@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="ST_AxisCmd" Id="{bf7479eb-b665-403f-aa40-61f162a9ede9}">
+    <Declaration><![CDATA[TYPE ST_AxisCmd :
+STRUCT
+    bEnable  : BOOL;
+    bReset   : BOOL;
+    bStop    : BOOL;
+    bHome    : BOOL;
+
+    bMoveRel : BOOL;
+    bMoveAbs : BOOL;
+
+    bJogPos  : BOOL;
+    bJogNeg  : BOOL;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

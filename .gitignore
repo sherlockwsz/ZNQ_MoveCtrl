@@ -1,0 +1,38 @@
+# Visual Studio用户缓存
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# TwinCAT运行和启动文件
+_Boot/
+**/_Boot/
+
+# TwinCAT编译缓存
+**/_CompileInfo/
+**/_Libraries/
+
+# TwinCAT生成文件
+*.tmc
+*.tpy
+*.compileinfo
+*.compiled-library
+*.compiled-library-ge33
+*.app
+*.bootdata
+*.crc
+*.occ
+*.oce
+*.ocm
+*.tizip
+*.tpzip
+
+# 自动备份文件
+*.tsproj.bak
+*.plcproj.bak
+
+# 常见临时文件
+*.tmp
+*.log
+~$*

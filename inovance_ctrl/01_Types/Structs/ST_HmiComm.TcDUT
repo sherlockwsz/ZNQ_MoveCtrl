@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="ST_HmiComm" Id="{3f58e135-70f1-4d99-a9d5-f52f92711e85}">
+    <Declaration><![CDATA[TYPE ST_HmiComm :
+STRUCT
+    // HMI通过ADS周期递增，建议500 ms～1 s增加一次
+    udiHeartbeat : UDINT;
+
+    // PLC写入：当前HMI通信正常
+    bOnline : BOOL;
+
+    // PLC写入：心跳停止达到超时时间
+    bTimeout : BOOL;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

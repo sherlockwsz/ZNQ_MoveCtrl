@@ -1,0 +1,25 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="E_AxisCommand" Id="{4e6d8c7c-13c7-415d-a8df-33d2cc40a365}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_AxisCommand :
+(
+    NoCommand    := 0,    // 当前没有运动命令
+
+    PowerOn      := 10,   // 请求轴使能
+    PowerOff     := 20,   // 请求轴撤销使能
+    Reset        := 30,   // 轴错误复位
+    Stop         := 40,   // 软件停止
+    Halt         := 50,   // 点动松手减速停止
+    Home         := 60,   // 回零
+
+    MoveRelative := 70,   // 相对运动
+    MoveAbsolute := 80,   // 绝对运动
+    JogPositive  := 90,   // 正向点动
+    JogNegative  := 100   // 反向点动
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

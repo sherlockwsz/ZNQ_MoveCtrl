@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <POU Name="MAIN" Id="{de82ff6c-f728-4f8e-8227-437e5e880436}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM MAIN
+VAR
+    fbHmiWatchdog : FB_HmiWatchdog;
+    fbSafety      : FB_SafetyManager;
+    fbMode        : FB_ModeManager;
+    fbAxisManager : FB_AxisManager;
+    fbAlarm       : FB_AlarmManager;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[fbAxisManager();]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

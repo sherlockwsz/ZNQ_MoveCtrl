@@ -1,0 +1,12 @@
+<Solution>
+  <Configurations>
+    <Platform Name="TwinCAT OS (ARMV7-A)" />
+    <Platform Name="TwinCAT OS (ARMV7-M)" />
+    <Platform Name="TwinCAT OS (ARMV8-A)" />
+    <Platform Name="TwinCAT OS (x64)" />
+    <Platform Name="TwinCAT OS (x64-E)" />
+    <Platform Name="TwinCAT RT (x64)" />
+    <Platform Name="TwinCAT RT (x86)" />
+  </Configurations>
+  <Project Path="ZNQ_MoveCtrl.tsproj" Type="b1e792be-aa5f-4e3c-8c82-674bf9c0715b" />
+</Solution>

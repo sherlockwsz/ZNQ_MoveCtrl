@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="ST_AxisData" Id="{bf71d3e8-0d5d-433d-bc31-6a2106ce1b99}">
+    <Declaration><![CDATA[TYPE ST_AxisData :
+STRUCT
+    fActPosition : LREAL;
+    fSetPosition : LREAL;
+    fActVelocity : LREAL;
+    fSetVelocity : LREAL;
+    fPositionDiff: LREAL;
+    fActRpm      : LREAL;
+    fActTorque   : LREAL;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

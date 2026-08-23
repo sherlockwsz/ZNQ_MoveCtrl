@@ -1,0 +1,25 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="ST_AxisConfig" Id="{0af0d951-bef7-431c-92ed-ba8294b414de}">
+    <Declaration><![CDATA[TYPE ST_AxisConfig :
+STRUCT
+    sAxisName : STRING(40);
+
+    fMoveVelocity : LREAL;
+    fMoveAcc      : LREAL;
+    fMoveDec      : LREAL;
+
+    fJogVelocity  : LREAL;
+    fJogAcc       : LREAL;
+    fJogDec       : LREAL;
+
+    fMinPosition  : LREAL;
+    fMaxPosition  : LREAL;
+    fMmPerRev     : LREAL;
+
+    bUseSoftLimit : BOOL;
+    bNeedHoming   : BOOL;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

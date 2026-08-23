@@ -1,0 +1,31 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="E_AxisErrorSource" Id="{53736d4f-2cc7-4228-bb42-0a34171093a1}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_AxisErrorSource :
+(
+    NoError          := 0,    // 当前没有错误
+
+    Power            := 10,   // MC_Power错误
+    Reset            := 20,   // MC_Reset错误
+    Home             := 30,   // MC_Home错误
+    MoveRelative     := 40,   // MC_MoveRelative错误
+    MoveAbsolute     := 50,   // MC_MoveAbsolute错误
+    Jog              := 60,   // MC_MoveVelocity错误
+    Halt             := 70,   // MC_Halt错误
+    Stop             := 80,   // MC_Stop错误
+
+    Parameter        := 90,   // 速度、位置等参数不合法
+    Interlock        := 100,  // 轴运动互锁条件不满足
+    NcAxis           := 110,  // TwinCAT NC轴错误
+    Drive            := 120,  // 伺服驱动器错误
+    EtherCAT         := 130,  // EtherCAT或WcState异常
+    HmiCommunication := 140,  // HMI/ADS通信异常
+    MotionTimeout    := 150,  // 运动超过允许时间
+    Safety           := 160   // 急停、STO或安全门等安全异常
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

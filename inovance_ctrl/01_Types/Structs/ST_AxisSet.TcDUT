@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="ST_AxisSet" Id="{075c5c13-598d-4055-820d-26b48c961e0d}">
+    <Declaration><![CDATA[TYPE ST_AxisSet :
+STRUCT
+    fRelDistance : LREAL;
+    fAbsPosition : LREAL;
+
+    fVelocity     : LREAL;
+    fAcceleration : LREAL;
+    fDeceleration : LREAL;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

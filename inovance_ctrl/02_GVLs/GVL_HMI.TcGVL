@@ -1,0 +1,54 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <GVL Name="GVL_HMI" Id="{65f78e28-9d20-414e-8a89-341c4c061362}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+VAR_GLOBAL
+    // =====================================================
+    // 轴1的HMI接口
+    //
+    // HMI/ADS写入：
+    // Axis1.Cmd
+    // Axis1.Set
+    //
+    // PLC写入：
+    // Axis1.Data
+    // Axis1.State
+    // Axis1.Alarm
+    // Axis1.Interlock
+    // =====================================================
+    Axis1 : ST_AxisInterface;
+
+    // =====================================================
+    // HMI通信心跳
+    //
+    // HMI写入：
+    // Comm.udiHeartbeat
+    //
+    // PLC写入：
+    // Comm.bOnline
+    // Comm.bTimeout
+    // =====================================================
+    Comm : ST_HmiComm;
+
+    // =====================================================
+    // HMI请求的设备运行模式
+    // 模式请求需要经过FB_ModeManager确认后，
+    // 才能写入GVL_System.eMachineMode
+    // =====================================================
+    eModeRequest : E_MachineMode :=
+        E_MachineMode.Undefined;
+
+    // HMI整机停止请求
+    // TRUE时要求所有轴受控停止
+    bMachineStop : BOOL;
+
+    // HMI整机复位请求
+    // 建议作为脉冲命令，PLC接收后自动清零
+    bMachineReset : BOOL;
+
+    // HMI报警确认命令
+    // 用于清除已经锁存但条件已消失的报警
+    bAlarmAcknowledge : BOOL;
+END_VAR]]></Declaration>
+  </GVL>
+</TcPlcObject>

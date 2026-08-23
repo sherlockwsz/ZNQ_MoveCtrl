@@ -1,0 +1,20 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="ST_AxisState" Id="{e651d5ca-2126-4867-b223-4d56baf5dbb5}">
+    <Declaration><![CDATA[TYPE ST_AxisState :
+STRUCT
+    bReady          : BOOL;
+    bPowerStatus    : BOOL;
+    bHomed          : BOOL;
+
+    bBusy           : BOOL;
+    bActive         : BOOL;
+    bDone           : BOOL;
+    bCommandAborted : BOOL;
+    bCmdRejected    : BOOL;
+
+    eMotionState    : E_AxisMotionState;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

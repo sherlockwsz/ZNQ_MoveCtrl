@@ -1,0 +1,152 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <POU Name="FB_AxisControl" Id="{cbe667f4-3a4a-4731-acdb-ae88eb96b09a}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_AxisControl
+VAR_INPUT
+    stConfig        : ST_AxisConfig;
+    bControlAllowed : BOOL;
+END_VAR
+
+VAR_IN_OUT
+    AxisRef : AXIS_REF;
+    stAxis  : ST_AxisInterface;
+END_VAR
+
+VAR
+    // PLCopen功能块实例：必须跨周期保持
+    fbPower   : MC_Power;
+    fbReset   : MC_Reset;
+    fbMoveRel : MC_MoveRelative;
+    fbMoveAbs : MC_MoveAbsolute;
+    fbMoveVel : MC_MoveVelocity;
+    fbHalt    : MC_Halt;
+    fbStop    : MC_Stop;
+    fbHome    : MC_Home;
+
+    // 边沿触发器：必须跨周期保持
+    trigReset   : R_TRIG;
+    trigMoveRel : R_TRIG;
+    trigMoveAbs : R_TRIG;
+    trigHome    : R_TRIG;
+    trigJogStop : F_TRIG;
+
+    // 内部保持状态
+    bMoveRelExecute : BOOL;
+    bMoveAbsExecute : BOOL;
+    bHomeExecute    : BOOL;
+    bJogExecute     : BOOL;
+    bHaltRequest    : BOOL;
+    bStopPending    : BOOL;
+
+    // 汇总互锁
+    bAxisBusy  : BOOL;
+    bAxisError : BOOL;
+
+    // 检查后的参数
+    fCheckedPosition : LREAL;
+    fCheckedDistance : LREAL;
+    fCheckedVelocity : LREAL;
+    fCheckedAcc      : LREAL;
+    fCheckedDec      : LREAL;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// 1. 检查输入命令、互锁和运动参数
+M_PrepareCommand();
+
+// 2. 使能和复位
+M_ExecutePowerReset();
+
+// 3. Stop拥有最高优先级
+M_ExecuteStop();
+
+// 4. 普通运动功能
+M_ExecuteHome();
+M_ExecutePositioning();
+M_ExecuteJog();
+
+// 5. 更新对外数据、状态和报警
+M_UpdateData();
+M_UpdateStateAlarm();]]></ST>
+    </Implementation>
+    <Method Name="M_ExecuteHome" Id="{faeb13b6-41c6-4ae8-b97f-99175abe4616}">
+      <Declaration><![CDATA[//处理回零命令和 MC_Home
+METHOD PRIVATE M_ExecuteHome
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ExecuteJog" Id="{a4ee27c3-dd78-49f1-a96d-8089113d52a3}">
+      <Declaration><![CDATA[//正反点动和松手后的 MC_Halt
+METHOD PRIVATE M_ExecuteJog
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ExecutePositioning" Id="{f6694070-471f-441e-a9e8-b34f3a930dbc}">
+      <Declaration><![CDATA[//相对、绝对定位运动
+METHOD PRIVATE M_ExecutePositioning
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ExecutePowerReset" Id="{97d51e5c-08e7-4f36-a4c4-b68d43d17128}">
+      <Declaration><![CDATA[//调用 MC_Power和MC_Reset
+METHOD PRIVATE M_ExecutePowerReset
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ExecuteStop" Id="{b3e2f5b9-520d-444d-9b18-5c763a9aea1b}">
+      <Declaration><![CDATA[//处理最高优先级停止和 MC_Stop
+METHOD PRIVATE M_ExecuteStop
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_PrepareCommand" Id="{7f85a792-f6e9-4b73-8d02-924cadcf74bc}">
+      <Declaration><![CDATA[//边沿检测、参数限幅、忙碌和错误互锁、命令接受判断
+METHOD PRIVATE M_PrepareCommand
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_UpdateData" Id="{84000384-9550-4806-a23a-4bd7988cfdb2}">
+      <Declaration><![CDATA[//更新位置、速度、转速、位置偏差
+METHOD PRIVATE M_UpdateData
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_UpdateStateAlarm" Id="{1267e6b4-d7ac-4fd6-a151-1e95cc09de30}">
+      <Declaration><![CDATA[//汇总Busy、Done、状态、错误来源和错误码
+METHOD PRIVATE M_UpdateStateAlarm
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

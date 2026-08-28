@@ -7,7 +7,10 @@ STRUCT
     bPowerStatus    : BOOL;// 轴是否实际使能
 	
     bHomed          : BOOL;// 是否完成回零
-
+	
+    //==========================================================
+    // 运行状态
+    //==========================================================
     bBusy           : BOOL;// 是否正在执行命令
     bActive         : BOOL;// 是否存在有效运动
 	
@@ -16,6 +19,16 @@ STRUCT
     bCmdRejected    : BOOL;// 命令被拒绝
 	
     eMotionState    : E_AxisMotionState;// 轴当前正在进行的运动	
+	
+	//==========================================================
+    // 软件限位状态
+    //==========================================================
+    bSoftLimitEnabled : BOOL;// PLC侧软件限位是否启用
+    bSoftLimitReady : BOOL;// 软件限位配置和坐标基准是否有效
+    bSoftLimitPositive : BOOL; // 轴已进入正向限位缓冲区域
+    bSoftLimitNegative : BOOL;// 轴已进入负向限位缓冲区域
+	
+    
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

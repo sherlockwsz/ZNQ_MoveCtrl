@@ -1,0 +1,64 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="ST_AxisControlInternal" Id="{83537b71-f63e-4341-b10c-5c9e78b9832e}">
+    <Declaration><![CDATA[//==============================================================
+// 单轴控制功能块内部运行数据
+//
+// 作用：
+// 1. 汇总FB_AxisControl内部跨方法共享的数据；
+// 2. 减少FB声明区分散的BOOL变量；
+// 3. 这些数据只供FB_AxisControl内部使用；
+// 4. 不属于WPF接口，也不是轴配置参数。
+//
+// 注意：
+// 此结构体变量声明在FB内部，因此能够跨PLC周期保持状态。
+//==============================================================
+
+TYPE ST_AxisControlInternal :
+STRUCT
+    //==========================================================
+    // 当前周期汇总状态
+    //==========================================================
+
+    bMotionActive : BOOL;
+    // 点动或定位运动是否处于有效状态
+    // 包含MC功能块Busy和定位Execute锁存阶段
+
+    bAnyBusy : BOOL;
+    // 复位、停止、点动或定位是否有任一命令正在执行
+
+
+    //==========================================================
+    // 停止控制
+    //==========================================================
+
+    bStopRequest : BOOL;
+    // 当前周期是否存在停止请求
+
+    bStopExecute : BOOL;
+    // MC_Stop.Execute跨周期锁存信号
+
+
+    //==========================================================
+    // 命令仲裁
+    //==========================================================
+
+    eRequestedCommand : E_AxisCommand;
+    // M_SelectCommand产生的唯一命令
+
+
+    //==========================================================
+    // 定位Execute锁存
+    //==========================================================
+
+    bMoveAbsExecute : BOOL;
+    // MC_MoveAbsolute.Execute锁存
+
+    bMoveRelExecute : BOOL;
+    // MC_MoveRelative.Execute锁存
+
+    // 由M_UpdateSoftLimitState每周期更新
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

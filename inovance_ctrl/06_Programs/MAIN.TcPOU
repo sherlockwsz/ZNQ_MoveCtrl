@@ -15,9 +15,10 @@ END_VAR]]></Declaration>
 *)
 
 fbAxis1(
-    bControlAllowed := TRUE,
-    AxisRef         := GVL_AxisRef.Axis1Ref,
-    stAxis          := GVL_AxisRuntime.Axis1
+    bControlAllowed := TRUE,//可以被控制
+    stLimit         := GVL_AxisConfig.Axis1Limit,// 当前轴的软件限位配置
+    AxisRef         := GVL_AxisRef.Axis1Ref,// 当前NC轴引用
+    stAxis          := GVL_AxisRuntime.Axis1// 当前轴命令、参数和反馈接口
 );]]></ST>
     </Implementation>
   </POU>

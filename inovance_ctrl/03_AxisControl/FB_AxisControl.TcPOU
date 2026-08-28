@@ -3,16 +3,14 @@
   <POU Name="FB_AxisControl" Id="{cbe667f4-3a4a-4731-acdb-ae88eb96b09a}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_AxisControl
 VAR_INPUT
-    bControlAllowed : BOOL;
-    // 外部控制许可
+    bControlAllowed : BOOL;// 外部控制许可
+	stLimit : ST_AxisLimit;// 当前轴的限位配置
 END_VAR
 
 VAR_IN_OUT
-    AxisRef : AXIS_REF;
-    // TwinCAT NC轴引用
+    AxisRef : AXIS_REF;    // TwinCAT NC轴引用
+    stAxis : ST_AxisInterface;    // 单轴命令、参数和反馈接口
 
-    stAxis : ST_AxisInterface;
-    // 单轴命令、参数和反馈接口
 END_VAR
 
 VAR
@@ -35,6 +33,14 @@ VAR
     bStopRequest  : BOOL;
     bAnyBusy      : BOOL;
 	
+	//==========================================================
+	// 软件限位计算结果
+	//
+	// 由M_UpdateSoftLimitState每周期更新；
+	// M_ExecuteJog和M_ExecutePositioning读取。
+	//==========================================================
+	
+	stSoftLimitResult : ST_AxisSoftLimitResult;	
 	//==========================================================
     // 命令上升沿
     //
@@ -74,6 +80,15 @@ VAR
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[//==============================================================
+// 0. 刷新NC轴状态
+//
+// AXIS_REF.Status不会自动周期刷新。
+// 必须在读取Status.Error、Status.ErrorId和Status.Homed之前调用。
+// 每根轴、每个PLC周期只能调用一次。
+//==============================================================
+AxisRef.ReadStatus();
+
+//==============================================================
 // 1. 清除上一个PLC周期的瞬时结果
 //
 // 必须在命令检测和执行方法之前调用。
@@ -94,7 +109,18 @@ M_ClearCycleResults(
 M_UpdateCommandEdges(
     iCmd := stAxis.Cmd
 );
+//==============================================================
+// 3. 更新软件限位状态
+//
+// 必须在点动和定位执行方法之前调用。
+// 相对目标、绝对目标和点动方向许可均在此处计算。
+//==============================================================
 
+M_UpdateSoftLimitState(
+    iLimit    := stLimit,
+    ioAxisRef := AxisRef,
+    ioAxis    := stAxis
+);
 
 //==============================================================
 // 3. 汇总上一周期运动状态
@@ -361,6 +387,9 @@ bJogAllowed :=
 
 //==============================================================
 // 5. 点动命令拒绝
+//
+// 只在点动按钮产生上升沿时反馈一次拒绝结果。
+// 点动运行过程中进入限位区时，MC_Jog方向输入会自动撤销。
 //==============================================================
 
 IF
@@ -374,6 +403,7 @@ THEN
     ioAxis.Alarm.eRejectReason :=
         E_AxisRejectReason.JogDirectionConflict;
 
+
 ELSIF
     bJogCommandEdge
     AND NOT bJogDynamicsValid
@@ -383,6 +413,53 @@ THEN
 
     ioAxis.Alarm.eRejectReason :=
         E_AxisRejectReason.InvalidDynamics;
+
+
+ELSIF
+    bJogCommandEdge
+    AND stSoftLimitResult.bEnabled
+    AND NOT stSoftLimitResult.bConfigValid
+THEN
+
+    ioAxis.State.bCmdRejected := TRUE;
+
+    ioAxis.Alarm.eRejectReason :=
+        E_AxisRejectReason.SoftLimitConfigInvalid;
+
+
+ELSIF
+    bJogCommandEdge
+    AND stSoftLimitResult.bEnabled
+    AND NOT stSoftLimitResult.bReferenceValid
+THEN
+
+    ioAxis.State.bCmdRejected := TRUE;
+
+    ioAxis.Alarm.eRejectReason :=
+        E_AxisRejectReason.NotHomed;
+
+
+ELSIF
+    bJogCommandEdge
+    AND
+    (
+        (
+            ioAxis.Cmd.bJogPos
+            AND NOT stSoftLimitResult.bJogPositiveAllowed
+        )
+        OR
+        (
+            ioAxis.Cmd.bJogNeg
+            AND NOT stSoftLimitResult.bJogNegativeAllowed
+        )
+    )
+THEN
+
+    ioAxis.State.bCmdRejected := TRUE;
+
+    ioAxis.Alarm.eRejectReason :=
+        E_AxisRejectReason.TargetOutOfLimit;
+
 
 ELSIF
     bJogCommandEdge
@@ -402,9 +479,20 @@ END_IF;
 //==============================================================
 
 fbJog(
-    Axis         := ioAxisRef,
-    JogForward   := bJogAllowed AND bJogForward,
-    JogBackwards := bJogAllowed AND bJogBackward,
+    Axis := ioAxisRef,
+
+    // 正向点动同时受到通用许可和正向软限位许可约束
+    JogForward :=
+        bJogAllowed
+        AND bJogForward
+        AND stSoftLimitResult.bJogPositiveAllowed,
+
+    // 负向点动同时受到通用许可和负向软限位许可约束
+    JogBackwards :=
+        bJogAllowed
+        AND bJogBackward
+        AND stSoftLimitResult.bJogNegativeAllowed,
+
     Mode         := MC_JOGMODE_CONTINOUS,
     Position     := 0.0,
     Velocity     := ioAxis.Set.Jog.fVelocity,
@@ -479,12 +567,18 @@ bPositionAllowed :=
 
 IF trigMoveAbs.Q AND trigMoveRel.Q THEN
 
+    // 绝对和相对命令同时触发
     ioAxis.State.bCmdRejected := TRUE;
 
     ioAxis.Alarm.eRejectReason :=
         E_AxisRejectReason.CommandConflict;
 
+
 ELSIF trigMoveAbs.Q OR trigMoveRel.Q THEN
+
+    //==========================================================
+    // 4.1 轴当前不允许定位
+    //==========================================================
 
     IF NOT bPositionAllowed THEN
 
@@ -493,6 +587,11 @@ ELSIF trigMoveAbs.Q OR trigMoveRel.Q THEN
         ioAxis.Alarm.eRejectReason :=
             E_AxisRejectReason.AxisNotReady;
 
+
+    //==========================================================
+    // 4.2 动态参数错误
+    //==========================================================
+
     ELSIF NOT bPositionDynamicsValid THEN
 
         ioAxis.State.bCmdRejected := TRUE;
@@ -500,25 +599,95 @@ ELSIF trigMoveAbs.Q OR trigMoveRel.Q THEN
         ioAxis.Alarm.eRejectReason :=
             E_AxisRejectReason.InvalidDynamics;
 
+
+    //==========================================================
+    // 4.3 软件限位配置错误
+    //==========================================================
+
     ELSIF
-        eRequestedCommand =
-        E_AxisCommand.MoveAbsolute
+        stSoftLimitResult.bEnabled
+        AND NOT stSoftLimitResult.bConfigValid
     THEN
 
-        // 锁存绝对运动Execute，直到完成、终止或错误
+        ioAxis.State.bCmdRejected := TRUE;
+
+        ioAxis.Alarm.eRejectReason :=
+            E_AxisRejectReason.SoftLimitConfigInvalid;
+
+
+    //==========================================================
+    // 4.4 尚未建立有效坐标基准
+    //==========================================================
+
+    ELSIF
+        stSoftLimitResult.bEnabled
+        AND NOT stSoftLimitResult.bReferenceValid
+    THEN
+
+        ioAxis.State.bCmdRejected := TRUE;
+
+        ioAxis.Alarm.eRejectReason :=
+            E_AxisRejectReason.NotHomed;
+
+
+    //==========================================================
+    // 4.5 绝对目标超出软件限位
+    //==========================================================
+
+    ELSIF
+        eRequestedCommand = E_AxisCommand.MoveAbsolute
+        AND NOT stSoftLimitResult.bAbsoluteTargetValid
+    THEN
+
+        ioAxis.State.bCmdRejected := TRUE;
+
+        ioAxis.Alarm.eRejectReason :=
+            E_AxisRejectReason.TargetOutOfLimit;
+
+
+    //==========================================================
+    // 4.6 相对运动最终目标超出软件限位
+    //==========================================================
+
+    ELSIF
+        eRequestedCommand = E_AxisCommand.MoveRelative
+        AND NOT stSoftLimitResult.bRelativeTargetValid
+    THEN
+
+        ioAxis.State.bCmdRejected := TRUE;
+
+        ioAxis.Alarm.eRejectReason :=
+            E_AxisRejectReason.TargetOutOfLimit;
+
+
+    //==========================================================
+    // 4.7 接受绝对运动
+    //==========================================================
+
+    ELSIF
+        eRequestedCommand = E_AxisCommand.MoveAbsolute
+    THEN
+
         bMoveAbsExecute := TRUE;
 
+
+    //==========================================================
+    // 4.8 接受相对运动
+    //==========================================================
+
     ELSIF
-        eRequestedCommand =
-        E_AxisCommand.MoveRelative
+        eRequestedCommand = E_AxisCommand.MoveRelative
     THEN
 
-        // 锁存相对运动Execute，直到完成、终止或错误
         bMoveRelExecute := TRUE;
+
+
+    //==========================================================
+    // 4.9 请求被高优先级命令覆盖
+    //==========================================================
 
     ELSE
 
-        // 定位请求被Stop、Reset或Jog等高优先级命令覆盖
         ioAxis.State.bCmdRejected := TRUE;
 
         ioAxis.Alarm.eRejectReason :=
@@ -1423,6 +1592,231 @@ ELSE
         E_AxisMotionState.Standstill;
 
 END_IF;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_UpdateSoftLimitState" Id="{072cd1fa-f091-44c5-8764-82398ddee6ea}">
+      <Declaration><![CDATA[//==============================================================
+// 方法名称：M_UpdateSoftLimitState
+//
+// 功能：
+// 1. 检查软件限位配置是否合法；
+// 2. 检查当前坐标基准是否有效；
+// 3. 计算正负点动方向许可；
+// 4. 检查绝对运动目标；
+// 5. 计算并检查相对运动最终目标；
+// 6. 更新WPF所需的软件限位状态。
+//
+// 注意：
+// 1. 本方法只计算状态，不调用任何MC功能块；
+// 2. 相对运动必须基于NC设定位置SetPos计算；
+// 3. 已经超限时，禁止继续向外，但允许向内返回。
+//==============================================================
+
+METHOD PRIVATE M_UpdateSoftLimitState
+
+VAR_INPUT
+    iLimit : ST_AxisLimit;
+    // 当前轴的软件限位配置
+END_VAR
+
+VAR_IN_OUT
+    ioAxisRef : AXIS_REF;
+    // 当前NC轴引用
+
+    ioAxis : ST_AxisInterface;
+    // 当前单轴接口
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[//==============================================================
+// 1. 读取是否启用软件限位
+//==============================================================
+
+stSoftLimitResult.bEnabled :=
+    iLimit.bSoftLimitEnable;
+
+
+//==============================================================
+// 2. 检查限位配置
+//
+// 配置必须满足：
+// 1. 负限位小于正限位；
+// 2. Margin不能为负数；
+// 3. 两侧Margin之间仍然存在有效运动范围。
+//==============================================================
+
+stSoftLimitResult.bConfigValid :=
+    iLimit.fSoftwareLimitNeg
+        < iLimit.fSoftwareLimitPos
+
+    AND iLimit.fSoftLimitMargin >= 0.0
+
+    AND
+    (
+        iLimit.fSoftwareLimitNeg
+        + iLimit.fSoftLimitMargin
+    )
+    <
+    (
+        iLimit.fSoftwareLimitPos
+        - iLimit.fSoftLimitMargin
+    );
+
+
+//==============================================================
+// 3. 检查坐标基准
+//
+// 不要求回零时，坐标基准直接视为有效。
+// 要求回零时，必须等待AxisRef.Status.Homed为TRUE。
+//==============================================================
+
+stSoftLimitResult.bReferenceValid :=
+    NOT iLimit.bRequireHomed
+    OR ioAxisRef.Status.Homed;
+
+
+//==============================================================
+// 4. 汇总软件限位是否可用
+//
+// 禁用软限位时，不阻止任何运动。
+// 启用时，配置和坐标基准必须同时有效。
+//==============================================================
+
+stSoftLimitResult.bReady :=
+    NOT stSoftLimitResult.bEnabled
+    OR
+    (
+        stSoftLimitResult.bConfigValid
+        AND stSoftLimitResult.bReferenceValid
+    );
+
+
+//==============================================================
+// 5. 计算相对运动最终目标
+//
+// MC_MoveRelative以当前NC设定位置SetPos为基准。
+// 不应使用ActPos计算相对运动最终目标。
+//==============================================================
+
+stSoftLimitResult.fRelativeTargetPosition :=
+    ioAxisRef.NcToPlc.SetPos
+    + ioAxis.Set.Position.fRelativeDistance;
+
+
+//==============================================================
+// 6. 软件限位未启用
+//
+// 所有运动方向和目标均允许。
+//==============================================================
+
+IF NOT stSoftLimitResult.bEnabled THEN
+
+    stSoftLimitResult.bPositiveActive := FALSE;
+    stSoftLimitResult.bNegativeActive := FALSE;
+
+    stSoftLimitResult.bJogPositiveAllowed := TRUE;
+    stSoftLimitResult.bJogNegativeAllowed := TRUE;
+
+    stSoftLimitResult.bAbsoluteTargetValid := TRUE;
+    stSoftLimitResult.bRelativeTargetValid := TRUE;
+
+
+//==============================================================
+// 7. 软件限位启用且状态有效
+//==============================================================
+
+ELSIF stSoftLimitResult.bReady THEN
+
+    // 使用实际位置生成WPF限位指示
+    stSoftLimitResult.bPositiveActive :=
+        ioAxisRef.NcToPlc.ActPos
+        >=
+        (
+            iLimit.fSoftwareLimitPos
+            - iLimit.fSoftLimitMargin
+        );
+
+    stSoftLimitResult.bNegativeActive :=
+        ioAxisRef.NcToPlc.ActPos
+        <=
+        (
+            iLimit.fSoftwareLimitNeg
+            + iLimit.fSoftLimitMargin
+        );
+
+
+    // 正向点动进入正向缓冲区域后停止继续向外运动
+    stSoftLimitResult.bJogPositiveAllowed :=
+        ioAxisRef.NcToPlc.SetPos
+        <
+        (
+            iLimit.fSoftwareLimitPos
+            - iLimit.fSoftLimitMargin
+        );
+
+
+    // 负向点动进入负向缓冲区域后停止继续向外运动
+    stSoftLimitResult.bJogNegativeAllowed :=
+        ioAxisRef.NcToPlc.SetPos
+        >
+        (
+            iLimit.fSoftwareLimitNeg
+            + iLimit.fSoftLimitMargin
+        );
+
+
+    // 检查绝对目标
+    stSoftLimitResult.bAbsoluteTargetValid :=
+        ioAxis.Set.Position.fAbsolutePosition
+            >= iLimit.fSoftwareLimitNeg
+        AND
+        ioAxis.Set.Position.fAbsolutePosition
+            <= iLimit.fSoftwareLimitPos;
+
+
+    // 检查相对运动计算得到的最终目标
+    stSoftLimitResult.bRelativeTargetValid :=
+        stSoftLimitResult.fRelativeTargetPosition
+            >= iLimit.fSoftwareLimitNeg
+        AND
+        stSoftLimitResult.fRelativeTargetPosition
+            <= iLimit.fSoftwareLimitPos;
+
+
+//==============================================================
+// 8. 软件限位启用但配置或坐标基准无效
+//
+// 采用失效安全原则，禁止普通运动。
+//==============================================================
+
+ELSE
+
+    stSoftLimitResult.bPositiveActive := FALSE;
+    stSoftLimitResult.bNegativeActive := FALSE;
+
+    stSoftLimitResult.bJogPositiveAllowed := FALSE;
+    stSoftLimitResult.bJogNegativeAllowed := FALSE;
+
+    stSoftLimitResult.bAbsoluteTargetValid := FALSE;
+    stSoftLimitResult.bRelativeTargetValid := FALSE;
+
+END_IF;
+
+
+//==============================================================
+// 9. 更新WPF状态反馈
+//==============================================================
+
+ioAxis.State.bSoftLimitEnabled :=
+    stSoftLimitResult.bEnabled;
+
+ioAxis.State.bSoftLimitReady :=
+    stSoftLimitResult.bReady;
+
+ioAxis.State.bSoftLimitPositive :=
+    stSoftLimitResult.bPositiveActive;
+
+ioAxis.State.bSoftLimitNegative :=
+    stSoftLimitResult.bNegativeActive;]]></ST>
       </Implementation>
     </Method>
   </POU>

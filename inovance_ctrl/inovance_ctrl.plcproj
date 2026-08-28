@@ -27,13 +27,19 @@
     <Compile Include="01_Types\Structs\ST_Alarm\ST_AxisAlarm.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\ST_AxisLimit.TcDUT">
-      <SubType>Code</SubType>
-    </Compile>
     <Compile Include="01_Types\Structs\ST_Data\ST_AxisData.TcDUT">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="01_Types\Structs\ST_Internal\ST_AxisControlInternal.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="01_Types\Structs\ST_JogAct\ST_AxisJogSet.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\ST_Limit\ST_AxisLimit.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\ST_Limit\ST_AxisSoftLimitResult.TcDUT">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="01_Types\Structs\ST_PositionAct\ST_PositionSet.TcDUT">
@@ -118,6 +124,8 @@
     </Compile>
   </ItemGroup>
   <ItemGroup>
+    <Folder Include="01_Types\Structs\ST_Internal" />
+    <Folder Include="01_Types\Structs\ST_Limit" />
     <Folder Include="01_Types\Structs\ST_State" />
     <Folder Include="01_Types\Structs\ST_Data" />
     <Folder Include="01_Types\Structs\ST_Alarm" />

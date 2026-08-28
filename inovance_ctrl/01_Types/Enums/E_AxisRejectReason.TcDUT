@@ -15,7 +15,8 @@ TYPE E_AxisRejectReason :
     ResetDuringMotion    := 16#0005, // 运动或停止过程中禁止复位
     HomeNotAllowed       := 16#0006, // 当前不允许回零
     JogDirectionConflict := 16#0007, // 正负点动同时请求
-    TargetOutOfLimit     := 16#0008  // 目标位置超出软限位
+    TargetOutOfLimit     := 16#0008,  // 目标位置超出软限位
+	SoftLimitConfigInvalid := 16#0009 // 软件限位配置错误：
 );
 END_TYPE]]></Declaration>
   </DUT>

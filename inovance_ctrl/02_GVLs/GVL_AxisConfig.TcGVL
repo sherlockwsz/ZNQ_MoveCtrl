@@ -3,39 +3,7 @@
   <GVL Name="GVL_AxisConfig" Id="{292f67a3-fb57-4951-94dc-c8359ba6e509}">
     <Declaration><![CDATA[{attribute 'qualified_only'}
 VAR_GLOBAL
-    // =====================================================
-    // 轴1配置参数
-    // 当前用于单轴调试，后续可扩展为14轴配置数组
-    // =====================================================
-    Axis1 : ST_AxisConfig := (
-        // HMI显示和报警记录使用的轴名称
-        sAxisName := 'testAxis',
 
-        // 普通相对/绝对运动参数
-        fMoveVelocity := 60.0,     // 运动速度，工程单位/s
-        fMoveAcc      := 1000.0,   // 运动加速度，工程单位/s²
-        fMoveDec      := 1000.0,   // 运动减速度，工程单位/s²
-
-        // 正反点动参数
-        fJogVelocity := 60.0,      // 点动速度，工程单位/s
-        fJogAcc      := 500.0,     // 点动加速度
-        fJogDec      := 500.0,     // 点动及松手停止减速度
-
-        // 软件位置范围
-        fMinPosition := -6000.0,   // 最小允许位置
-        fMaxPosition := 6000.0,    // 最大允许位置
-
-        // 转速换算参数
-        // 例如机构每转移动60 mm，则填写60.0
-        fMmPerRev := 60.0,
-
-        // 是否在PLC中检查目标位置软限位
-        bUseSoftLimit := TRUE,
-
-        // 该轴执行定位前是否必须完成回零
-        // 单轴初次调试阶段可暂时设为FALSE
-        bNeedHoming := FALSE
-    );
 END_VAR]]></Declaration>
   </GVL>
 </TcPlcObject>

@@ -12,13 +12,17 @@ TYPE E_AxisMotionState :
     NotReady   := 20,   // NC轴、驱动器或通信尚未准备好
     Standstill := 30,   // 轴已使能并静止
 
+
+
     Homing     := 40,   // 回零中
     Moving     := 50,   // 相对或绝对定位运动中
     Jogging    := 60,   // 点动中
     Stopping   := 70,   // MC_Stop或MC_Halt停止中
     Resetting  := 80,   // 错误复位中
 
-    Error      := 90    // 轴存在错误
+    Error      := 90,   // 轴存在错误
+	
+	TorqueRunning := 100 // 力矩控制
 );
 END_TYPE]]></Declaration>
   </DUT>

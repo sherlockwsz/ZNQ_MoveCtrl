@@ -3,14 +3,22 @@
   <POU Name="MAIN" Id="{de82ff6c-f728-4f8e-8227-437e5e880436}" SpecialFunc="None">
     <Declaration><![CDATA[PROGRAM MAIN
 VAR
-    fbHmiWatchdog : FB_HmiWatchdog;
-    fbSafety      : FB_SafetyManager;
-    fbMode        : FB_ModeManager;
-    fbAxisManager : FB_AxisManager;
-    fbAlarm       : FB_AlarmManager;
+    fbAxis1 : FB_AxisControl;
 END_VAR]]></Declaration>
     <Implementation>
-      <ST><![CDATA[fbAxisManager();]]></ST>
+      <ST><![CDATA[(*
+    最小单轴调试主程序
+
+    初期直接使用GVL_AxisRuntime.Axis1作为ADS接口：
+    上位机写入Cmd和Set；
+    上位机读取Data、State和Alarm。
+*)
+
+fbAxis1(
+    bControlAllowed := TRUE,
+    AxisRef         := GVL_AxisRef.Axis1Ref,
+    stAxis          := GVL_AxisRuntime.Axis1
+);]]></ST>
     </Implementation>
   </POU>
 </TcPlcObject>

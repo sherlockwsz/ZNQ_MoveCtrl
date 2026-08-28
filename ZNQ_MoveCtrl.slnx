@@ -8,5 +8,8 @@
     <Platform Name="TwinCAT RT (x64)" />
     <Platform Name="TwinCAT RT (x86)" />
   </Configurations>
+  <Folder Name="/API_Doc/">
+    <File Path="ZNQ_MoveCtrl9_PLC_Architecture_Review.md" />
+  </Folder>
   <Project Path="ZNQ_MoveCtrl.tsproj" Type="b1e792be-aa5f-4e3c-8c82-674bf9c0715b" />
 </Solution>

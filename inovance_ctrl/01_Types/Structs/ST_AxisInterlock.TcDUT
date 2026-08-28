@@ -3,8 +3,21 @@
   <DUT Name="ST_AxisInterlock" Id="{b89579d9-5006-4b18-b612-28926a53fc50}">
     <Declaration><![CDATA[TYPE ST_AxisInterlock :
 STRUCT
+    // 回零开关输入
+    bHomeCam : BOOL;
+
+    // 单轴正负方向运动许可
+    // 后续可由硬限位、安全状态和机械互锁共同生成
+    bPositiveAllowed : BOOL := TRUE;
+    bNegativeAllowed : BOOL := TRUE;
+
+    // 单轴总运动许可
+    bMotionAllowed : BOOL := TRUE;
+
+    // 抱闸是否已释放
+    // 无抱闸轴可以始终置TRUE
+    bBrakeReleased : BOOL := TRUE;
 END_STRUCT
-END_TYPE
-]]></Declaration>
+END_TYPE]]></Declaration>
   </DUT>
 </TcPlcObject>

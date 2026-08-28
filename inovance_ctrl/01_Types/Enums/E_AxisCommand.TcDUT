@@ -4,6 +4,7 @@
     <Declaration><![CDATA[{attribute 'qualified_only'}
 {attribute 'strict'}
 {attribute 'to_string'}
+//定义命令、运动状态
 TYPE E_AxisCommand :
 (
     NoCommand    := 0,    // 当前没有运动命令
@@ -12,13 +13,15 @@ TYPE E_AxisCommand :
     PowerOff     := 20,   // 请求轴撤销使能
     Reset        := 30,   // 轴错误复位
     Stop         := 40,   // 软件停止
-    Halt         := 50,   // 点动松手减速停止
+	Halt		 := 50,	  // 减速停止
     Home         := 60,   // 回零
-
+	
     MoveRelative := 70,   // 相对运动
     MoveAbsolute := 80,   // 绝对运动
-    JogPositive  := 90,   // 正向点动
-    JogNegative  := 100   // 反向点动
+	JogPositive  := 90,	  // 正向点动
+	JogNegative  := 100,  // 反向点动
+	
+	TorqueControl:= 110   // 力矩模式
 );
 END_TYPE]]></Declaration>
   </DUT>

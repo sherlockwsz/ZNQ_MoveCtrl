@@ -1,0 +1,41 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="ST_PositionSet" Id="{ec5e24a3-1090-41f1-b64f-2cf78a1d0961}">
+    <Declaration><![CDATA[(*
+    轴定位运动参数结构体
+
+    绝对运动和相对运动共用速度、加速度和减速度，
+    但绝对目标位置与相对移动距离分别保存，避免含义混淆。
+*)
+TYPE ST_PositionSet :
+STRUCT
+    //==========================================================
+    // 位置参数
+    //==========================================================
+
+    fAbsolutePosition : LREAL;
+    // 绝对目标位置
+    // 对应MC_MoveAbsolute.Position
+
+    fRelativeDistance : LREAL;
+    // 相对移动距离
+    // 对应MC_MoveRelative.Distance
+    // 正数表示正向移动，负数表示反向移动
+
+
+    //==========================================================
+    // 公共运动参数
+    //==========================================================
+
+    fVelocity : LREAL;
+    // 最大运动速度，必须大于0
+
+    fAcceleration : LREAL;
+    // 加速度，设置为0时使用NC轴默认值
+
+    fDeceleration : LREAL;
+    // 减速度，设置为0时使用NC轴默认值
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

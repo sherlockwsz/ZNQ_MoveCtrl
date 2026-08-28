@@ -1,0 +1,22 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="ST_AxisState" Id="{e651d5ca-2126-4867-b223-4d56baf5dbb5}">
+    <Declaration><![CDATA[TYPE ST_AxisState :
+STRUCT
+    bReady          : BOOL;// 轴是否准备好
+    bPowerStatus    : BOOL;// 轴是否实际使能
+	
+    bHomed          : BOOL;// 是否完成回零
+
+    bBusy           : BOOL;// 是否正在执行命令
+    bActive         : BOOL;// 是否存在有效运动
+	
+    bDone           : BOOL;// 最近命令完成
+    bCommandAborted : BOOL;// 命令被中止
+    bCmdRejected    : BOOL;// 命令被拒绝
+	
+    eMotionState    : E_AxisMotionState;// 轴当前正在进行的运动	
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

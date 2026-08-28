@@ -3,12 +3,16 @@
   <DUT Name="ST_AxisSet" Id="{075c5c13-598d-4055-820d-26b48c961e0d}">
     <Declaration><![CDATA[TYPE ST_AxisSet :
 STRUCT
-    fRelDistance : LREAL;
-    fAbsPosition : LREAL;
-
-    fVelocity     : LREAL;
-    fAcceleration : LREAL;
-    fDeceleration : LREAL;
+    //========================
+    // 点动参数设置
+    //========================	
+    Jog : ST_AxisJogSet;
+	
+	//========================
+    // 运动参数设置
+    //========================	
+	Position : ST_PositionSet;
+	
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

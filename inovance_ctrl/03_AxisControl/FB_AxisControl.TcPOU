@@ -3,149 +3,1426 @@
   <POU Name="FB_AxisControl" Id="{cbe667f4-3a4a-4731-acdb-ae88eb96b09a}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_AxisControl
 VAR_INPUT
-    stConfig        : ST_AxisConfig;
     bControlAllowed : BOOL;
+    // 外部控制许可
 END_VAR
 
 VAR_IN_OUT
     AxisRef : AXIS_REF;
-    stAxis  : ST_AxisInterface;
+    // TwinCAT NC轴引用
+
+    stAxis : ST_AxisInterface;
+    // 单轴命令、参数和反馈接口
 END_VAR
 
 VAR
-    // PLCopen功能块实例：必须跨周期保持
+    //==========================================================
+    // PLCopen功能块实例
+    //==========================================================
+
     fbPower   : MC_Power;
     fbReset   : MC_Reset;
-    fbMoveRel : MC_MoveRelative;
-    fbMoveAbs : MC_MoveAbsolute;
-    fbMoveVel : MC_MoveVelocity;
-    fbHalt    : MC_Halt;
     fbStop    : MC_Stop;
-    fbHome    : MC_Home;
+    fbJog     : MC_Jog;
+    fbMoveAbs : MC_MoveAbsolute;
+    fbMoveRel : MC_MoveRelative;
 
-    // 边沿触发器：必须跨周期保持
+    //==========================================================
+    // 四个方法共用的状态
+    //==========================================================
+
+    bMotionActive : BOOL;
+    bStopRequest  : BOOL;
+    bAnyBusy      : BOOL;
+	
+	//==========================================================
+    // 命令上升沿
+    //
+    // 所有R_TRIG必须在FB主体中每周期只调用一次。
+    // 各执行方法只读取Q结果，不允许再次调用R_TRIG。
+    //==========================================================
+
     trigReset   : R_TRIG;
-    trigMoveRel : R_TRIG;
     trigMoveAbs : R_TRIG;
-    trigHome    : R_TRIG;
-    trigJogStop : F_TRIG;
+    trigMoveRel : R_TRIG;
+    trigJogPos  : R_TRIG;
+    trigJogNeg  : R_TRIG;
 
-    // 内部保持状态
-    bMoveRelExecute : BOOL;
+
+    //==========================================================
+    // 命令识别和仲裁结果
+    //
+    // eRequestedCommand：
+    // 由M_SelectCommand根据原始BOOL命令生成。
+    // 同一扫描周期只允许选择一个主要动作命令。
+    //
+    // 注意：
+    // bEnable是轴持续使能状态，不参与运动命令互斥仲裁。
+    //==========================================================
+
+    eRequestedCommand :
+        E_AxisCommand := E_AxisCommand.NoCommand;
+
+
+    //==========================================================
+    // 跨周期执行信号
+    //==========================================================
+
     bMoveAbsExecute : BOOL;
-    bHomeExecute    : BOOL;
-    bJogExecute     : BOOL;
-    bHaltRequest    : BOOL;
-    bStopPending    : BOOL;
-
-    // 汇总互锁
-    bAxisBusy  : BOOL;
-    bAxisError : BOOL;
-
-    // 检查后的参数
-    fCheckedPosition : LREAL;
-    fCheckedDistance : LREAL;
-    fCheckedVelocity : LREAL;
-    fCheckedAcc      : LREAL;
-    fCheckedDec      : LREAL;
+    bMoveRelExecute : BOOL;
+    bStopExecute    : BOOL;
 END_VAR]]></Declaration>
     <Implementation>
-      <ST><![CDATA[// 1. 检查输入命令、互锁和运动参数
-M_PrepareCommand();
+      <ST><![CDATA[//==============================================================
+// 1. 清除上一个PLC周期的瞬时结果
+//
+// 必须在命令检测和执行方法之前调用。
+// 后续方法可以在本周期重新设置完成、终止或拒绝信号。
+//==============================================================
 
-// 2. 使能和复位
-M_ExecutePowerReset();
+M_ClearCycleResults(
+    ioAxis := stAxis
+);
 
-// 3. Stop拥有最高优先级
-M_ExecuteStop();
 
-// 4. 普通运动功能
-M_ExecuteHome();
-M_ExecutePositioning();
-M_ExecuteJog();
+//==============================================================
+// 2. 更新命令上升沿
+//
+// 必须在M_SelectCommand和所有执行方法之前调用。
+//==============================================================
 
-// 5. 更新对外数据、状态和报警
-M_UpdateData();
-M_UpdateStateAlarm();]]></ST>
+M_UpdateCommandEdges(
+    iCmd := stAxis.Cmd
+);
+
+
+//==============================================================
+// 3. 汇总上一周期运动状态
+//
+// 用于判断轴当前是否处于运动状态，并提前生成停止请求。
+// Execute锁存已经置位但Busy尚未建立时，也视为运动有效。
+//==============================================================
+
+bMotionActive :=
+    fbJog.Busy
+    OR fbMoveAbs.Busy
+    OR fbMoveRel.Busy
+    OR bMoveAbsExecute
+    OR bMoveRelExecute;
+
+
+//==============================================================
+// 4. 生成停止请求
+//
+// 以下任意条件成立时请求停止：
+// 1. WPF或外部程序发出Stop；
+// 2. 外部控制许可在运动中撤销；
+// 3. 轴使能命令在运动中撤销。
+//
+// bStopRequest是本周期停止条件；
+// bStopExecute是MC_Stop使用的跨周期锁存信号。
+//==============================================================
+
+bStopRequest :=
+    stAxis.Cmd.bStop
+    OR
+    (
+        NOT bControlAllowed
+        AND bMotionActive
+    )
+    OR
+    (
+        NOT stAxis.Cmd.bEnable
+        AND bMotionActive
+    );
+
+
+//==============================================================
+// 5. 命令识别和优先级仲裁
+//
+// 优先级：
+// Stop > Reset > Jog > MoveAbsolute/MoveRelative
+//
+// M_SelectCommand只负责选择命令，不执行任何MC功能块。
+//==============================================================
+
+eRequestedCommand := M_SelectCommand(
+    bStopRequest  := bStopRequest,
+    bResetPulse   := trigReset.Q,
+    bJogPositive  := stAxis.Cmd.bJogPos,
+    bJogNegative  := stAxis.Cmd.bJogNeg,
+    bMoveAbsPulse := trigMoveAbs.Q,
+    bMoveRelPulse := trigMoveRel.Q
+);
+
+
+//==============================================================
+// 6. 锁存停止Execute
+//
+// Stop被仲裁为最高优先级命令后，锁存MC_Stop.Execute。
+// MC_Stop完成并且外部Stop释放后，才在M_ExecuteStop中清除。
+//==============================================================
+
+IF
+    (eRequestedCommand = E_AxisCommand.Stop)
+    AND fbPower.Status
+THEN
+    bStopExecute := TRUE;
+END_IF;
+
+
+//==============================================================
+// 7. 调用四个执行方法
+//
+// 虽然命令已经完成仲裁，各MC功能块仍然必须每周期调用。
+//==============================================================
+
+// MC_Power必须每周期调用；同时处理Reset
+M_ExecutePowerReset(
+    ioAxisRef := AxisRef,
+    ioAxis    := stAxis
+);
+
+// 执行正向和负向点动
+M_ExecuteJog(
+    ioAxisRef := AxisRef,
+    ioAxis    := stAxis
+);
+
+// 执行绝对运动和相对运动
+M_ExecutePositioning(
+    ioAxisRef := AxisRef,
+    ioAxis    := stAxis
+);
+
+// Stop最后调用，保证停止具有最终优先级
+M_ExecuteStop(
+    ioAxisRef := AxisRef,
+    ioAxis    := stAxis
+);
+
+//==============================================================
+// 8. 统一更新锁存错误
+//
+// 必须放在四个执行方法之后，以读取本周期最新的MC输出。
+// 必须放在状态更新之前，因为bReady和eMotionState需要使用
+// 最新的Alarm.bError。
+//==============================================================
+
+M_UpdateError(
+    ioAxisRef := AxisRef,
+    ioAxis    := stAxis
+);
+
+
+//==============================================================
+// 9. 更新基础状态
+//
+// 必须在M_UpdateError之后调用，确保bReady使用本周期最新错误。
+// 必须在运动状态更新之前调用，保证所有基础状态先完成刷新。
+//==============================================================
+
+M_UpdateBasicState(
+    ioAxisRef := AxisRef,
+    ioAxis    := stAxis
+);
+
+
+//==============================================================
+// 10. 更新唯一运动状态
+//
+// 必须在M_UpdateError和M_UpdateBasicState之后调用。
+//==============================================================
+
+M_UpdateMotionState(
+    ioAxisRef := AxisRef,
+    ioAxis    := stAxis
+);
+
+
+//==============================================================
+// 11. 更新轴实时数据
+//
+// 放在本周期调用链最后，向WPF提供最新的NC轴反馈。
+//==============================================================
+
+M_UpdateAxisData(
+    ioAxisRef := AxisRef,
+    ioAxis    := stAxis
+);]]></ST>
     </Implementation>
-    <Method Name="M_ExecuteHome" Id="{faeb13b6-41c6-4ae8-b97f-99175abe4616}">
-      <Declaration><![CDATA[//处理回零命令和 MC_Home
-METHOD PRIVATE M_ExecuteHome
-VAR_INPUT
-END_VAR
-]]></Declaration>
+    <Method Name="M_ClearCycleResults" Id="{b0100f26-6f1e-463a-8206-ad01d5a00796}">
+      <Declaration><![CDATA[//==============================================================
+// 方法名称：M_ClearCycleResults
+// 功能：清除只保持一个PLC扫描周期的结果和提示信息
+//
+// 注意：
+// 1. 本方法必须在每个PLC周期最开始调用；
+// 2. 不清除bError、nErrorID和eErrorSource等锁存报警；
+// 3. 锁存报警只能在MC_Reset成功后清除。
+//==============================================================
+
+METHOD PRIVATE M_ClearCycleResults
+
+VAR_IN_OUT
+    ioAxis : ST_AxisInterface;
+    // 当前轴的命令、参数和反馈接口
+END_VAR]]></Declaration>
       <Implementation>
-        <ST><![CDATA[]]></ST>
+        <ST><![CDATA[//==============================================================
+// 1. 清除单周期命令结果
+//==============================================================
+
+ioAxis.State.bDone := FALSE;
+ioAxis.State.bCommandAborted := FALSE;
+ioAxis.State.bCmdRejected := FALSE;
+
+
+//==============================================================
+// 2. 清除单周期拒绝原因
+//==============================================================
+
+ioAxis.Alarm.eRejectReason :=
+    E_AxisRejectReason.NoReason;
+
+
+//==============================================================
+// 3. 清除单周期警告
+//
+// 当前警告没有采用锁存方式，因此每周期重新生成。
+//==============================================================
+
+ioAxis.Alarm.bWarning := FALSE;
+ioAxis.Alarm.nWarningID := 0;]]></ST>
       </Implementation>
     </Method>
     <Method Name="M_ExecuteJog" Id="{a4ee27c3-dd78-49f1-a96d-8089113d52a3}">
-      <Declaration><![CDATA[//正反点动和松手后的 MC_Halt
+      <Declaration><![CDATA[//正反点动
 METHOD PRIVATE M_ExecuteJog
-VAR_INPUT
+VAR_IN_OUT
+    ioAxisRef : AXIS_REF;
+    // 当前Method使用的NC轴引用
+
+    ioAxis : ST_AxisInterface;
+    // 当前Method使用的单轴接口
 END_VAR
-]]></Declaration>
+
+VAR
+    bJogAllowed       : BOOL;
+    bJogDynamicsValid : BOOL;
+    bJogForward       : BOOL;
+    bJogBackward      : BOOL;
+    bJogCommandEdge   : BOOL;
+END_VAR]]></Declaration>
       <Implementation>
-        <ST><![CDATA[]]></ST>
+        <ST><![CDATA[//==============================================================
+// 1.根据仲裁结果生成MC_Jog方向
+//
+// 不再直接使用两个原始按钮驱动MC_Jog，
+// 防止互斥命令或高优先级命令同时进入执行层。
+//==============================================================
+
+bJogForward :=
+    eRequestedCommand = E_AxisCommand.JogPositive;
+
+bJogBackward :=
+    eRequestedCommand = E_AxisCommand.JogNegative;
+bJogCommandEdge :=
+    trigJogPos.Q
+    OR trigJogNeg.Q;
+
+
+//==============================================================
+// 2. 检查点动参数
+//==============================================================
+
+bJogDynamicsValid :=
+    ioAxis.Set.Jog.fVelocity > 0.0
+    AND ioAxis.Set.Jog.fAcceleration >= 0.0
+    AND ioAxis.Set.Jog.fDeceleration >= 0.0;
+
+//==============================================================
+// 4. 生成点动许可
+//==============================================================
+
+bJogAllowed :=
+    bControlAllowed
+    AND fbPower.Status
+    AND NOT ioAxis.Alarm.bError
+    AND NOT bStopExecute
+    AND NOT fbStop.Busy
+    AND NOT fbReset.Busy
+    AND NOT fbMoveAbs.Busy
+    AND NOT fbMoveRel.Busy
+    AND NOT bMoveAbsExecute
+    AND NOT bMoveRelExecute
+    AND bJogDynamicsValid;
+
+
+//==============================================================
+// 5. 点动命令拒绝
+//==============================================================
+
+IF
+    bJogCommandEdge
+    AND ioAxis.Cmd.bJogPos
+    AND ioAxis.Cmd.bJogNeg
+THEN
+
+    ioAxis.State.bCmdRejected := TRUE;
+
+    ioAxis.Alarm.eRejectReason :=
+        E_AxisRejectReason.JogDirectionConflict;
+
+ELSIF
+    bJogCommandEdge
+    AND NOT bJogDynamicsValid
+THEN
+
+    ioAxis.State.bCmdRejected := TRUE;
+
+    ioAxis.Alarm.eRejectReason :=
+        E_AxisRejectReason.InvalidDynamics;
+
+ELSIF
+    bJogCommandEdge
+    AND NOT bJogAllowed
+THEN
+
+    ioAxis.State.bCmdRejected := TRUE;
+
+    ioAxis.Alarm.eRejectReason :=
+        E_AxisRejectReason.AxisNotReady;
+
+END_IF;
+
+
+//==============================================================
+// 6. 周期调用MC_Jog
+//==============================================================
+
+fbJog(
+    Axis         := ioAxisRef,
+    JogForward   := bJogAllowed AND bJogForward,
+    JogBackwards := bJogAllowed AND bJogBackward,
+    Mode         := MC_JOGMODE_CONTINOUS,
+    Position     := 0.0,
+    Velocity     := ioAxis.Set.Jog.fVelocity,
+    Acceleration := ioAxis.Set.Jog.fAcceleration,
+    Deceleration := ioAxis.Set.Jog.fDeceleration,
+    Jerk         := 0.0
+);
+
+
+//==============================================================
+// 7. 点动被其他命令打断
+//==============================================================
+
+IF fbJog.CommandAborted THEN
+    ioAxis.State.bCommandAborted := TRUE;
+END_IF;]]></ST>
       </Implementation>
     </Method>
     <Method Name="M_ExecutePositioning" Id="{f6694070-471f-441e-a9e8-b34f3a930dbc}">
       <Declaration><![CDATA[//相对、绝对定位运动
 METHOD PRIVATE M_ExecutePositioning
-VAR_INPUT
+VAR_IN_OUT
+    ioAxisRef : AXIS_REF;
+    ioAxis    : ST_AxisInterface;
+END_VAR
+
+VAR
+    bPositionAllowed       : BOOL;
+    bPositionDynamicsValid : BOOL;
 END_VAR
 ]]></Declaration>
       <Implementation>
-        <ST><![CDATA[]]></ST>
+        <ST><![CDATA[//==============================================================
+// 1. 绝对/相对运动命令上升沿
+//==============================================================
+
+
+
+//==============================================================
+// 2. 定位参数检查
+//==============================================================
+
+bPositionDynamicsValid :=
+    ioAxis.Set.Position.fVelocity > 0.0
+    AND ioAxis.Set.Position.fAcceleration >= 0.0
+    AND ioAxis.Set.Position.fDeceleration >= 0.0;
+
+
+//==============================================================
+// 3. 统一定位许可
+//==============================================================
+
+bPositionAllowed :=
+    bControlAllowed
+    AND fbPower.Status
+    AND NOT ioAxis.Alarm.bError
+    AND NOT bStopExecute
+    AND NOT fbStop.Busy
+    AND NOT fbReset.Busy
+    AND NOT fbJog.Busy
+    AND NOT ioAxis.Cmd.bJogPos
+    AND NOT ioAxis.Cmd.bJogNeg
+    AND NOT fbMoveAbs.Busy
+    AND NOT fbMoveRel.Busy
+    AND NOT bMoveAbsExecute
+    AND NOT bMoveRelExecute;
+
+
+//==============================================================
+// 4. 接受或拒绝定位命令
+//==============================================================
+
+IF trigMoveAbs.Q AND trigMoveRel.Q THEN
+
+    ioAxis.State.bCmdRejected := TRUE;
+
+    ioAxis.Alarm.eRejectReason :=
+        E_AxisRejectReason.CommandConflict;
+
+ELSIF trigMoveAbs.Q OR trigMoveRel.Q THEN
+
+    IF NOT bPositionAllowed THEN
+
+        ioAxis.State.bCmdRejected := TRUE;
+
+        ioAxis.Alarm.eRejectReason :=
+            E_AxisRejectReason.AxisNotReady;
+
+    ELSIF NOT bPositionDynamicsValid THEN
+
+        ioAxis.State.bCmdRejected := TRUE;
+
+        ioAxis.Alarm.eRejectReason :=
+            E_AxisRejectReason.InvalidDynamics;
+
+    ELSIF
+        eRequestedCommand =
+        E_AxisCommand.MoveAbsolute
+    THEN
+
+        // 锁存绝对运动Execute，直到完成、终止或错误
+        bMoveAbsExecute := TRUE;
+
+    ELSIF
+        eRequestedCommand =
+        E_AxisCommand.MoveRelative
+    THEN
+
+        // 锁存相对运动Execute，直到完成、终止或错误
+        bMoveRelExecute := TRUE;
+
+    ELSE
+
+        // 定位请求被Stop、Reset或Jog等高优先级命令覆盖
+        ioAxis.State.bCmdRejected := TRUE;
+
+        ioAxis.Alarm.eRejectReason :=
+            E_AxisRejectReason.AxisNotReady;
+
+    END_IF;
+
+END_IF;
+
+
+//==============================================================
+// 5. Stop开始后撤销普通运动Execute
+//==============================================================
+
+IF bStopExecute THEN
+    bMoveAbsExecute := FALSE;
+    bMoveRelExecute := FALSE;
+END_IF;
+
+
+//==============================================================
+// 6. 周期调用MC_MoveAbsolute
+//==============================================================
+
+fbMoveAbs(
+    Axis         := ioAxisRef,
+    Execute      := bMoveAbsExecute,
+    Position     := ioAxis.Set.Position.fAbsolutePosition,
+    Velocity     := ioAxis.Set.Position.fVelocity,
+    Acceleration := ioAxis.Set.Position.fAcceleration,
+    Deceleration := ioAxis.Set.Position.fDeceleration,
+    Jerk         := 0.0,
+    BufferMode   := MC_Aborting
+);
+
+
+//==============================================================
+// 7. 周期调用MC_MoveRelative
+//==============================================================
+
+fbMoveRel(
+    Axis         := ioAxisRef,
+    Execute      := bMoveRelExecute,
+    Distance     := ioAxis.Set.Position.fRelativeDistance,
+    Velocity     := ioAxis.Set.Position.fVelocity,
+    Acceleration := ioAxis.Set.Position.fAcceleration,
+    Deceleration := ioAxis.Set.Position.fDeceleration,
+    Jerk         := 0.0,
+    BufferMode   := MC_Aborting
+);
+
+
+//==============================================================
+// 8. 绝对运动结果
+//==============================================================
+
+IF fbMoveAbs.Done THEN
+
+    bMoveAbsExecute := FALSE;
+    ioAxis.State.bDone := TRUE;
+
+ELSIF fbMoveAbs.CommandAborted THEN
+
+    bMoveAbsExecute := FALSE;
+    ioAxis.State.bCommandAborted := TRUE;
+
+ELSIF fbMoveAbs.Error THEN
+
+    bMoveAbsExecute := FALSE;
+
+END_IF;
+
+
+//==============================================================
+// 9. 相对运动结果
+//==============================================================
+
+IF fbMoveRel.Done THEN
+
+    bMoveRelExecute := FALSE;
+    ioAxis.State.bDone := TRUE;
+
+ELSIF fbMoveRel.CommandAborted THEN
+
+    bMoveRelExecute := FALSE;
+    ioAxis.State.bCommandAborted := TRUE;
+
+ELSIF fbMoveRel.Error THEN
+
+    bMoveRelExecute := FALSE;
+
+END_IF;]]></ST>
       </Implementation>
     </Method>
     <Method Name="M_ExecutePowerReset" Id="{97d51e5c-08e7-4f36-a4c4-b68d43d17128}">
       <Declaration><![CDATA[//调用 MC_Power和MC_Reset
 METHOD PRIVATE M_ExecutePowerReset
-VAR_INPUT
+VAR_IN_OUT
+    ioAxisRef : AXIS_REF;
+    ioAxis    : ST_AxisInterface;
+END_VAR
+
+VAR
+    bPowerEnable  : BOOL; // 实际送入MC_Power的Enable
+    bResetAllowed : BOOL; // 当前是否允许复位	
 END_VAR
 ]]></Declaration>
       <Implementation>
-        <ST><![CDATA[]]></ST>
+        <ST><![CDATA[//==============================================================
+// 1. 生成MC_Power实际使能信号
+//
+// 外部要求使能时正常保持使能。
+// 运动中撤销使能时，先保持使能完成MC_Stop。
+//==============================================================
+
+bPowerEnable :=
+    ioAxis.Cmd.bEnable
+    OR
+    (
+        (bStopExecute OR fbStop.Busy)
+        AND fbPower.Status
+    );
+
+
+//==============================================================
+// 2. 周期调用MC_Power
+//==============================================================
+
+fbPower(
+    Axis            := ioAxisRef,
+    Enable          := bPowerEnable,
+    Enable_Positive := TRUE,
+    Enable_Negative := TRUE,
+    Override        := 100.0
+);
+
+
+
+//==============================================================
+// 4. Reset许可
+//
+// 运动、点动和停止过程中不允许Reset。
+//==============================================================
+
+bResetAllowed :=
+    NOT bMotionActive
+    AND NOT bStopExecute
+    AND NOT fbStop.Busy;
+
+//==============================================================
+// 5. 周期调用MC_Reset
+//
+// Reset必须同时满足：
+// 1. 已被M_SelectCommand选中；
+// 2. 当前轴状态允许复位。
+//==============================================================
+
+fbReset(
+    Axis := ioAxisRef,
+    Execute :=
+        (eRequestedCommand = E_AxisCommand.Reset)
+        AND bResetAllowed
+);
+
+
+//==============================================================
+// 6. Reset命令被拒绝
+//==============================================================
+
+IF
+    (eRequestedCommand = E_AxisCommand.Reset)
+    AND NOT bResetAllowed
+THEN
+    ioAxis.State.bCmdRejected := TRUE;
+
+    ioAxis.Alarm.eRejectReason :=
+        E_AxisRejectReason.ResetDuringMotion;
+END_IF;
+
+//==============================================================
+// 7. Reset成功
+//
+// 清除PLC锁存的轴报警。
+//==============================================================
+
+IF fbReset.Done THEN
+
+    ioAxis.Alarm.bError       := FALSE;
+    ioAxis.Alarm.nErrorID     := 0;
+    ioAxis.Alarm.eErrorSource :=
+        E_AxisErrorSource.NoError;
+
+    ioAxis.State.bDone := TRUE;
+
+END_IF;]]></ST>
       </Implementation>
     </Method>
     <Method Name="M_ExecuteStop" Id="{b3e2f5b9-520d-444d-9b18-5c763a9aea1b}">
       <Declaration><![CDATA[//处理最高优先级停止和 MC_Stop
 METHOD PRIVATE M_ExecuteStop
-VAR_INPUT
+VAR_IN_OUT
+    ioAxisRef : AXIS_REF;
+    ioAxis    : ST_AxisInterface;
+END_VAR
+
+VAR
+    fStopDeceleration : LREAL;//停止声明
 END_VAR
 ]]></Declaration>
       <Implementation>
-        <ST><![CDATA[]]></ST>
+        <ST><![CDATA[//==============================================================
+// 1. Stop开始后撤销定位Execute
+//
+// 点动由bStopExecute使bJogAllowed变为FALSE，
+// MC_Jog会撤销点动请求，MC_Stop负责最终停止。
+//==============================================================
+
+IF bStopExecute THEN
+    bMoveAbsExecute := FALSE;
+    bMoveRelExecute := FALSE;
+END_IF;
+
+
+//==============================================================
+// 2. 选择停止减速度
+//
+// 当前使用定位减速度。
+// 设置为0时，由NC轴使用默认减速度。
+//==============================================================
+
+fStopDeceleration :=
+    ioAxis.Set.Position.fDeceleration;
+
+IF fStopDeceleration < 0.0 THEN
+    fStopDeceleration := 0.0;
+END_IF;
+
+
+//==============================================================
+// 3. MC_Stop每周期调用
+//
+// 该方法必须在点动和定位方法之后调用。
+//==============================================================
+
+fbStop(
+    Axis         := ioAxisRef,
+    Execute      := bStopExecute,
+    Deceleration := fStopDeceleration,
+    Jerk         := 0.0
+);
+
+
+//==============================================================
+// 4. 停止完成
+//
+// 外部Stop恢复FALSE后，撤销Execute并释放轴锁定。
+//==============================================================
+
+IF fbStop.Done AND NOT bStopRequest THEN
+    bStopExecute := FALSE;
+END_IF;
+
+
+//==============================================================
+// 5. Stop错误
+//==============================================================
+
+IF fbStop.Error THEN
+    bStopExecute := FALSE;
+END_IF;]]></ST>
       </Implementation>
     </Method>
-    <Method Name="M_PrepareCommand" Id="{7f85a792-f6e9-4b73-8d02-924cadcf74bc}">
-      <Declaration><![CDATA[//边沿检测、参数限幅、忙碌和错误互锁、命令接受判断
-METHOD PRIVATE M_PrepareCommand
+    <Method Name="M_SelectCommand" Id="{3eba9e33-1af3-4d6b-bf6d-4e9299aa666b}">
+      <Declaration><![CDATA[//==============================================================
+// 方法名称：M_SelectCommand
+// 功能：
+// 1. 识别外部BOOL命令；
+// 2. 将多个BOOL命令转换成唯一E_AxisCommand；
+// 3. 实现停止、复位、点动、定位之间的优先级；
+// 4. 发现互斥命令时返回NoCommand。
+//
+// 本方法只进行命令选择，不调用任何MC功能块。
+//==============================================================
+
+METHOD PRIVATE M_SelectCommand : E_AxisCommand
+
 VAR_INPUT
-END_VAR
-]]></Declaration>
+    bStopRequest  : BOOL; // 停止请求，最高优先级
+    bResetPulse   : BOOL; // 复位命令上升沿
+
+    bJogPositive  : BOOL; // 正向点动保持信号
+    bJogNegative  : BOOL; // 负向点动保持信号
+
+    bMoveAbsPulse : BOOL; // 绝对运动命令上升沿
+    bMoveRelPulse : BOOL; // 相对运动命令上升沿
+END_VAR]]></Declaration>
       <Implementation>
-        <ST><![CDATA[]]></ST>
+        <ST><![CDATA[// 默认本周期没有有效命令
+M_SelectCommand := E_AxisCommand.NoCommand;
+
+
+//==============================================================
+// 1. 停止命令
+//
+// Stop具有最高优先级，可以覆盖复位、点动和定位命令。
+// bStopRequest还包括撤销控制许可和运动中撤销使能。
+//==============================================================
+
+IF bStopRequest THEN
+
+    M_SelectCommand := E_AxisCommand.Stop;
+
+
+//==============================================================
+// 2. 复位命令
+//
+// Reset使用上升沿，只在触发周期返回Reset。
+// 是否允许复位仍由M_ExecutePowerReset检查。
+//==============================================================
+
+ELSIF bResetPulse THEN
+
+    M_SelectCommand := E_AxisCommand.Reset;
+
+
+//==============================================================
+// 3. 点动方向冲突
+//
+// 正向点动和负向点动同时成立时不选择任何方向。
+// 具体拒绝原因由M_ExecuteJog写入状态和报警接口。
+//==============================================================
+
+ELSIF bJogPositive AND bJogNegative THEN
+
+    M_SelectCommand := E_AxisCommand.NoCommand;
+
+
+//==============================================================
+// 4. 正向和负向点动
+//
+// 点动是保持型命令：
+// 按钮保持TRUE时，每周期持续返回对应点动命令；
+// 松开按钮后返回NoCommand，MC_Jog开始减速停止。
+//==============================================================
+
+ELSIF bJogPositive THEN
+
+    M_SelectCommand := E_AxisCommand.JogPositive;
+
+ELSIF bJogNegative THEN
+
+    M_SelectCommand := E_AxisCommand.JogNegative;
+
+
+//==============================================================
+// 5. 定位命令冲突
+//
+// 绝对运动和相对运动在同一扫描周期同时触发时，
+// 不选择任何定位命令。
+// 具体拒绝原因由M_ExecutePositioning写入反馈。
+//==============================================================
+
+ELSIF bMoveAbsPulse AND bMoveRelPulse THEN
+
+    M_SelectCommand := E_AxisCommand.NoCommand;
+
+
+//==============================================================
+// 6. 绝对运动和相对运动
+//==============================================================
+
+ELSIF bMoveAbsPulse THEN
+
+    M_SelectCommand := E_AxisCommand.MoveAbsolute;
+
+ELSIF bMoveRelPulse THEN
+
+    M_SelectCommand := E_AxisCommand.MoveRelative;
+
+END_IF;]]></ST>
       </Implementation>
     </Method>
-    <Method Name="M_UpdateData" Id="{84000384-9550-4806-a23a-4bd7988cfdb2}">
-      <Declaration><![CDATA[//更新位置、速度、转速、位置偏差
-METHOD PRIVATE M_UpdateData
-VAR_INPUT
-END_VAR
-]]></Declaration>
+    <Method Name="M_UpdateAxisData" Id="{90593075-838c-4824-af74-478ff719ba9d}">
+      <Declaration><![CDATA[//==============================================================
+// 方法名称：M_UpdateAxisData
+// 功能：
+// 1. 从AXIS_REF.NcToPlc读取NC轴实时数据；
+// 2. 写入ST_AxisData，供PLC程序和WPF读取；
+// 3. 集中处理后续可能增加的单位换算。
+//
+// 调用位置：
+// 放在所有命令执行、错误和状态更新之后，每周期调用一次。
+//==============================================================
+
+METHOD PRIVATE M_UpdateAxisData
+
+VAR_IN_OUT
+    ioAxisRef : AXIS_REF;
+    // 当前TwinCAT NC轴引用
+
+    ioAxis : ST_AxisInterface;
+    // 当前单轴数据反馈接口
+END_VAR]]></Declaration>
       <Implementation>
-        <ST><![CDATA[]]></ST>
+        <ST><![CDATA[//==============================================================
+// 1. 位置数据
+//==============================================================
+
+// NC轴设定位置
+ioAxis.Data.fSetPosition :=
+    ioAxisRef.NcToPlc.SetPos;
+
+// 编码器反馈的实际位置
+ioAxis.Data.fActPosition :=
+    ioAxisRef.NcToPlc.ActPos;
+
+// 当前运动的目标位置
+ioAxis.Data.fTargetPosition :=
+    ioAxisRef.NcToPlc.TargetPos;
+
+
+//==============================================================
+// 2. 速度数据
+//==============================================================
+
+// NC轴设定速度
+ioAxis.Data.fSetVelocity :=
+    ioAxisRef.NcToPlc.SetVelo;
+
+// 编码器反馈的实际速度
+ioAxis.Data.fActVelocity :=
+    ioAxisRef.NcToPlc.ActVelo;
+
+
+//==============================================================
+// 3. 加速度数据
+//==============================================================
+
+// NC轴设定加速度
+ioAxis.Data.fSetAcceleration :=
+    ioAxisRef.NcToPlc.SetAcc;
+
+// NC轴实际加速度
+ioAxis.Data.fActAcceleration :=
+    ioAxisRef.NcToPlc.ActAcc;
+
+
+//==============================================================
+// 4. 跟随误差
+//
+// 带方向的位置偏差。
+//==============================================================
+
+ioAxis.Data.fFollowingError :=
+    ioAxisRef.NcToPlc.PosDiff;
+
+
+//==============================================================
+// 5. 转矩数据
+//
+// 是否为实际物理转矩、百分比或归一化值，
+// 取决于驱动器和NC轴的配置。
+//==============================================================
+
+ioAxis.Data.fSetTorque :=
+    ioAxisRef.NcToPlc.SetTorque;
+
+ioAxis.Data.fActTorque :=
+    ioAxisRef.NcToPlc.ActTorque;
+
+
+//==============================================================
+// 6. 电机转速
+//
+// 当前缺少“每转对应多少工程单位”的换算参数，
+// 因此暂不计算实际rpm。
+//==============================================================
+
+ioAxis.Data.fActRpm := 0.0;]]></ST>
       </Implementation>
     </Method>
-    <Method Name="M_UpdateStateAlarm" Id="{1267e6b4-d7ac-4fd6-a151-1e95cc09de30}">
-      <Declaration><![CDATA[//汇总Busy、Done、状态、错误来源和错误码
-METHOD PRIVATE M_UpdateStateAlarm
-VAR_INPUT
-END_VAR
-]]></Declaration>
+    <Method Name="M_UpdateBasicState" Id="{5450b6ce-a3d6-4d3c-84ee-f95ee610611d}">
+      <Declaration><![CDATA[//==============================================================
+// 方法名称：M_UpdateBasicState
+// 功能：
+// 1. 汇总各PLCopen功能块的Busy状态；
+// 2. 更新轴使能、忙碌、活动、准备完成和回零状态；
+// 3. 为WPF提供统一的基础状态反馈。
+//
+// 调用位置：
+// 必须放在四个执行方法和M_UpdateError之后。
+//==============================================================
+
+METHOD PRIVATE M_UpdateBasicState
+
+VAR_IN_OUT
+    ioAxisRef : AXIS_REF;
+    // 当前TwinCAT NC轴引用
+
+    ioAxis : ST_AxisInterface;
+    // 当前单轴状态和报警接口
+END_VAR]]></Declaration>
       <Implementation>
-        <ST><![CDATA[]]></ST>
+        <ST><![CDATA[//==============================================================
+// 1. 汇总轴忙碌状态
+//
+// 除PLCopen功能块的Busy外，还包含三个Execute锁存信号，
+// 避免命令已经接受但Busy尚未建立时出现一周期状态空缺。
+//==============================================================
+
+bAnyBusy :=
+    fbReset.Busy
+    OR fbStop.Busy
+    OR bStopExecute
+    OR fbJog.Busy
+    OR fbMoveAbs.Busy
+    OR fbMoveRel.Busy
+    OR bMoveAbsExecute
+    OR bMoveRelExecute;
+
+
+//==============================================================
+// 2. 更新实际使能状态
+//
+// 采用MC_Power.Status，而不是外部bEnable请求。
+//==============================================================
+
+ioAxis.State.bPowerStatus :=
+    fbPower.Status;
+
+
+//==============================================================
+// 3. 更新忙碌状态
+//
+// 复位、停止、点动或定位过程中均视为Busy。
+//==============================================================
+
+ioAxis.State.bBusy :=
+    bAnyBusy;
+
+
+//==============================================================
+// 4. 更新有效运动状态
+//
+// bActive表示NC轴当前存在实际运动或停止过程。
+// 不包含仅已锁存、但PLCopen Busy尚未建立的命令。
+//==============================================================
+
+ioAxis.State.bActive :=
+    fbJog.Busy
+    OR fbMoveAbs.Busy
+    OR fbMoveRel.Busy
+    OR fbStop.Busy;
+
+
+//==============================================================
+// 5. 更新轴准备状态
+//
+// 满足以下全部条件才允许接受新的普通运动命令：
+// 1. 轴已经实际使能；
+// 2. 外部控制许可有效；
+// 3. 没有锁存错误；
+// 4. 当前没有正在执行的命令。
+//==============================================================
+
+ioAxis.State.bReady :=
+    fbPower.Status
+    AND bControlAllowed
+    AND NOT ioAxis.Alarm.bError
+    AND NOT bAnyBusy;
+
+
+//==============================================================
+// 6. 更新回零状态
+//
+// 当前程序没有MC_Home，只读取NC轴的Homed状态。
+//==============================================================
+
+ioAxis.State.bHomed :=
+    ioAxisRef.Status.Homed;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_UpdateCommandEdges" Id="{4c7b1159-4005-4e07-bab0-2bc66c855e7f}">
+      <Declaration><![CDATA[//==============================================================
+// 方法名称：M_UpdateCommandEdges
+// 功能：统一更新单轴命令的上升沿检测结果
+//
+// 注意：
+// 1. 每个R_TRIG实例每周期只能在本方法中调用一次；
+// 2. Reset、绝对运动、相对运动使用上升沿触发；
+// 3. 点动使用持续信号，上升沿仅用于判断命令是否被拒绝；
+// 4. Enable和Stop是持续型信号，不需要R_TRIG。
+//==============================================================
+
+METHOD PRIVATE M_UpdateCommandEdges
+
+VAR_INPUT
+    iCmd : ST_AxisCmd;
+    // 当前轴的原始命令
+    // 结构体较小，使用VAR_INPUT传递不会造成明显开销
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[//==============================================================
+// 1. 错误复位命令上升沿
+//==============================================================
+
+trigReset(
+    CLK := iCmd.bReset
+);
+
+
+//==============================================================
+// 2. 绝对运动命令上升沿
+//==============================================================
+
+trigMoveAbs(
+    CLK := iCmd.bMoveAbs
+);
+
+
+//==============================================================
+// 3. 相对运动命令上升沿
+//==============================================================
+
+trigMoveRel(
+    CLK := iCmd.bMoveRel
+);
+
+
+//==============================================================
+// 4. 正向点动按钮上升沿
+//
+// MC_Jog仍然使用bJogPos持续电平；
+// 本上升沿只用于产生命令拒绝反馈。
+//==============================================================
+
+trigJogPos(
+    CLK := iCmd.bJogPos
+);
+
+
+//==============================================================
+// 5. 负向点动按钮上升沿
+//==============================================================
+
+trigJogNeg(
+    CLK := iCmd.bJogNeg
+);]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_UpdateError" Id="{dd0c9f2b-f27c-4abb-b438-65065b8f3756}">
+      <Declaration><![CDATA[//==============================================================
+// 方法名称：M_UpdateError
+// 功能：
+// 1. 汇总NC轴和各PLCopen功能块错误；
+// 2. 根据优先级选择当前显示的错误；
+// 3. 将错误锁存到单轴报警接口。
+//
+// 错误优先级：
+// NC轴 > Stop > Power > Reset > Jog > 绝对运动 > 相对运动
+//
+// 注意：
+// 1. 本方法不主动清除错误；
+// 2. 错误只能在MC_Reset成功后清除；
+// 3. 没有新错误时保持原报警不变。
+//==============================================================
+
+METHOD PRIVATE M_UpdateError
+
+VAR_IN_OUT
+    ioAxisRef : AXIS_REF;
+    // 当前TwinCAT NC轴引用
+
+    ioAxis : ST_AxisInterface;
+    // 当前轴的状态和报警接口
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[//==============================================================
+// 1. NC轴错误
+//
+// NC轴本体错误优先级最高。
+//==============================================================
+
+IF ioAxisRef.Status.Error THEN
+
+    ioAxis.Alarm.bError := TRUE;
+    ioAxis.Alarm.nErrorID :=
+        ioAxisRef.Status.ErrorId;
+
+    ioAxis.Alarm.eErrorSource :=
+        E_AxisErrorSource.NcAxis;
+
+
+//==============================================================
+// 2. MC_Stop错误
+//==============================================================
+
+ELSIF fbStop.Error THEN
+
+    ioAxis.Alarm.bError := TRUE;
+    ioAxis.Alarm.nErrorID :=
+        fbStop.ErrorID;
+
+    ioAxis.Alarm.eErrorSource :=
+        E_AxisErrorSource.Stop;
+
+
+//==============================================================
+// 3. MC_Power错误
+//==============================================================
+
+ELSIF fbPower.Error THEN
+
+    ioAxis.Alarm.bError := TRUE;
+    ioAxis.Alarm.nErrorID :=
+        fbPower.ErrorID;
+
+    ioAxis.Alarm.eErrorSource :=
+        E_AxisErrorSource.Power;
+
+
+//==============================================================
+// 4. MC_Reset错误
+//==============================================================
+
+ELSIF fbReset.Error THEN
+
+    ioAxis.Alarm.bError := TRUE;
+    ioAxis.Alarm.nErrorID :=
+        fbReset.ErrorID;
+
+    ioAxis.Alarm.eErrorSource :=
+        E_AxisErrorSource.Reset;
+
+
+//==============================================================
+// 5. MC_Jog错误
+//==============================================================
+
+ELSIF fbJog.Error THEN
+
+    ioAxis.Alarm.bError := TRUE;
+    ioAxis.Alarm.nErrorID :=
+        fbJog.ErrorID;
+
+    ioAxis.Alarm.eErrorSource :=
+        E_AxisErrorSource.Jog;
+
+
+//==============================================================
+// 6. MC_MoveAbsolute错误
+//==============================================================
+
+ELSIF fbMoveAbs.Error THEN
+
+    ioAxis.Alarm.bError := TRUE;
+    ioAxis.Alarm.nErrorID :=
+        fbMoveAbs.ErrorID;
+
+    ioAxis.Alarm.eErrorSource :=
+        E_AxisErrorSource.MoveAbsolute;
+
+
+//==============================================================
+// 7. MC_MoveRelative错误
+//==============================================================
+
+ELSIF fbMoveRel.Error THEN
+
+    ioAxis.Alarm.bError := TRUE;
+    ioAxis.Alarm.nErrorID :=
+        fbMoveRel.ErrorID;
+
+    ioAxis.Alarm.eErrorSource :=
+        E_AxisErrorSource.MoveRelative;
+
+END_IF;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_UpdateMotionState" Id="{f24094b2-eed5-45d6-807b-d5bb6e886654}">
+      <Declaration><![CDATA[//==============================================================
+// 方法名称：M_UpdateMotionState
+// 功能：根据轴错误、停止、复位、点动、定位和使能状态，
+//       生成唯一的E_AxisMotionState运动状态。
+//
+// 状态优先级：
+// Error > Stopping > Resetting > Jogging > Moving
+// > Disabled > NotReady > Standstill
+//
+// 调用位置：
+// 必须放在执行方法、错误汇总和基础状态更新之后。
+//==============================================================
+
+METHOD PRIVATE M_UpdateMotionState
+
+VAR_IN_OUT
+    ioAxisRef : AXIS_REF;
+    // 当前TwinCAT NC轴引用
+
+    ioAxis : ST_AxisInterface;
+    // 当前单轴状态和报警接口
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[//==============================================================
+// 1. 错误状态
+//
+// NC轴错误或PLC锁存错误存在时，统一进入Error。
+//==============================================================
+
+IF
+    ioAxisRef.Status.Error
+    OR ioAxis.Alarm.bError
+THEN
+
+    ioAxis.State.eMotionState :=
+        E_AxisMotionState.Error;
+
+
+//==============================================================
+// 2. 停止状态
+//
+// bStopExecute包含Stop已经锁存但Busy尚未建立的阶段。
+//==============================================================
+
+ELSIF
+    bStopExecute
+    OR fbStop.Busy
+THEN
+
+    ioAxis.State.eMotionState :=
+        E_AxisMotionState.Stopping;
+
+
+//==============================================================
+// 3. 复位状态
+//==============================================================
+
+ELSIF fbReset.Busy THEN
+
+    ioAxis.State.eMotionState :=
+        E_AxisMotionState.Resetting;
+
+
+//==============================================================
+// 4. 点动状态
+//==============================================================
+
+ELSIF fbJog.Busy THEN
+
+    ioAxis.State.eMotionState :=
+        E_AxisMotionState.Jogging;
+
+
+//==============================================================
+// 5. 定位运动状态
+//
+// Execute锁存可以覆盖命令已接受但Busy尚未建立的周期。
+//==============================================================
+
+ELSIF
+    fbMoveAbs.Busy
+    OR fbMoveRel.Busy
+    OR bMoveAbsExecute
+    OR bMoveRelExecute
+THEN
+
+    ioAxis.State.eMotionState :=
+        E_AxisMotionState.Moving;
+
+
+//==============================================================
+// 6. 未使能状态
+//==============================================================
+
+ELSIF NOT fbPower.Status THEN
+
+    ioAxis.State.eMotionState :=
+        E_AxisMotionState.Disabled;
+
+
+//==============================================================
+// 7. 控制未许可状态
+//
+// 轴已经使能，但外部控制许可无效。
+//==============================================================
+
+ELSIF NOT bControlAllowed THEN
+
+    ioAxis.State.eMotionState :=
+        E_AxisMotionState.NotReady;
+
+
+//==============================================================
+// 8. 静止状态
+//
+// 轴已使能、控制许可有效、无错误且没有执行命令。
+//==============================================================
+
+ELSE
+
+    ioAxis.State.eMotionState :=
+        E_AxisMotionState.Standstill;
+
+END_IF;]]></ST>
       </Implementation>
     </Method>
   </POU>

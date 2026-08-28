@@ -1,0 +1,43 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="ST_AxisData" Id="{bf71d3e8-0d5d-433d-bc31-6a2106ce1b99}">
+    <Declaration><![CDATA[TYPE ST_AxisData :
+STRUCT
+    //========================
+    // 位置数据
+    //========================
+    fSetPosition       : LREAL; // NC设定位置
+    fActPosition       : LREAL; // 轴实际位置
+    fTargetPosition    : LREAL; // 当前运动目标位置
+
+    //========================
+    // 速度数据
+    //========================
+    fSetVelocity       : LREAL; // NC设定速度
+    fActVelocity       : LREAL; // 轴实际速度
+
+    //========================
+    // 加速度数据
+    //========================
+    fSetAcceleration   : LREAL; // NC设定加速度
+    fActAcceleration   : LREAL; // 实际加速度
+
+    //========================
+    // 跟随误差
+    //========================
+    fFollowingError    : LREAL; // 带方向的跟随误差
+
+    //========================
+    // 力矩数据
+    //========================
+    fSetTorque         : LREAL; // 设定力矩
+    fActTorque         : LREAL; // 实际力矩
+	
+	//========================
+    // 转速
+    //========================
+	fActRpm : LREAL;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

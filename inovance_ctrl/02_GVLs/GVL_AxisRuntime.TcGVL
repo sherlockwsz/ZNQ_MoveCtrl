@@ -3,33 +3,23 @@
   <GVL Name="GVL_AxisRuntime" Id="{a60e6e4c-c618-41fe-980a-aaeaff595cce}">
     <Declaration><![CDATA[{attribute 'qualified_only'}
 VAR_GLOBAL
-    // =====================================================
-    // 轴1最终运行接口
-    //
-    // Cmd和Set：
-    // 由FB_ModeManager根据手动/自动模式选择后写入
-    //
-    // Data、State、Alarm：
-    // 由FB_AxisControl运行后写入
-    //
-    // Interlock：
-    // 由安全管理和单轴控制逻辑共同更新
-    // =====================================================
-    Axis1 : ST_AxisInterface;
+    Axis1 : ST_AxisInterface := (
+        Set := (
+            Jog := (
+                fVelocity     := 5.0,
+                fAcceleration := 200.0,
+                fDeceleration := 500.0
+            ),
 
-    // =====================================================
-    // 轴1自动流程命令
-    // 上下料、调整等自动流程写入这里
-    // FB_ModeManager在自动模式下将其传递给Axis1.Cmd
-    // =====================================================
-    Axis1AutoCmd : ST_AxisCmd;
-
-    // 轴1自动流程运动设定
-    Axis1AutoSet : ST_AxisSet;
-
-    // 自动流程当前是否具有有效的轴命令
-    // FALSE时，自动命令不应传递给底层轴功能块
-    bAxis1AutoCommandValid : BOOL;
+            Position := (
+                fAbsolutePosition := 0.0,
+                fRelativeDistance := 0.0,
+                fVelocity         := 20.0,
+                fAcceleration     := 500.0,
+                fDeceleration     := 500.0
+            )
+        )
+    );
 END_VAR]]></Declaration>
   </GVL>
 </TcPlcObject>

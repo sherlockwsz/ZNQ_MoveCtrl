@@ -1,0 +1,43 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="ST_AxisLimit" Id="{0500cab9-42d0-4db2-8fc7-ee74ab6d7f0b}">
+    <Declaration><![CDATA[TYPE ST_AxisLimit :
+STRUCT
+	//========================
+    // 运动参数允许范围
+    // 用于限制上位机输入，保护机械结构
+    //========================
+    fMinVelocity         : LREAL := 0.1;//最小速度
+    fMaxVelocity         : LREAL := 100.0;//最大速度
+
+    fMinAcceleration     : LREAL := 1.0;//最小加速度
+    fMaxAcceleration     : LREAL := 1000.0;//最大加速度
+
+    fMinDeceleration     : LREAL := 1.0;//最小减速度
+    fMaxDeceleration     : LREAL := 1000.0;//最大减速度
+
+    //========================
+    // 位置限制
+    //========================
+    fSoftwareLimitPos    : LREAL := 1000.0;//正向软限位
+    fSoftwareLimitNeg    : LREAL := -1000.0;//负向软限位
+
+    //========================
+    // 力矩限制
+    //========================
+    fTorqueLimitPos      : LREAL := 100.0;//最大力矩
+    fTorqueLimitNeg      : LREAL := 100.0;//最小力矩
+	
+	//========================
+    // 跟随误差
+    //========================
+	fFollowingErrorWarning : LREAL; // 跟随误差警告值
+	fFollowingErrorFault   : LREAL; // 跟随误差故障值
+	tFollowingErrorDelay   : TIME;  // 超限确认时间
+	
+	
+END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

@@ -3,15 +3,9 @@
   <POU Name="FB_AxisManager" Id="{a5239ea1-599b-4572-87dc-e1890577acbf}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_AxisManager
 VAR
-    fbAxis1 : FB_AxisControl;
 END_VAR]]></Declaration>
     <Implementation>
-      <ST><![CDATA[fbAxis1(
-    stConfig := GVL_AxisConfig.Axis1,
-    bControlAllowed := GVL_System.bControlAllowed,
-    AxisRef := GVL_AxisRef.Axis1,
-    stAxis := GVL_AxisRuntime.Axis1
-);]]></ST>
+      <ST><![CDATA[]]></ST>
     </Implementation>
   </POU>
 </TcPlcObject>

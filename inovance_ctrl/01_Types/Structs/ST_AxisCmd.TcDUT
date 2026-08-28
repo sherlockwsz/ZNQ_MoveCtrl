@@ -1,18 +1,30 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
   <DUT Name="ST_AxisCmd" Id="{bf7479eb-b665-403f-aa40-61f162a9ede9}">
-    <Declaration><![CDATA[TYPE ST_AxisCmd :
+    <Declaration><![CDATA[(*
+    单轴动作命令
+
+    bEnable、bStop、bJogPos、bJogNeg为持续型信号。
+    bReset、bMoveAbs、bMoveRel使用上升沿触发。
+*)
+TYPE ST_AxisCmd :
 STRUCT
-    bEnable  : BOOL;
-    bReset   : BOOL;
-    bStop    : BOOL;
-    bHome    : BOOL;
+    bEnable : BOOL;// 轴使能请求
+    // TRUE：请求使能；FALSE：请求撤销使能
 
-    bMoveRel : BOOL;
-    bMoveAbs : BOOL;
+    bReset : BOOL;    // 错误复位命令，上升沿触发
 
-    bJogPos  : BOOL;
-    bJogNeg  : BOOL;
+    bStop : BOOL;    // 停止请求
+    // TRUE期间MC_Stop保持锁定，恢复FALSE后解除锁定
+
+    bMoveAbs : BOOL;    // 绝对运动命令，上升沿触发
+
+    bMoveRel : BOOL;    // 相对运动命令，上升沿触发
+
+    bJogPos : BOOL;    // 正向点动，按住为TRUE，松开为FALSE
+
+    bJogNeg : BOOL;    // 反向点动，按住为TRUE，松开为FALSE
+
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

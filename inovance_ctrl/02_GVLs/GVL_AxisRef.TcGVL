@@ -8,7 +8,7 @@ VAR_GLOBAL
     // 当前只声明一根测试轴
     // 建立NC轴后，将PlcToNc和NcToPlc与NC轴链接
     // =====================================================
-    Axis1 : AXIS_REF;
+    Axis1Ref : AXIS_REF;			// TwinCAT NC轴引用
 END_VAR]]></Declaration>
   </GVL>
 </TcPlcObject>

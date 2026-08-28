@@ -1,0 +1,22 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="E_AxisRejectReason" Id="{8a61b545-a684-4bd4-92e7-ab03d2445362}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+//拒绝原因
+TYPE E_AxisRejectReason :
+(
+    NoReason             := 16#0000,
+    CommandConflict      := 16#0001, // 相对和绝对命令同时触发
+    AxisNotReady         := 16#0002, // 轴未准备好
+    NotHomed             := 16#0003, // 轴尚未回零
+    InvalidDynamics      := 16#0004, // 速度或加减速度非法
+    ResetDuringMotion    := 16#0005, // 运动或停止过程中禁止复位
+    HomeNotAllowed       := 16#0006, // 当前不允许回零
+    JogDirectionConflict := 16#0007, // 正负点动同时请求
+    TargetOutOfLimit     := 16#0008  // 目标位置超出软限位
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

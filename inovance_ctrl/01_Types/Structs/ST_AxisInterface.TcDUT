@@ -1,14 +1,14 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
   <DUT Name="ST_AxisInterface" Id="{bc384f07-bbf3-4f6c-845f-b9ff7ce0549c}">
-    <Declaration><![CDATA[TYPE ST_AxisInterface :
+    <Declaration><![CDATA[TYPE ST_AxisInterface ://汇总Cmd、Set、Data、State、Alarm
 STRUCT
-    Cmd       : ST_AxisCmd;
-    Set       : ST_AxisSet;
-    Data      : ST_AxisData;
-    State     : ST_AxisState;
-    Alarm     : ST_AxisAlarm;
-    Interlock : ST_AxisInterlock;
+    Cmd       : ST_AxisCmd;//动作命令
+    Set       : ST_AxisSet;//本次运动参数
+	
+    Data      : ST_AxisData;//实时数据
+    State     : ST_AxisState;//运行状态
+    Alarm     : ST_AxisAlarm;//报警信息
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

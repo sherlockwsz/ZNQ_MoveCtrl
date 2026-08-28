@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="E_AxisControlMode" Id="{1cbae697-5b63-4788-ae81-eb790552d7dd}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_AxisControlMode :
+(
+    Undefined := 0,   // 控制模式未知
+    Position  := 10,  // 位置控制模式
+    Velocity  := 20,  // 速度控制模式
+    Torque    := 30   // 力矩控制模式
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

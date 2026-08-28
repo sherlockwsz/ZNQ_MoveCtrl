@@ -1,0 +1,34 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="ST_AxisJogSet" Id="{5e9c52db-5618-46bb-abae-0784735bf49c}">
+    <Declaration><![CDATA[(*
+    点动动作及参数结构体
+
+    使用说明：
+    1. bPositive、bNegative是持续型信号，不是脉冲信号。
+    2. 上位机按下按钮时写TRUE，松开按钮时写FALSE。
+    3. 正负方向不允许同时为TRUE。
+    4. 点动速度必须大于0，否则MC_Jog会报参数错误。
+*)
+TYPE ST_AxisJogSet :
+STRUCT
+
+    //==========================================================
+    // 点动运动参数
+    //==========================================================
+
+    fVelocity : LREAL;
+    // 点动速度
+    // 单位取决于轴的缩放设置，直线轴通常为mm/s
+
+    fAcceleration : LREAL;
+    // 点动加速度
+    // 设置为0时，使用NC轴参数中的默认加速度
+
+    fDeceleration : LREAL;
+    // 点动减速度
+    // 设置为0时，使用NC轴参数中的默认减速度
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

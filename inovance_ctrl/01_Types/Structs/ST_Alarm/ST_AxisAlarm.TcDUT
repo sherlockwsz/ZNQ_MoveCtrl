@@ -3,14 +3,14 @@
   <DUT Name="ST_AxisAlarm" Id="{026c1a49-80b2-4404-8728-874d0f9ae498}">
     <Declaration><![CDATA[TYPE ST_AxisAlarm :
 STRUCT
-    bError       : BOOL;
-    nErrorID     : UDINT;
-    eErrorSource : E_AxisErrorSource;
+    bError       : BOOL;//轴总错误
+    nErrorID     : UDINT;//当前优先级最高的错误码
+    eErrorSource : E_AxisErrorSource;//错误来源
 
-    bWarning     : BOOL;
-    nWarningID   : UDINT;
+    bWarning     : BOOL;//警告标志
+    nWarningID   : UDINT;//警告码
 
-    nRejectReason : UDINT;
+    eRejectReason : E_AxisRejectReason;//命令拒绝原因
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

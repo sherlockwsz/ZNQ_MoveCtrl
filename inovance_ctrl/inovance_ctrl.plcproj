@@ -18,7 +18,28 @@
     <LibraryReferences>{019a77e5-ff0d-4ac9-99c8-1675a70892e9}</LibraryReferences>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="01_Types\Structs\ST_HmiComm.TcDUT">
+    <Compile Include="01_Types\Enums\E_AxisControlMode.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Enums\E_AxisRejectReason.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\ST_Alarm\ST_AxisAlarm.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\ST_AxisLimit.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\ST_Data\ST_AxisData.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\ST_JogAct\ST_AxisJogSet.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\ST_PositionAct\ST_PositionSet.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\ST_State\ST_AxisState.TcDUT">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="02_GVLs\GVL_AxisConfig.TcGVL">
@@ -83,19 +104,7 @@
     <Compile Include="01_Types\Enums\E_AxisMotionState.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\E_MachineMode.TcDUT">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="01_Types\Structs\ST_AxisAlarm.TcDUT">
-      <SubType>Code</SubType>
-    </Compile>
     <Compile Include="01_Types\Structs\ST_AxisCmd.TcDUT">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="01_Types\Structs\ST_AxisConfig.TcDUT">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="01_Types\Structs\ST_AxisData.TcDUT">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="01_Types\Structs\ST_AxisInterface.TcDUT">
@@ -107,11 +116,13 @@
     <Compile Include="01_Types\Structs\ST_AxisSet.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\ST_AxisState.TcDUT">
-      <SubType>Code</SubType>
-    </Compile>
   </ItemGroup>
   <ItemGroup>
+    <Folder Include="01_Types\Structs\ST_State" />
+    <Folder Include="01_Types\Structs\ST_Data" />
+    <Folder Include="01_Types\Structs\ST_Alarm" />
+    <Folder Include="01_Types\Structs\ST_PositionAct" />
+    <Folder Include="01_Types\Structs\ST_JogAct" />
     <Folder Include="02_GVLs" />
     <Folder Include="03_AxisControl" />
     <Folder Include="05_Sequences" />

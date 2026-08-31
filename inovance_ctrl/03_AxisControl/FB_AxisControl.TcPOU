@@ -265,7 +265,6 @@ M_UpdateMotionState(
     ioAxis    := stAxis
 );
 
-
 //==============================================================
 // 11. 更新轴实时数据
 //
@@ -275,6 +274,20 @@ M_UpdateMotionState(
 M_UpdateAxisData(
     ioAxisRef := AxisRef,
     ioAxis    := stAxis
+);
+//==============================================================
+// 12. 更新运动方向
+//
+// 使用本周期最新的：
+// 1. eMotionState；
+// 2. fActVelocity；
+// 3. fSetVelocity。
+//
+// 必须放在M_UpdateMotionState和M_UpdateAxisData之后。
+//==============================================================
+
+M_UpdateMotionDirection(
+    ioAxis := stAxis
 );]]></ST>
     </Implementation>
     <Method Name="M_ClearCycleResults" Id="{b0100f26-6f1e-463a-8206-ad01d5a00796}">
@@ -1463,6 +1476,132 @@ ELSIF fbMoveRel.Error THEN
 
     ioAxis.Alarm.eErrorSource :=
         E_AxisErrorSource.MoveRelative;
+
+END_IF;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_UpdateMotionDirection" Id="{ef82fa8e-8387-4d59-b60a-cdad9b7d7a20}">
+      <Declaration><![CDATA[//==============================================================
+// 方法名称：M_UpdateMotionDirection
+//
+// 功能：
+// 1. 根据轴当前运动状态判断是否需要输出运动方向；
+// 2. 优先使用NC实际速度判断方向；
+// 3. 运动刚启动、实际速度尚未建立时，使用NC设定速度辅助判断；
+// 4. 停止、故障、未使能等状态统一输出None；
+// 5. 不使用目标位置，避免中途停止后旧目标造成方向状态残留。
+//
+// 调用位置：
+// 必须在M_UpdateMotionState和M_UpdateAxisData之后调用。
+//==============================================================
+
+METHOD PRIVATE M_UpdateMotionDirection
+
+VAR_IN_OUT
+    ioAxis : ST_AxisInterface;
+    // 当前单轴命令、数据和状态接口
+END_VAR
+
+VAR CONSTANT
+    // 速度方向判断死区。
+    //
+    // 防止轴在零速附近因浮点波动频繁切换正负方向。
+    // 当前单位取决于轴的工程单位，Axis1直线轴通常为mm/s。
+    c_fVelocityDeadband : LREAL := 0.01;
+END_VAR
+
+VAR
+    // 最终用于判断正负方向的速度。
+    fDirectionVelocity : LREAL;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[//==============================================================
+// 1. 每周期默认清除方向
+//
+// 先写None可以保证：
+// 1. 轴停止后不会保留上一次运动方向；
+// 2. 故障、掉使能和复位时不会显示旧方向；
+// 3. 方法后续即使没有满足方向条件，状态也始终明确。
+//==============================================================
+
+ioAxis.State.eMotionDirection :=
+    E_AxisMotionDirection.None;
+
+
+//==============================================================
+// 2. 只在定位运动或点动期间判断方向
+//
+// Stopping状态由WPF显示为“停止中”；
+// Standstill状态由WPF显示为“停止”；
+// 因此这些状态不再输出Positive或Negative。
+//==============================================================
+
+IF
+    (ioAxis.State.eMotionState = E_AxisMotionState.Moving)
+    OR
+    (ioAxis.State.eMotionState = E_AxisMotionState.Jogging)
+THEN
+
+    //==========================================================
+    // 3. 优先使用实际速度
+    //
+    // 实际速度能够反映轴真正运动的方向，
+    // 不会受到旧目标位置或点动NC目标位置的影响。
+    //==========================================================
+
+    fDirectionVelocity :=
+        ioAxis.Data.fActVelocity;
+
+
+    //==========================================================
+    // 4. 实际速度尚未建立时使用设定速度
+    //
+    // 运动命令刚被接受的前几个PLC周期中，
+    // eMotionState可能已经是Moving或Jogging，
+    // 但实际速度仍然接近0。
+    //
+    // 此时使用NC设定速度可以尽早显示运动方向。
+    //==========================================================
+
+    IF
+        ABS(fDirectionVelocity)
+        <= c_fVelocityDeadband
+    THEN
+
+        fDirectionVelocity :=
+            ioAxis.Data.fSetVelocity;
+
+    END_IF;
+
+
+    //==========================================================
+    // 5. 根据速度正负生成统一方向状态
+    //==========================================================
+
+    IF
+        fDirectionVelocity
+        > c_fVelocityDeadband
+    THEN
+
+        ioAxis.State.eMotionDirection :=
+            E_AxisMotionDirection.Positive;
+
+    ELSIF
+        fDirectionVelocity
+        < -c_fVelocityDeadband
+    THEN
+
+        ioAxis.State.eMotionDirection :=
+            E_AxisMotionDirection.Negative;
+
+    ELSE
+
+        // Moving/Jogging已经建立，但实际速度和设定速度
+        // 暂时都处于零速死区，例如刚启动或即将停止。
+        ioAxis.State.eMotionDirection :=
+            E_AxisMotionDirection.None;
+
+    END_IF;
 
 END_IF;]]></ST>
       </Implementation>

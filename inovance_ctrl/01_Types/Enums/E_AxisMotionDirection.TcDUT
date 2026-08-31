@@ -1,0 +1,24 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="E_AxisMotionDirection" Id="{5a3330c8-45a1-4db0-8902-1de188df895f}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+
+TYPE E_AxisMotionDirection :
+(
+    // 当前没有有效的正负方向。
+    // 停止、未使能、故障、复位等状态均使用None。
+    None := 0,
+
+    // 轴坐标正方向。
+    // WPF根据轴定义映射成前移、左移、上移、顺时针或夹紧。
+    Positive := 10,
+
+    // 轴坐标负方向。
+    // WPF根据轴定义映射成后移、右移、下移、逆时针或松开。
+    Negative := 20
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

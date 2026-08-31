@@ -3,7 +3,17 @@
   <GVL Name="GVL_System" Id="{e087346e-e6fe-4094-b4e2-6f8a98151646}">
     <Declaration><![CDATA[{attribute 'qualified_only'}
 VAR_GLOBAL
+    //==========================================================
+    // HMI通信看门狗配置
+    //==========================================================
 
+    // 初次增加程序时保持FALSE。
+    // 确认WPF已经能够稳定写入心跳后，再改为TRUE。
+    bUseHmiWatchdog : BOOL := FALSE;
+
+    // WPF心跳超过2秒没有变化，判定通信失效。
+    // WPF建议每250～500ms更新一次。
+    tHmiWatchdogTimeout : TIME := T#2S;
 END_VAR]]></Declaration>
   </GVL>
 </TcPlcObject>

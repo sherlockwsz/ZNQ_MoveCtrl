@@ -17,16 +17,16 @@ STRUCT
     // 点动运动参数
     //==========================================================
 
-    fVelocity : LREAL;
-    // 点动速度
+    fVelocity : LREAL;// 点动速度
+    
     // 单位取决于轴的缩放设置，直线轴通常为mm/s
 
-    fAcceleration : LREAL;
-    // 点动加速度
+    fAcceleration : LREAL;// 点动加速度
+    
     // 设置为0时，使用NC轴参数中的默认加速度
 
-    fDeceleration : LREAL;
-    // 点动减速度
+    fDeceleration : LREAL;// 点动减速度
+    
     // 设置为0时，使用NC轴参数中的默认减速度
 END_STRUCT
 END_TYPE]]></Declaration>

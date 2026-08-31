@@ -20,42 +20,42 @@ STRUCT
     // 当前周期汇总状态
     //==========================================================
 
-    bMotionActive : BOOL;
-    // 点动或定位运动是否处于有效状态
+    bMotionActive : BOOL;// 点动或定位运动是否处于有效状态
+    
     // 包含MC功能块Busy和定位Execute锁存阶段
 
-    bAnyBusy : BOOL;
-    // 复位、停止、点动或定位是否有任一命令正在执行
+    bAnyBusy : BOOL;// 复位、停止、点动或定位是否有任一命令正在执行
+    
 
 
     //==========================================================
     // 停止控制
     //==========================================================
 
-    bStopRequest : BOOL;
-    // 当前周期是否存在停止请求
+    bStopRequest : BOOL;// 当前周期是否存在停止请求
+    
 
-    bStopExecute : BOOL;
-    // MC_Stop.Execute跨周期锁存信号
+    bStopExecute : BOOL;// MC_Stop.Execute跨周期锁存信号
+    
 
 
     //==========================================================
     // 命令仲裁
     //==========================================================
 
-    eRequestedCommand : E_AxisCommand;
-    // M_SelectCommand产生的唯一命令
+    eRequestedCommand : E_AxisCommand;// M_SelectCommand产生的唯一命令
+    
 
 
     //==========================================================
     // 定位Execute锁存
     //==========================================================
 
-    bMoveAbsExecute : BOOL;
-    // MC_MoveAbsolute.Execute锁存
+    bMoveAbsExecute : BOOL;// MC_MoveAbsolute.Execute锁存
+    
 
-    bMoveRelExecute : BOOL;
-    // MC_MoveRelative.Execute锁存
+    bMoveRelExecute : BOOL;// MC_MoveRelative.Execute锁存
+    
 
     // 由M_UpdateSoftLimitState每周期更新
 END_STRUCT

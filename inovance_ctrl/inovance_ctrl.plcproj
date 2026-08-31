@@ -21,6 +21,9 @@
     <Compile Include="01_Types\Enums\E_AxisControlMode.TcDUT">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="01_Types\Enums\E_AxisMotionDirection.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="01_Types\Enums\E_AxisRejectReason.TcDUT">
       <SubType>Code</SubType>
     </Compile>
@@ -28,6 +31,9 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="01_Types\Structs\ST_Data\ST_AxisData.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\ST_HmiCommunication.TcDUT">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="01_Types\Structs\ST_Internal\ST_AxisControlInternal.TcDUT">

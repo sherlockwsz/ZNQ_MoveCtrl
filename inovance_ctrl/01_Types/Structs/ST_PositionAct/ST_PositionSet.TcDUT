@@ -13,12 +13,12 @@ STRUCT
     // 位置参数
     //==========================================================
 
-    fAbsolutePosition : LREAL;
-    // 绝对目标位置
+    fAbsolutePosition : LREAL;// 绝对目标位置
+    
     // 对应MC_MoveAbsolute.Position
 
-    fRelativeDistance : LREAL;
-    // 相对移动距离
+    fRelativeDistance : LREAL;// 相对移动距离
+    
     // 对应MC_MoveRelative.Distance
     // 正数表示正向移动，负数表示反向移动
 
@@ -27,14 +27,14 @@ STRUCT
     // 公共运动参数
     //==========================================================
 
-    fVelocity : LREAL;
-    // 最大运动速度，必须大于0
+    fVelocity : LREAL;// 最大运动速度，必须大于0
+    
 
-    fAcceleration : LREAL;
-    // 加速度，设置为0时使用NC轴默认值
+    fAcceleration : LREAL;// 加速度，设置为0时使用NC轴默认值
+    
 
-    fDeceleration : LREAL;
-    // 减速度，设置为0时使用NC轴默认值
+    fDeceleration : LREAL;// 减速度，设置为0时使用NC轴默认值
+    
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

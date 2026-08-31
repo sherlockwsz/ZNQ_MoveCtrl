@@ -1,0 +1,34 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="ST_HmiCommunication" Id="{c2554544-8e4d-4c6f-9f0b-a897755ca2a1}">
+    <Declaration><![CDATA[(*
+    HMI与PLC之间的通信状态。
+
+    写入方向：
+    udiHeartbeat：WPF写入，PLC读取。
+
+    反馈方向：
+    其余变量由PLC写入，WPF只读取。
+*)
+TYPE ST_HmiCommunication :
+STRUCT
+    // WPF周期递增的心跳计数。
+    // 建议每250～500ms增加1。
+    udiHeartbeat : UDINT;
+
+    // PLC已经检测到有效心跳。
+    bOnline : BOOL;
+
+    // 心跳超过规定时间没有变化。
+    bTimeout : BOOL;
+
+    // 当前是否允许HMI控制轴。
+    bControlAllowed : BOOL;
+
+    // 通信恢复后，要求旧命令全部复位。
+    // 防止重连后遗留的点动或定位命令重新生效。
+    bRequireEnableReset : BOOL;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

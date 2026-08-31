@@ -3,7 +3,8 @@
   <GVL Name="GVL_HMI" Id="{65f78e28-9d20-414e-8a89-341c4c061362}">
     <Declaration><![CDATA[{attribute 'qualified_only'}
 VAR_GLOBAL
-
+    // WPF与PLC的通信握手、心跳及看门狗反馈。
+    Comm : ST_HmiCommunication;
 END_VAR]]></Declaration>
   </GVL>
 </TcPlcObject>

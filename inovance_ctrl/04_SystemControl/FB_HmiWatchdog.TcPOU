@@ -2,11 +2,211 @@
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
   <POU Name="FB_HmiWatchdog" Id="{df81b304-bd24-448b-8153-41afa23e1505}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_HmiWatchdog
-VAR
 
+VAR_INPUT
+    // 是否启用HMI通信看门狗。
+    // FALSE时旁路看门狗，保持原来的调试行为。
+    bEnable : BOOL;
+
+    // WPF周期递增的心跳计数。
+    udiHeartbeat : UDINT;
+
+    // 心跳超时时间。
+    tTimeout : TIME;
+
+    // Axis1所有控制命令是否已经恢复到安全状态。
+    // 通信恢复后，只有该条件成立才重新开放控制。
+    bCommandsSafe : BOOL;
+END_VAR
+
+VAR_OUTPUT
+    // 已经检测到WPF有效心跳。
+    bOnline : BOOL;
+
+    // 心跳超时。
+    bTimeout : BOOL;
+
+    // 提供给FB_AxisControl的最终控制许可。
+    bControlAllowed : BOOL;
+
+    // 通信恢复后是否仍在等待旧命令清零。
+    bRequireEnableReset : BOOL;
+END_VAR
+
+VAR
+    // 上一次检测到的心跳值。
+    udiLastHeartbeat : UDINT;
+
+    // 是否至少检测到一次心跳变化。
+    bHeartbeatSeen : BOOL;
+
+    // 本周期心跳是否变化。
+    bHeartbeatChanged : BOOL;
+
+    // 上一周期看门狗使能状态。
+    // 用于检测看门狗从FALSE变为TRUE。
+    bPreviousEnable : BOOL;
+
+    // 实际采用的超时时间。
+    tEffectiveTimeout : TIME;
+
+    // 心跳超时定时器。
+    fbHeartbeatTimeout : TON;
 END_VAR]]></Declaration>
     <Implementation>
-      <ST><![CDATA[]]></ST>
+      <ST><![CDATA[//==============================================================
+// 1. 校验超时时间
+//
+// 防止外部误把超时时间设置为0，导致看门狗立即超时。
+//==============================================================
+
+IF tTimeout <= T#0MS THEN
+    tEffectiveTimeout := T#2S;
+ELSE
+    tEffectiveTimeout := tTimeout;
+END_IF;
+
+
+//==============================================================
+// 2. 看门狗未启用
+//
+// 调试阶段允许正常控制Axis1。
+// 同时复位看门狗内部状态。
+//==============================================================
+
+IF NOT bEnable THEN
+
+    fbHeartbeatTimeout(
+        IN := FALSE,
+        PT := tEffectiveTimeout
+    );
+
+    // 保存当前心跳，避免以后启用时把旧值误认为新心跳。
+    udiLastHeartbeat := udiHeartbeat;
+
+    bHeartbeatSeen := FALSE;
+    bHeartbeatChanged := FALSE;
+
+    // 看门狗旁路时不阻止当前单轴调试。
+    bOnline := TRUE;
+    bTimeout := FALSE;
+    bControlAllowed := TRUE;
+    bRequireEnableReset := FALSE;
+
+
+//==============================================================
+// 3. 看门狗已启用
+//==============================================================
+
+ELSE
+
+    //==========================================================
+    // 3.1 看门狗刚刚启用
+    //
+    // 必须等待一次新的心跳，并确认旧命令已经清零。
+    //==========================================================
+
+    IF NOT bPreviousEnable THEN
+        bHeartbeatSeen := FALSE;
+        bRequireEnableReset := TRUE;
+    END_IF;
+
+
+    //==========================================================
+    // 3.2 检测心跳变化
+    //==========================================================
+
+    bHeartbeatChanged :=
+        udiHeartbeat <> udiLastHeartbeat;
+
+
+    //==========================================================
+    // 3.3 心跳发生变化
+    //
+    // 保存新值并复位超时定时器。
+    //==========================================================
+
+    IF bHeartbeatChanged THEN
+
+        udiLastHeartbeat := udiHeartbeat;
+        bHeartbeatSeen := TRUE;
+
+        fbHeartbeatTimeout(
+            IN := FALSE,
+            PT := tEffectiveTimeout
+        );
+
+
+    //==========================================================
+    // 3.4 心跳没有变化
+    //
+    // 启动或继续累计超时时间。
+    //==========================================================
+
+    ELSE
+
+        fbHeartbeatTimeout(
+            IN := TRUE,
+            PT := tEffectiveTimeout
+        );
+
+    END_IF;
+
+
+    //==========================================================
+    // 3.5 生成通信状态
+    //==========================================================
+
+    bTimeout := fbHeartbeatTimeout.Q;
+
+    bOnline :=
+        bHeartbeatSeen
+        AND NOT bTimeout;
+
+
+    //==========================================================
+    // 3.6 超时或尚未收到心跳
+    //
+    // 锁存重新授权要求。
+    // 即使通信恢复，也不能让旧命令立即重新生效。
+    //==========================================================
+
+    IF NOT bOnline THEN
+
+        bRequireEnableReset := TRUE;
+
+
+    //==========================================================
+    // 3.7 通信已经恢复且命令全部清零
+    //
+    // 解除重新授权锁存。
+    // 注意：Axis1的bEnable已被MAIN清零，
+    // 操作员仍然需要重新点击使能按钮。
+    //==========================================================
+
+    ELSIF
+        bRequireEnableReset
+        AND bCommandsSafe
+    THEN
+
+        bRequireEnableReset := FALSE;
+
+    END_IF;
+
+
+    //==========================================================
+    // 3.8 最终HMI控制许可
+    //==========================================================
+
+    bControlAllowed :=
+        bOnline
+        AND NOT bRequireEnableReset;
+
+END_IF;
+
+
+// 保存本周期使能状态，供下一周期检测上升沿。
+bPreviousEnable := bEnable;]]></ST>
     </Implementation>
   </POU>
 </TcPlcObject>

@@ -3,23 +3,233 @@
   <POU Name="MAIN" Id="{de82ff6c-f728-4f8e-8227-437e5e880436}" SpecialFunc="None">
     <Declaration><![CDATA[PROGRAM MAIN
 VAR
+    // Axis1单轴控制功能块。
     fbAxis1 : FB_AxisControl;
+
+    // HMI通信看门狗功能块。
+    // 只能在M_UpdateHmiWatchdog中每周期调用一次。
+    fbHmiWatchdog : FB_HmiWatchdog;
+
+    // Axis1所有外部命令是否已经恢复到安全状态。
+    bAxis1CommandsSafe : BOOL;
+
+    // 看门狗计算出的最终HMI控制许可。
+    bHmiControlAllowed : BOOL;
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[(*
-    最小单轴调试主程序
+    最小单轴调试主程序。
 
-    初期直接使用GVL_AxisRuntime.Axis1作为ADS接口：
-    上位机写入Cmd和Set；
-    上位机读取Data、State和Alarm。
+    调用顺序：
+    1. 更新HMI看门狗和控制许可；
+    2. 调用Axis1控制功能块。
+
+    顺序不能颠倒：
+    看门狗必须先清理命令并生成控制许可，
+    FB_AxisControl再根据许可执行停止、掉使能和普通运动。
 *)
 
+
+//==============================================================
+// 1. 更新HMI看门狗
+//
+// 方法每周期只能调用一次。
+// 返回值保存到变量中，便于在线监控。
+//==============================================================
+
+bHmiControlAllowed :=
+    M_UpdateHmiWatchdog();
+
+
+//==============================================================
+// 2. 调用Axis1控制功能块
+//==============================================================
+
 fbAxis1(
-    bControlAllowed := TRUE,//可以被控制
-    stLimit         := GVL_AxisConfig.Axis1Limit,// 当前轴的软件限位配置
-    AxisRef         := GVL_AxisRef.Axis1Ref,// 当前NC轴引用
-    stAxis          := GVL_AxisRuntime.Axis1// 当前轴命令、参数和反馈接口
+    bControlAllowed :=
+        bHmiControlAllowed,
+
+    stLimit :=
+        GVL_AxisConfig.Axis1Limit,
+
+    AxisRef :=
+        GVL_AxisRef.Axis1Ref,
+
+    stAxis :=
+        GVL_AxisRuntime.Axis1
 );]]></ST>
     </Implementation>
+    <Method Name="M_ClearAxisCommands" Id="{46b36327-834f-407b-80ce-eb6287b2429b}">
+      <Declaration><![CDATA[//==============================================================
+// 方法名称：M_ClearAxisCommands
+//
+// 功能：
+// 清除指定单轴的全部外部控制命令。
+//
+// 使用场景：
+// 1. HMI心跳超时；
+// 2. ADS通信失效；
+// 3. 系统退出手动控制；
+// 4. 模式切换时撤销旧命令；
+// 5. 后续安全联锁触发。
+//
+// 注意：
+// 1. 只修改ST_AxisCmd，不修改运动参数和反馈状态；
+// 2. bStop同样恢复FALSE；
+// 3. 受控停止由FB_AxisControl根据bControlAllowed完成。
+//==============================================================
+
+METHOD PRIVATE M_ClearAxisCommands
+
+VAR_IN_OUT
+    // 指定轴的外部命令结构。
+    ioCmd : ST_AxisCmd;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[//==============================================================
+// 1. 撤销轴使能请求
+//
+// 如果轴正在运动，FB_AxisControl会先执行MC_Stop，
+// 停止完成后再真正撤销MC_Power。
+//==============================================================
+
+ioCmd.bEnable := FALSE;
+
+
+//==============================================================
+// 2. 清除上升沿命令
+//
+// 防止通信恢复后旧的定位或复位信号重新产生上升沿。
+//==============================================================
+
+ioCmd.bReset := FALSE;
+ioCmd.bMoveAbs := FALSE;
+ioCmd.bMoveRel := FALSE;
+
+
+//==============================================================
+// 3. 清除保持型点动命令
+//
+// 点动命令必须优先清除，防止WPF在按钮按下期间崩溃后，
+// PLC继续接收到保持为TRUE的点动请求。
+//==============================================================
+
+ioCmd.bJogPos := FALSE;
+ioCmd.bJogNeg := FALSE;
+
+
+//==============================================================
+// 4. 外部停止请求恢复FALSE
+//
+// 不要在看门狗超时期间持续保持bStop=TRUE。
+// FB_AxisControl会使用bControlAllowed=FALSE自动锁存停止请求。
+//
+// 如果持续保持bStop=TRUE，MC_Stop完成后可能无法释放，
+// MC_Power也可能因为停止锁存而继续保持使能。
+//==============================================================
+
+ioCmd.bStop := FALSE;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_UpdateHmiWatchdog" Id="{7a4660c9-2255-49fc-ac08-35f03b40b4a0}">
+      <Declaration><![CDATA[//==============================================================
+// 方法名称：M_UpdateHmiWatchdog
+//
+// 功能：
+// 1. 检查Axis1外部命令是否全部复位；
+// 2. 调用HMI心跳看门狗；
+// 3. 将看门狗结果发布到GVL_HMI；
+// 4. 控制许可失效时清除Axis1命令；
+// 5. 返回最终HMI控制许可。
+//
+// 返回值：
+// TRUE  = 允许HMI控制Axis1；
+// FALSE = 禁止HMI控制Axis1。
+//==============================================================
+
+METHOD PRIVATE M_UpdateHmiWatchdog : BOOL]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[//==============================================================
+// 1. 检查Axis1命令是否全部处于安全状态
+//
+// 通信恢复后，只有这些命令全部为FALSE，
+// 才能重新开放HMI控制。
+//==============================================================
+
+bAxis1CommandsSafe :=
+    NOT GVL_AxisRuntime.Axis1.Cmd.bEnable
+    AND NOT GVL_AxisRuntime.Axis1.Cmd.bReset
+    AND NOT GVL_AxisRuntime.Axis1.Cmd.bStop
+    AND NOT GVL_AxisRuntime.Axis1.Cmd.bMoveAbs
+    AND NOT GVL_AxisRuntime.Axis1.Cmd.bMoveRel
+    AND NOT GVL_AxisRuntime.Axis1.Cmd.bJogPos
+    AND NOT GVL_AxisRuntime.Axis1.Cmd.bJogNeg;
+
+
+//==============================================================
+// 2. 调用HMI看门狗
+//
+// FB_HmiWatchdog必须每个PLC周期只调用一次。
+// 不要在MAIN或其他方法中再次调用同一个实例。
+//==============================================================
+
+fbHmiWatchdog(
+    bEnable :=
+        GVL_System.bUseHmiWatchdog,
+
+    udiHeartbeat :=
+        GVL_HMI.Comm.udiHeartbeat,
+
+    tTimeout :=
+        GVL_System.tHmiWatchdogTimeout,
+
+    bCommandsSafe :=
+        bAxis1CommandsSafe
+);
+
+
+//==============================================================
+// 3. 发布看门狗状态
+//
+// 供WPF读取和界面显示。
+//==============================================================
+
+GVL_HMI.Comm.bOnline :=
+    fbHmiWatchdog.bOnline;
+
+GVL_HMI.Comm.bTimeout :=
+    fbHmiWatchdog.bTimeout;
+
+GVL_HMI.Comm.bControlAllowed :=
+    fbHmiWatchdog.bControlAllowed;
+
+GVL_HMI.Comm.bRequireEnableReset :=
+    fbHmiWatchdog.bRequireEnableReset;
+
+
+//==============================================================
+// 4. HMI控制许可失效时清除Axis1命令
+//
+// 具体清除内容统一封装在M_ClearAxisCommands中。
+// 后续增加其他轴时可直接复用该方法。
+//==============================================================
+
+IF NOT fbHmiWatchdog.bControlAllowed THEN
+
+    M_ClearAxisCommands(
+        ioCmd := GVL_AxisRuntime.Axis1.Cmd
+    );
+
+END_IF;
+
+
+//==============================================================
+// 5. 返回最终控制许可
+//==============================================================
+
+M_UpdateHmiWatchdog :=
+    fbHmiWatchdog.bControlAllowed;]]></ST>
+      </Implementation>
+    </Method>
   </POU>
 </TcPlcObject>

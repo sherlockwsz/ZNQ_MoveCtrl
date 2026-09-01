@@ -9,22 +9,17 @@ VAR_GLOBAL
     // 当前数值仅为示例。
     // 接入实际电机前，必须修改为真实机械行程。
     //==========================================================
-
     Axis1Limit : ST_AxisLimit := (
-        // 当前先保持FALSE。
-        // 确认真实行程和坐标方向后再改为TRUE。
-        bSoftLimitEnable := TRUE,
-
-		// 当前模拟轴没有执行MC_Home，因此不要求回零
-		// 实际增量编码器轴应在加入回零后改为TRUE
-		bRequireHomed := FALSE,
+        bSoftLimitEnable := TRUE,//软限位是否使能
 		
-        // 示例范围：-1000～1000工程单位
+		// 实际增量编码器轴应在加入回零后改为TRUE
+		bRequireHomed := FALSE,// 当前模拟轴没有执行MC_Home，因此不要求回零
+		
+        // 示例范围：0～600工程单位
         fSoftwareLimitNeg := 0.0,
         fSoftwareLimitPos := 600.0,
-
-        // 距离限位5个工程单位时停止继续向外点动
-        fSoftLimitMargin := 5.0
+		
+        fSoftLimitMargin := 5.0// 距离限位5个工程单位时停止继续向外点动
     );
 END_VAR]]></Declaration>
   </GVL>

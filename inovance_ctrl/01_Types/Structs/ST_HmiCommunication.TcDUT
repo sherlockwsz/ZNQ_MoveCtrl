@@ -12,22 +12,18 @@
 *)
 TYPE ST_HmiCommunication :
 STRUCT
-    // WPF周期递增的心跳计数。
+    
     // 建议每250～500ms增加1。
-    udiHeartbeat : UDINT;
-
-    // PLC已经检测到有效心跳。
-    bOnline : BOOL;
-
-    // 心跳超过规定时间没有变化。
-    bTimeout : BOOL;
-
-    // 当前是否允许HMI控制轴。
-    bControlAllowed : BOOL;
-
-    // 通信恢复后，要求旧命令全部复位。
+    udiHeartbeat : UDINT;// WPF周期递增的心跳计数。
+    
+    bOnline : BOOL;// PLC已经检测到有效心跳。
+    
+    bTimeout : BOOL;// 心跳超过规定时间没有变化。
+    
+    bControlAllowed : BOOL;// 当前是否允许HMI控制轴。
+    
     // 防止重连后遗留的点动或定位命令重新生效。
-    bRequireEnableReset : BOOL;
+    bRequireEnableReset : BOOL;// 通信恢复后，要求旧命令全部复位。
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

@@ -1612,7 +1612,7 @@ External Setpoint Generation:
 		</Motion>
 		<Plc>
 			<Project GUID="{EA67B656-2FC5-4A9C-A62D-78AA627F7844}" Name="inovance_ctrl" PrjFilePath="inovance_ctrl\inovance_ctrl.plcproj" TmcFilePath="inovance_ctrl\inovance_ctrl.tmc" ReloadTmc="true" AmsPort="851" FileArchiveSettings="#x000e" SymbolicMapping="true">
-				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcHash="{D3462880-BEDD-7D9B-36CF-7C5545F75EB8}" TmcPath="inovance_ctrl\inovance_ctrl.tmc">
+				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcHash="{BC774AE2-6B4D-9B11-7F5A-5741D46361BC}" TmcPath="inovance_ctrl\inovance_ctrl.tmc">
 					<Name>inovance_ctrl Instance</Name>
 					<CLSID ClassFactory="TcPlc30">{08500001-0000-0000-F000-000000000064}</CLSID>
 					<Vars VarGrpType="2" AreaNo="1">

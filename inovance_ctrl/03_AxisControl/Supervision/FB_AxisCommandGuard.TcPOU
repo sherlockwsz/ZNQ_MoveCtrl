@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <POU Name="FB_AxisCommandGuard" Id="{7cfd58f3-d9dc-4e70-9f98-d249022d8f85}" SpecialFunc="None">
+    <Declaration><![CDATA[//==============================================================
+// 单轴外部命令保护
+//
+// 职责：
+// 1. 通信无效时清除指定轴的全部外部命令；
+// 2. 锁存通信恢复后的命令复位要求；
+// 3. 旧命令全部清零后重新开放控制；
+// 4. 不直接调用任何PLCopen运动功能块。
+//==============================================================
+
+FUNCTION_BLOCK FB_AxisCommandGuard
+
+VAR_INPUT
+    bProtectionEnabled : BOOL;     // 是否启用HMI通信保护
+    bCommunicationOnline : BOOL;   // FB_HmiWatchdog输出的在线状态
+END_VAR
+
+VAR_IN_OUT
+    ioCmd : ST_AxisCmd;            // 需要保护的单轴外部命令
+END_VAR
+
+VAR_OUTPUT
+    bCommandsSafe : BOOL;          // 本周期进入FB时命令是否全部为FALSE
+    bControlAllowed : BOOL;        // 提供给FB_AxisControl的最终控制许可
+    bRequireEnableReset : BOOL;    // 通信恢复后是否等待旧命令清零
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[//==============================================================
+// 1. 先检查命令状态
+//
+// 必须在清理前检查，使通信恢复后至少经过一个完整PLC周期，
+// 防止清理和重新授权在同一扫描周期内同时完成。
+//==============================================================
+bCommandsSafe := M_AreCommandsSafe(
+    iCmd := ioCmd
+);
+
+
+//==============================================================
+// 2. 生成重新授权锁存和最终控制许可
+//==============================================================
+IF NOT bProtectionEnabled THEN
+    bRequireEnableReset := FALSE;
+    bControlAllowed := TRUE;
+ELSE
+    IF NOT bCommunicationOnline THEN
+        bRequireEnableReset := TRUE;
+    ELSIF bRequireEnableReset AND bCommandsSafe THEN
+        bRequireEnableReset := FALSE;
+    END_IF;
+
+    bControlAllowed :=
+        bCommunicationOnline
+        AND NOT bRequireEnableReset;
+END_IF;
+
+
+//==============================================================
+// 3. 许可无效时统一清理外部命令
+//==============================================================
+IF NOT bControlAllowed THEN
+    M_ClearCommands(
+        ioCmd := ioCmd
+    );
+END_IF;]]></ST>
+    </Implementation>
+    <Method Name="M_AreCommandsSafe" Id="{14fbffeb-c64f-4cc2-9ea3-29e31b274409}">
+      <Declaration><![CDATA[METHOD PRIVATE M_AreCommandsSafe : BOOL
+VAR_INPUT
+    iCmd : ST_AxisCmd;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_AreCommandsSafe :=
+    NOT iCmd.bEnable
+    AND NOT iCmd.bReset
+    AND NOT iCmd.bStop
+    AND NOT iCmd.bMoveAbs
+    AND NOT iCmd.bMoveRel
+    AND NOT iCmd.bJogPos
+    AND NOT iCmd.bJogNeg;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ClearCommands" Id="{fa777cdb-175b-4e5f-af64-a332007c3aae}">
+      <Declaration><![CDATA[METHOD PRIVATE M_ClearCommands
+VAR_IN_OUT
+    ioCmd : ST_AxisCmd;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// 撤销持续型使能和停止请求。
+ioCmd.bEnable := FALSE;
+ioCmd.bStop := FALSE;
+
+// 清除上升沿命令，防止重连后重新触发。
+ioCmd.bReset := FALSE;
+ioCmd.bMoveAbs := FALSE;
+ioCmd.bMoveRel := FALSE;
+
+// 清除保持型点动命令，避免HMI失联后继续点动。
+ioCmd.bJogPos := FALSE;
+ioCmd.bJogNeg := FALSE;]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

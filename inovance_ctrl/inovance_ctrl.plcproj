@@ -18,87 +18,101 @@
     <LibraryReferences>{019a77e5-ff0d-4ac9-99c8-1675a70892e9}</LibraryReferences>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="01_Types\Enums\E_AxisControlMode.TcDUT">
+    <Compile Include="01_Types\Enums\Axes\Commands\E_AxisCommand.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\E_AxisMotionDirection.TcDUT">
+    <Compile Include="01_Types\Enums\Axes\States\E_AxisMotionDirection.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\E_AxisRejectReason.TcDUT">
+    <Compile Include="01_Types\Enums\Axes\States\E_AxisMotionState.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\ST_Alarm\ST_AxisAlarm.TcDUT">
+    <Compile Include="01_Types\Enums\Axes\Modes\E_AxisControlMode.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\ST_Data\ST_AxisData.TcDUT">
+    <Compile Include="01_Types\Enums\Axes\Alarms\E_AxisErrorSource.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\ST_HmiCommunication.TcDUT">
+    <Compile Include="01_Types\Enums\Axes\Alarms\E_AxisRejectReason.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\ST_Internal\ST_AxisControlInternal.TcDUT">
+    <Compile Include="01_Types\Structs\Axes\Commands\ST_AxisCmd.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\ST_JogAct\ST_AxisJogSet.TcDUT">
+    <Compile Include="01_Types\Structs\Axes\Settings\ST_AxisJogSet.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\ST_Limit\ST_AxisLimit.TcDUT">
+    <Compile Include="01_Types\Structs\Axes\Settings\ST_PositionSet.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\ST_Limit\ST_AxisSoftLimitResult.TcDUT">
+    <Compile Include="01_Types\Structs\Axes\Settings\ST_AxisSet.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\ST_PositionAct\ST_PositionSet.TcDUT">
+    <Compile Include="01_Types\Structs\Axes\Feedback\ST_AxisData.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\ST_State\ST_AxisState.TcDUT">
+    <Compile Include="01_Types\Structs\Axes\Feedback\ST_AxisState.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="02_GVLs\GVL_AxisConfig.TcGVL">
+    <Compile Include="01_Types\Structs\Axes\Alarms\ST_AxisAlarm.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\Axes\Limits\ST_AxisLimit.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\Axes\Limits\ST_AxisSoftLimitResult.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\Axes\Interlocks\ST_AxisInterlock.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\Axes\Interface\ST_AxisInterface.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\Axes\Internal\ST_AxisControlInternal.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\Communication\ST_HmiCommunication.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="02_GVLs\Axes\Configuration\GVL_AxisConfig.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
-    <Compile Include="02_GVLs\GVL_AxisRef.TcGVL">
+    <Compile Include="02_GVLs\Axes\Configuration\GVL_AxisIndex.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
-    <Compile Include="02_GVLs\GVL_AxisRuntime.TcGVL">
+    <Compile Include="02_GVLs\Axes\Constants\GVL_Constants.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
-    <Compile Include="02_GVLs\GVL_HMI.TcGVL">
+    <Compile Include="02_GVLs\Axes\References\GVL_AxisRef.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
-    <Compile Include="02_GVLs\GVL_System.TcGVL">
+    <Compile Include="02_GVLs\Axes\Interface\GVL_AxisRuntime.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
-    <Compile Include="03_AxisControl\FB_AxisControl.TcPOU">
+    <Compile Include="02_GVLs\Communication\GVL_HMI.TcGVL">
+      <SubType>Code</SubType>
+      <LinkAlways>true</LinkAlways>
+    </Compile>
+    <Compile Include="02_GVLs\System\GVL_System.TcGVL">
+      <SubType>Code</SubType>
+      <LinkAlways>true</LinkAlways>
+    </Compile>
+    <Compile Include="03_AxisControl\Core\FB_AxisControl.TcPOU">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="03_AxisControl\FB_AxisManager.TcPOU">
+    <Compile Include="03_AxisControl\Supervision\FB_AxisCommandGuard.TcPOU">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="04_SystemControl\FB_AlarmManager.TcPOU">
+    <Compile Include="03_AxisControl\Management\FB_AxisManager.TcPOU">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="04_SystemControl\FB_HmiWatchdog.TcPOU">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="04_SystemControl\FB_ModeManager.TcPOU">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="04_SystemControl\FB_SafetyManager.TcPOU">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="05_Sequences\FB_AdjustmentSequence.TcPOU">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="05_Sequences\FB_InitializationSequence.TcPOU">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="05_Sequences\FB_LoadingSequence.TcPOU">
+    <Compile Include="04_SystemControl\Communication\FB_HmiWatchdog.TcPOU">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="06_Programs\MAIN.TcPOU">
@@ -107,44 +121,41 @@
     <Compile Include="PlcTask.TcTTO">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\E_AxisCommand.TcDUT">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="01_Types\Enums\E_AxisErrorSource.TcDUT">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="01_Types\Enums\E_AxisMotionState.TcDUT">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="01_Types\Structs\ST_AxisCmd.TcDUT">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="01_Types\Structs\ST_AxisInterface.TcDUT">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="01_Types\Structs\ST_AxisInterlock.TcDUT">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="01_Types\Structs\ST_AxisSet.TcDUT">
-      <SubType>Code</SubType>
-    </Compile>
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="01_Types\Structs\ST_Internal" />
-    <Folder Include="01_Types\Structs\ST_Limit" />
-    <Folder Include="01_Types\Structs\ST_State" />
-    <Folder Include="01_Types\Structs\ST_Data" />
-    <Folder Include="01_Types\Structs\ST_Alarm" />
-    <Folder Include="01_Types\Structs\ST_PositionAct" />
-    <Folder Include="01_Types\Structs\ST_JogAct" />
-    <Folder Include="02_GVLs" />
-    <Folder Include="03_AxisControl" />
-    <Folder Include="05_Sequences" />
-    <Folder Include="06_Programs" />
-    <Folder Include="04_SystemControl" />
     <Folder Include="01_Types" />
     <Folder Include="01_Types\Enums" />
+    <Folder Include="01_Types\Enums\Axes" />
+    <Folder Include="01_Types\Enums\Axes\Commands" />
+    <Folder Include="01_Types\Enums\Axes\States" />
+    <Folder Include="01_Types\Enums\Axes\Modes" />
+    <Folder Include="01_Types\Enums\Axes\Alarms" />
     <Folder Include="01_Types\Structs" />
+    <Folder Include="01_Types\Structs\Axes" />
+    <Folder Include="01_Types\Structs\Axes\Interface" />
+    <Folder Include="01_Types\Structs\Axes\Commands" />
+    <Folder Include="01_Types\Structs\Axes\Settings" />
+    <Folder Include="01_Types\Structs\Axes\Feedback" />
+    <Folder Include="01_Types\Structs\Axes\Alarms" />
+    <Folder Include="01_Types\Structs\Axes\Limits" />
+    <Folder Include="01_Types\Structs\Axes\Interlocks" />
+    <Folder Include="01_Types\Structs\Axes\Internal" />
+    <Folder Include="01_Types\Structs\Communication" />
+    <Folder Include="02_GVLs" />
+    <Folder Include="02_GVLs\Axes" />
+    <Folder Include="02_GVLs\Axes\Configuration" />
+    <Folder Include="02_GVLs\Axes\Constants" />
+    <Folder Include="02_GVLs\Axes\References" />
+    <Folder Include="02_GVLs\Axes\Interface" />
+    <Folder Include="02_GVLs\Communication" />
+    <Folder Include="02_GVLs\System" />
+    <Folder Include="03_AxisControl" />
+    <Folder Include="03_AxisControl\Core" />
+    <Folder Include="03_AxisControl\Management" />
+    <Folder Include="03_AxisControl\Supervision" />
+    <Folder Include="04_SystemControl" />
+    <Folder Include="04_SystemControl\Communication" />
+    <Folder Include="06_Programs" />
   </ItemGroup>
   <ItemGroup>
     <PlaceholderReference Include="Tc2_MC2">

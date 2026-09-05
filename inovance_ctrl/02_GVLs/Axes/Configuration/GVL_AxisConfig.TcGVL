@@ -1,0 +1,63 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <GVL Name="GVL_AxisConfig" Id="{292f67a3-fb57-4951-94dc-c8359ba6e509}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+VAR_GLOBAL
+    //==========================================================
+    // 14轴统一配置数组
+    //
+    // 数组下标必须使用GVL_AxisIndex中的业务轴编号。
+    //
+    // 当前配置：
+    // 1. 13根已接入轴：bConfigured = TRUE；
+    // 2. DamperGripper[7]未接入：bConfigured = FALSE；
+    // 3. 所有轴暂时关闭PLC软件限位；
+    // 4. 所有轴暂时不要求完成回零；
+    // 5. 软件限位缓冲距离预留为5.0。
+    //
+    // 注意：
+    // fSoftwareLimitNeg和fSoftwareLimitPos目前保持默认0.0。
+    // 在填写实际机械行程前，不允许打开bSoftLimitEnable。
+    //==========================================================
+    AxisLimits :
+        ARRAY[1..GVL_Constants.cMaxAxisCount]
+        OF ST_AxisLimit := [
+
+        //======================================================
+        // [1..6]
+        // TrayX、TrayZ、DamperX、DamperY、DamperZ、
+        // DamperRotation：均已接入NC轴
+        //======================================================
+        6((
+            bConfigured       := TRUE,
+            bSoftLimitEnable  := FALSE,
+            fSoftLimitMargin  := 5.0,
+            bRequireHomed     := FALSE
+        )),
+
+        //======================================================
+        // [7] DamperGripper
+        // 当前未接入，不允许调用PLCopen运动功能块
+        //======================================================
+        (
+            bConfigured       := FALSE,
+            bSoftLimitEnable  := FALSE,
+            fSoftLimitMargin  := 5.0,
+            bRequireHomed     := FALSE
+        ),
+
+        //======================================================
+        // [8..14]
+        // Turntable、Clamping、AdjustmentX/Y/Z、
+        // ScrewdriverY/Z：均已接入NC轴
+        //======================================================
+        7((
+            bConfigured       := TRUE,
+            bSoftLimitEnable  := FALSE,
+            fSoftLimitMargin  := 5.0,
+            bRequireHomed     := FALSE
+        ))
+    ];
+END_VAR]]></Declaration>
+  </GVL>
+</TcPlcObject>

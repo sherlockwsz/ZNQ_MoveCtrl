@@ -55,9 +55,14 @@ STRUCT
     
 
     bMoveRelExecute : BOOL;// MC_MoveRelative.Execute锁存
-    
 
-    // 由M_UpdateSoftLimitState每周期更新
+
+    //==========================================================
+    // 软件限位计算结果
+    //==========================================================
+
+    stSoftLimitResult : ST_AxisSoftLimitResult;
+    // 由M_UpdateSoftLimitState每周期更新，供点动和定位方法读取
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

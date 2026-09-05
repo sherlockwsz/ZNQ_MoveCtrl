@@ -1,0 +1,39 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <GVL Name="GVL_AxisRef" Id="{3b459897-13ae-4f42-9e85-8d77d1facf15}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+VAR_GLOBAL
+    //==========================================================
+    // 14轴统一NC引用数组
+    //
+    // 数组下标与GVL_AxisIndex、WPF轴编号保持一致。
+    //
+    // DamperGripper[7]当前未接入：
+    // 1. 不在TcNcAxis属性中建立映射；
+    // 2. AxisRefs[7]保留空引用；
+    // 3. MAIN仍会调用对应AxisManager；
+    // 4. AxisManager根据bConfigured=FALSE清除命令，
+    //    但不会调用FB_AxisControl。
+    //==========================================================
+
+    {attribute 'TcNcAxis' :=
+        '[1]:=TrayX;
+         [2]:=TrayZ;
+         [3]:=DamperX;
+         [4]:=DamperY;
+         [5]:=DamperZ;
+         [6]:=DamperRotation;
+         [8]:=Turntable;
+         [9]:=Clamping;
+         [10]:=AdjustmentX;
+         [11]:=AdjustmentY;
+         [12]:=AdjustmentZ;
+         [13]:=ScrewdriverY;
+         [14]:=ScrewdriverZ'}
+
+    AxisRefs :
+        ARRAY[1..GVL_Constants.cMaxAxisCount]
+        OF AXIS_REF;
+END_VAR]]></Declaration>
+  </GVL>
+</TcPlcObject>

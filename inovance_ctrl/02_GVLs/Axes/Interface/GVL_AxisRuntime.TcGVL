@@ -1,0 +1,30 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <GVL Name="GVL_AxisRuntime" Id="{a60e6e4c-c618-41fe-980a-aaeaff595cce}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+VAR_GLOBAL
+    // 14轴统一ADS命令、设置和反馈数组。
+    // 14(...)确保每个数组元素都获得相同的安全调试初值，
+    // 而不是只初始化第一个元素。
+    Axes : ARRAY[1..GVL_Constants.cMaxAxisCount] OF ST_AxisInterface := [
+        14((
+            Set := (
+                Jog := (
+                    fVelocity     := 5.0,
+                    fAcceleration := 200.0,
+                    fDeceleration := 500.0
+                ),
+
+                Position := (
+                    fAbsolutePosition := 0.0,
+                    fRelativeDistance := 0.0,
+                    fVelocity         := 20.0,
+                    fAcceleration     := 500.0,
+                    fDeceleration     := 500.0
+                )
+            )
+        ))
+    ];
+END_VAR]]></Declaration>
+  </GVL>
+</TcPlcObject>

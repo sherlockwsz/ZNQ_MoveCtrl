@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <POU Name="FB_HmiWatchdog" Id="{df81b304-bd24-448b-8153-41afa23e1505}" SpecialFunc="None">
+    <Declaration><![CDATA[//==============================================================
+// HMI心跳看门狗
+//
+// 职责边界：
+// 1. 只检测心跳、在线和超时状态；
+// 2. 不读取或修改任何轴命令；
+// 3. 不生成最终轴控制许可；
+// 4. 轴命令清理和重新授权由FB_AxisCommandGuard负责。
+//==============================================================
+
+FUNCTION_BLOCK FB_HmiWatchdog
+
+VAR_INPUT
+    bEnable : BOOL;         // 是否启用HMI通信看门狗
+    udiHeartbeat : UDINT;   // WPF周期递增的心跳计数
+    tTimeout : TIME;        // 心跳超时时间
+END_VAR
+
+VAR_OUTPUT
+    bOnline : BOOL;         // 已检测到有效心跳且未超时
+    bTimeout : BOOL;        // 心跳超过规定时间未变化
+END_VAR
+
+VAR
+    udiLastHeartbeat : UDINT;
+    bHeartbeatSeen : BOOL;
+    bHeartbeatChanged : BOOL;
+    bPreviousEnable : BOOL;
+    tEffectiveTimeout : TIME;
+    fbHeartbeatTimeout : TON;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// FB主体只保留按顺序执行的主要任务。
+M_ResolveTimeout();
+M_UpdateHeartbeat();
+
+// 保存本周期使能状态，供下一周期检测看门狗启用沿。
+bPreviousEnable := bEnable;]]></ST>
+    </Implementation>
+    <Method Name="M_ResolveTimeout" Id="{a9a7541c-7294-4940-abc5-7999b0da785a}">
+      <Declaration><![CDATA[METHOD PRIVATE M_ResolveTimeout]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// 防止外部误把超时时间设置为0，导致立即超时。
+IF tTimeout <= T#0MS THEN
+    tEffectiveTimeout := T#2S;
+ELSE
+    tEffectiveTimeout := tTimeout;
+END_IF;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_UpdateHeartbeat" Id="{2adb5171-b73b-4dc3-a5f5-f13a6e36fb8d}">
+      <Declaration><![CDATA[METHOD PRIVATE M_UpdateHeartbeat]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[//==============================================================
+// 1. 看门狗未启用：旁路通信保护并复位内部状态
+//==============================================================
+IF NOT bEnable THEN
+    fbHeartbeatTimeout(
+        IN := FALSE,
+        PT := tEffectiveTimeout
+    );
+
+    udiLastHeartbeat := udiHeartbeat;
+    bHeartbeatSeen := FALSE;
+    bHeartbeatChanged := FALSE;
+    bOnline := TRUE;
+    bTimeout := FALSE;
+    RETURN;
+END_IF;
+
+
+//==============================================================
+// 2. 看门狗刚启用：必须等待一次新的心跳
+//==============================================================
+IF NOT bPreviousEnable THEN
+    bHeartbeatSeen := FALSE;
+    udiLastHeartbeat := udiHeartbeat;
+END_IF;
+
+
+//==============================================================
+// 3. 检测心跳变化并更新超时定时器
+//==============================================================
+bHeartbeatChanged :=
+    udiHeartbeat <> udiLastHeartbeat;
+
+IF bHeartbeatChanged THEN
+    udiLastHeartbeat := udiHeartbeat;
+    bHeartbeatSeen := TRUE;
+
+    fbHeartbeatTimeout(
+        IN := FALSE,
+        PT := tEffectiveTimeout
+    );
+ELSE
+    fbHeartbeatTimeout(
+        IN := TRUE,
+        PT := tEffectiveTimeout
+    );
+END_IF;
+
+
+//==============================================================
+// 4. 输出纯通信状态
+//==============================================================
+bTimeout := fbHeartbeatTimeout.Q;
+bOnline := bHeartbeatSeen AND NOT bTimeout;]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

@@ -1,0 +1,32 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <GVL Name="GVL_AxisIndex" Id="{42d84556-58db-4567-ab95-46810cabb804}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+VAR_GLOBAL CONSTANT
+    // 料盘上下料机构
+    TrayX        : UINT := 1;  // X轴（原Axis1）
+    TrayZ        : UINT := 2;  // Z轴（原Warehouse_Z）
+	
+    // 阻尼器上下料机构
+    DamperX      : UINT := 3;  // X轴
+    DamperY 	 : UINT := 4;  	// Y轴
+    DamperZ  	 : UINT := 5;  // Z轴
+
+    DamperRotation      : UINT := 6;  // 阻尼器A轴
+    DamperGripper       : UINT := 7;  // 阻尼器夹紧，当前未接入，保留编号
+
+    // 转台及夹紧机构
+    Turntable      : UINT := 8;  // 转台轴
+    Clamping       : UINT := 9;  // 夹紧轴
+
+    // 同轴度调整机构
+    AdjustmentX    : UINT := 10; // X轴
+    AdjustmentY    : UINT := 11; // Y轴
+    AdjustmentZ    : UINT := 12; // Z轴
+
+    // 螺丝刀机构
+    ScrewdriverY   : UINT := 13; // Y轴
+    ScrewdriverZ   : UINT := 14; // Z轴
+END_VAR]]></Declaration>
+  </GVL>
+</TcPlcObject>

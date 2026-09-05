@@ -1,0 +1,9 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <GVL Name="GVL_Constants" Id="{79aafccb-e265-458e-9299-9ce99396c7cf}">
+    <Declaration><![CDATA[VAR_GLOBAL CONSTANT
+    // 设备最大轴数量。
+    cMaxAxisCount : UINT := 14;
+END_VAR]]></Declaration>
+  </GVL>
+</TcPlcObject>

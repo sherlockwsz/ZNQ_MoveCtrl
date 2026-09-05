@@ -24,6 +24,7 @@ STRUCT
 	bSoftLimitEnable 	 : BOOL;// 是否启用PLC侧软限位检查
 	fSoftLimitMargin 	 : LREAL;// 点动提前停止的缓冲距离，单位与轴位置单位相同
 	bRequireHomed : BOOL;		 // 是否要求轴完成回零
+    bConfigured : BOOL;// 当前下标是否已经绑定有效NC轴。
     //========================
     // 力矩限制
     //========================

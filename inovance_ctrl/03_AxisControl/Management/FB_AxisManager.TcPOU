@@ -1,0 +1,75 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <POU Name="FB_AxisManager" Id="{a5239ea1-599b-4572-87dc-e1890577acbf}" SpecialFunc="None">
+    <Declaration><![CDATA[//==============================================================
+// 可复用单轴管理器
+//
+// 每个数组元素管理一根业务轴，由MAIN统一循环调用。
+// 未配置轴只清除外部命令，不调用任何PLCopen运动功能块。
+//==============================================================
+
+FUNCTION_BLOCK FB_AxisManager
+
+VAR_INPUT
+    bAxisConfigured : BOOL;       // 当前数组下标是否已绑定有效NC轴
+    bProtectionEnabled : BOOL;    // 是否启用HMI通信保护
+    bHmiOnline : BOOL;            // HMI心跳在线状态
+    stLimit : ST_AxisLimit;       // 当前轴限位配置
+END_VAR
+
+VAR_IN_OUT
+    AxisRef : AXIS_REF;           // TwinCAT NC轴引用
+    stAxis : ST_AxisInterface;    // 单轴ADS接口和运行反馈
+END_VAR
+
+VAR_OUTPUT
+    bCommandsSafe : BOOL;
+    bControlAllowed : BOOL;
+    bRequireEnableReset : BOOL;
+END_VAR
+
+VAR
+    fbCommandGuard : FB_AxisCommandGuard;
+    fbAxisControl : FB_AxisControl;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[IF bAxisConfigured THEN
+    //==========================================================
+    // 1. 处理已配置轴的外部命令保护和重新授权
+    //==========================================================
+    fbCommandGuard(
+        bProtectionEnabled := bProtectionEnabled,
+        bCommunicationOnline := bHmiOnline,
+        ioCmd := stAxis.Cmd
+    );
+
+    bCommandsSafe := fbCommandGuard.bCommandsSafe;
+    bControlAllowed := fbCommandGuard.bControlAllowed;
+    bRequireEnableReset := fbCommandGuard.bRequireEnableReset;
+
+    //==========================================================
+    // 2. 仅对已映射NC轴调用运动控制核心
+    //==========================================================
+    fbAxisControl(
+        bControlAllowed := bControlAllowed,
+        stLimit := stLimit,
+        AxisRef := AxisRef,
+        stAxis := stAxis
+    );
+ELSE
+    // 未接入轴不得保留任何来自ADS/HMI的运动请求。
+    stAxis.Cmd.bEnable := FALSE;
+    stAxis.Cmd.bReset := FALSE;
+    stAxis.Cmd.bStop := FALSE;
+    stAxis.Cmd.bMoveAbs := FALSE;
+    stAxis.Cmd.bMoveRel := FALSE;
+    stAxis.Cmd.bJogPos := FALSE;
+    stAxis.Cmd.bJogNeg := FALSE;
+
+    bCommandsSafe := TRUE;
+    bControlAllowed := FALSE;
+    bRequireEnableReset := FALSE;
+END_IF;]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

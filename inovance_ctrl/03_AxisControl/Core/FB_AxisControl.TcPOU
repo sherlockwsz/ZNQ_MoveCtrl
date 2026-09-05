@@ -26,21 +26,10 @@ VAR
     fbMoveRel : MC_MoveRelative;
 
     //==========================================================
-    // 四个方法共用的状态
+    // 跨Method共享的内部运行状态
     //==========================================================
 
-    bMotionActive : BOOL;
-    bStopRequest  : BOOL;
-    bAnyBusy      : BOOL;
-	
-	//==========================================================
-	// 软件限位计算结果
-	//
-	// 由M_UpdateSoftLimitState每周期更新；
-	// M_ExecuteJog和M_ExecutePositioning读取。
-	//==========================================================
-	
-	stSoftLimitResult : ST_AxisSoftLimitResult;	
+    stInternal : ST_AxisControlInternal;
 	//==========================================================
     // 命令上升沿
     //
@@ -55,28 +44,6 @@ VAR
     trigJogNeg  : R_TRIG;
 
 
-    //==========================================================
-    // 命令识别和仲裁结果
-    //
-    // eRequestedCommand：
-    // 由M_SelectCommand根据原始BOOL命令生成。
-    // 同一扫描周期只允许选择一个主要动作命令。
-    //
-    // 注意：
-    // bEnable是轴持续使能状态，不参与运动命令互斥仲裁。
-    //==========================================================
-
-    eRequestedCommand :
-        E_AxisCommand := E_AxisCommand.NoCommand;
-
-
-    //==========================================================
-    // 跨周期执行信号
-    //==========================================================
-
-    bMoveAbsExecute : BOOL;
-    bMoveRelExecute : BOOL;
-    bStopExecute    : BOOL;
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[//==============================================================
@@ -86,7 +53,9 @@ END_VAR]]></Declaration>
 // 必须在读取Status.Error、Status.ErrorId和Status.Homed之前调用。
 // 每根轴、每个PLC周期只能调用一次。
 //==============================================================
-AxisRef.ReadStatus();
+M_ReadAxisStatus(
+    ioAxisRef := AxisRef
+);
 
 //==============================================================
 // 1. 清除上一个PLC周期的瞬时结果
@@ -123,82 +92,15 @@ M_UpdateSoftLimitState(
 );
 
 //==============================================================
-// 3. 汇总上一周期运动状态
-//
-// 用于判断轴当前是否处于运动状态，并提前生成停止请求。
-// Execute锁存已经置位但Busy尚未建立时，也视为运动有效。
+// 4. 汇总运动状态、生成停止请求并完成命令仲裁
 //==============================================================
-
-bMotionActive :=
-    fbJog.Busy
-    OR fbMoveAbs.Busy
-    OR fbMoveRel.Busy
-    OR bMoveAbsExecute
-    OR bMoveRelExecute;
-
-
-//==============================================================
-// 4. 生成停止请求
-//
-// 以下任意条件成立时请求停止：
-// 1. WPF或外部程序发出Stop；
-// 2. 外部控制许可在运动中撤销；
-// 3. 轴使能命令在运动中撤销。
-//
-// bStopRequest是本周期停止条件；
-// bStopExecute是MC_Stop使用的跨周期锁存信号。
-//==============================================================
-
-bStopRequest :=
-    stAxis.Cmd.bStop
-    OR
-    (
-        NOT bControlAllowed
-        AND bMotionActive
-    )
-    OR
-    (
-        NOT stAxis.Cmd.bEnable
-        AND bMotionActive
-    );
-
-
-//==============================================================
-// 5. 命令识别和优先级仲裁
-//
-// 优先级：
-// Stop > Reset > Jog > MoveAbsolute/MoveRelative
-//
-// M_SelectCommand只负责选择命令，不执行任何MC功能块。
-//==============================================================
-
-eRequestedCommand := M_SelectCommand(
-    bStopRequest  := bStopRequest,
-    bResetPulse   := trigReset.Q,
-    bJogPositive  := stAxis.Cmd.bJogPos,
-    bJogNegative  := stAxis.Cmd.bJogNeg,
-    bMoveAbsPulse := trigMoveAbs.Q,
-    bMoveRelPulse := trigMoveRel.Q
+M_UpdateCommandArbitration(
+    ioAxis := stAxis
 );
 
 
 //==============================================================
-// 6. 锁存停止Execute
-//
-// Stop被仲裁为最高优先级命令后，锁存MC_Stop.Execute。
-// MC_Stop完成并且外部Stop释放后，才在M_ExecuteStop中清除。
-//==============================================================
-
-IF
-    (eRequestedCommand = E_AxisCommand.Stop)
-    AND fbPower.Status
-THEN
-    bStopExecute := TRUE;
-END_IF;
-
-
-//==============================================================
-// 7. 调用四个执行方法
+// 5. 调用四个执行方法
 //
 // 虽然命令已经完成仲裁，各MC功能块仍然必须每周期调用。
 //==============================================================
@@ -228,7 +130,7 @@ M_ExecuteStop(
 );
 
 //==============================================================
-// 8. 统一更新锁存错误
+// 6. 统一更新锁存错误
 //
 // 必须放在四个执行方法之后，以读取本周期最新的MC输出。
 // 必须放在状态更新之前，因为bReady和eMotionState需要使用
@@ -242,7 +144,7 @@ M_UpdateError(
 
 
 //==============================================================
-// 9. 更新基础状态
+// 7. 更新基础状态
 //
 // 必须在M_UpdateError之后调用，确保bReady使用本周期最新错误。
 // 必须在运动状态更新之前调用，保证所有基础状态先完成刷新。
@@ -255,7 +157,7 @@ M_UpdateBasicState(
 
 
 //==============================================================
-// 10. 更新唯一运动状态
+// 8. 更新唯一运动状态
 //
 // 必须在M_UpdateError和M_UpdateBasicState之后调用。
 //==============================================================
@@ -266,7 +168,7 @@ M_UpdateMotionState(
 );
 
 //==============================================================
-// 11. 更新轴实时数据
+// 9. 更新轴实时数据
 //
 // 放在本周期调用链最后，向WPF提供最新的NC轴反馈。
 //==============================================================
@@ -276,7 +178,7 @@ M_UpdateAxisData(
     ioAxis    := stAxis
 );
 //==============================================================
-// 12. 更新运动方向
+// 10. 更新运动方向
 //
 // 使用本周期最新的：
 // 1. eMotionState；
@@ -290,6 +192,69 @@ M_UpdateMotionDirection(
     ioAxis := stAxis
 );]]></ST>
     </Implementation>
+    <Method Name="M_ReadAxisStatus" Id="{d0e5ee8d-228a-4964-9d8c-da9887885914}">
+      <Declaration><![CDATA[// 刷新NC轴状态。每根轴、每周期只调用一次。
+METHOD PRIVATE M_ReadAxisStatus
+VAR_IN_OUT
+    ioAxisRef : AXIS_REF;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[ioAxisRef.ReadStatus();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_UpdateCommandArbitration" Id="{d8b16562-dea7-412c-a822-b092e5d2cca8}">
+      <Declaration><![CDATA[//==============================================================
+// 汇总运动状态、生成停止请求、选择唯一命令并锁存停止。
+//==============================================================
+METHOD PRIVATE M_UpdateCommandArbitration
+VAR_IN_OUT
+    ioAxis : ST_AxisInterface;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Execute已锁存但Busy尚未建立时，同样视为运动有效。
+stInternal.bMotionActive :=
+    fbJog.Busy
+    OR fbMoveAbs.Busy
+    OR fbMoveRel.Busy
+    OR stInternal.bMoveAbsExecute
+    OR stInternal.bMoveRelExecute;
+
+
+// 外部Stop、运动中撤销控制许可或撤销使能均请求停止。
+stInternal.bStopRequest :=
+    ioAxis.Cmd.bStop
+    OR
+    (
+        NOT bControlAllowed
+        AND stInternal.bMotionActive
+    )
+    OR
+    (
+        NOT ioAxis.Cmd.bEnable
+        AND stInternal.bMotionActive
+    );
+
+
+// 优先级：Stop > Reset > Jog > MoveAbsolute/MoveRelative。
+stInternal.eRequestedCommand := M_SelectCommand(
+    bStopRequest := stInternal.bStopRequest,
+    bResetPulse := trigReset.Q,
+    bJogPositive := ioAxis.Cmd.bJogPos,
+    bJogNegative := ioAxis.Cmd.bJogNeg,
+    bMoveAbsPulse := trigMoveAbs.Q,
+    bMoveRelPulse := trigMoveRel.Q
+);
+
+
+// Stop一旦被选中，保持Execute直至停止完成并释放外部Stop。
+IF
+    (stInternal.eRequestedCommand = E_AxisCommand.Stop)
+    AND fbPower.Status
+THEN
+    stInternal.bStopExecute := TRUE;
+END_IF;]]></ST>
+      </Implementation>
+    </Method>
     <Method Name="M_ClearCycleResults" Id="{b0100f26-6f1e-463a-8206-ad01d5a00796}">
       <Declaration><![CDATA[//==============================================================
 // 方法名称：M_ClearCycleResults
@@ -362,10 +327,10 @@ END_VAR]]></Declaration>
 //==============================================================
 
 bJogForward :=
-    eRequestedCommand = E_AxisCommand.JogPositive;
+    stInternal.eRequestedCommand = E_AxisCommand.JogPositive;
 
 bJogBackward :=
-    eRequestedCommand = E_AxisCommand.JogNegative;
+    stInternal.eRequestedCommand = E_AxisCommand.JogNegative;
 bJogCommandEdge :=
     trigJogPos.Q
     OR trigJogNeg.Q;
@@ -388,13 +353,13 @@ bJogAllowed :=
     bControlAllowed
     AND fbPower.Status
     AND NOT ioAxis.Alarm.bError
-    AND NOT bStopExecute
+    AND NOT stInternal.bStopExecute
     AND NOT fbStop.Busy
     AND NOT fbReset.Busy
     AND NOT fbMoveAbs.Busy
     AND NOT fbMoveRel.Busy
-    AND NOT bMoveAbsExecute
-    AND NOT bMoveRelExecute
+    AND NOT stInternal.bMoveAbsExecute
+    AND NOT stInternal.bMoveRelExecute
     AND bJogDynamicsValid;
 
 
@@ -430,8 +395,8 @@ THEN
 
 ELSIF
     bJogCommandEdge
-    AND stSoftLimitResult.bEnabled
-    AND NOT stSoftLimitResult.bConfigValid
+    AND stInternal.stSoftLimitResult.bEnabled
+    AND NOT stInternal.stSoftLimitResult.bConfigValid
 THEN
 
     ioAxis.State.bCmdRejected := TRUE;
@@ -442,8 +407,8 @@ THEN
 
 ELSIF
     bJogCommandEdge
-    AND stSoftLimitResult.bEnabled
-    AND NOT stSoftLimitResult.bReferenceValid
+    AND stInternal.stSoftLimitResult.bEnabled
+    AND NOT stInternal.stSoftLimitResult.bReferenceValid
 THEN
 
     ioAxis.State.bCmdRejected := TRUE;
@@ -458,12 +423,12 @@ ELSIF
     (
         (
             ioAxis.Cmd.bJogPos
-            AND NOT stSoftLimitResult.bJogPositiveAllowed
+            AND NOT stInternal.stSoftLimitResult.bJogPositiveAllowed
         )
         OR
         (
             ioAxis.Cmd.bJogNeg
-            AND NOT stSoftLimitResult.bJogNegativeAllowed
+            AND NOT stInternal.stSoftLimitResult.bJogNegativeAllowed
         )
     )
 THEN
@@ -498,13 +463,13 @@ fbJog(
     JogForward :=
         bJogAllowed
         AND bJogForward
-        AND stSoftLimitResult.bJogPositiveAllowed,
+        AND stInternal.stSoftLimitResult.bJogPositiveAllowed,
 
     // 负向点动同时受到通用许可和负向软限位许可约束
     JogBackwards :=
         bJogAllowed
         AND bJogBackward
-        AND stSoftLimitResult.bJogNegativeAllowed,
+        AND stInternal.stSoftLimitResult.bJogNegativeAllowed,
 
     Mode         := MC_JOGMODE_CONTINOUS,
     Position     := 0.0,
@@ -562,7 +527,7 @@ bPositionAllowed :=
     bControlAllowed
     AND fbPower.Status
     AND NOT ioAxis.Alarm.bError
-    AND NOT bStopExecute
+    AND NOT stInternal.bStopExecute
     AND NOT fbStop.Busy
     AND NOT fbReset.Busy
     AND NOT fbJog.Busy
@@ -570,8 +535,8 @@ bPositionAllowed :=
     AND NOT ioAxis.Cmd.bJogNeg
     AND NOT fbMoveAbs.Busy
     AND NOT fbMoveRel.Busy
-    AND NOT bMoveAbsExecute
-    AND NOT bMoveRelExecute;
+    AND NOT stInternal.bMoveAbsExecute
+    AND NOT stInternal.bMoveRelExecute;
 
 
 //==============================================================
@@ -618,8 +583,8 @@ ELSIF trigMoveAbs.Q OR trigMoveRel.Q THEN
     //==========================================================
 
     ELSIF
-        stSoftLimitResult.bEnabled
-        AND NOT stSoftLimitResult.bConfigValid
+        stInternal.stSoftLimitResult.bEnabled
+        AND NOT stInternal.stSoftLimitResult.bConfigValid
     THEN
 
         ioAxis.State.bCmdRejected := TRUE;
@@ -633,8 +598,8 @@ ELSIF trigMoveAbs.Q OR trigMoveRel.Q THEN
     //==========================================================
 
     ELSIF
-        stSoftLimitResult.bEnabled
-        AND NOT stSoftLimitResult.bReferenceValid
+        stInternal.stSoftLimitResult.bEnabled
+        AND NOT stInternal.stSoftLimitResult.bReferenceValid
     THEN
 
         ioAxis.State.bCmdRejected := TRUE;
@@ -648,8 +613,8 @@ ELSIF trigMoveAbs.Q OR trigMoveRel.Q THEN
     //==========================================================
 
     ELSIF
-        eRequestedCommand = E_AxisCommand.MoveAbsolute
-        AND NOT stSoftLimitResult.bAbsoluteTargetValid
+        stInternal.eRequestedCommand = E_AxisCommand.MoveAbsolute
+        AND NOT stInternal.stSoftLimitResult.bAbsoluteTargetValid
     THEN
 
         ioAxis.State.bCmdRejected := TRUE;
@@ -663,8 +628,8 @@ ELSIF trigMoveAbs.Q OR trigMoveRel.Q THEN
     //==========================================================
 
     ELSIF
-        eRequestedCommand = E_AxisCommand.MoveRelative
-        AND NOT stSoftLimitResult.bRelativeTargetValid
+        stInternal.eRequestedCommand = E_AxisCommand.MoveRelative
+        AND NOT stInternal.stSoftLimitResult.bRelativeTargetValid
     THEN
 
         ioAxis.State.bCmdRejected := TRUE;
@@ -678,10 +643,10 @@ ELSIF trigMoveAbs.Q OR trigMoveRel.Q THEN
     //==========================================================
 
     ELSIF
-        eRequestedCommand = E_AxisCommand.MoveAbsolute
+        stInternal.eRequestedCommand = E_AxisCommand.MoveAbsolute
     THEN
 
-        bMoveAbsExecute := TRUE;
+        stInternal.bMoveAbsExecute := TRUE;
 
 
     //==========================================================
@@ -689,10 +654,10 @@ ELSIF trigMoveAbs.Q OR trigMoveRel.Q THEN
     //==========================================================
 
     ELSIF
-        eRequestedCommand = E_AxisCommand.MoveRelative
+        stInternal.eRequestedCommand = E_AxisCommand.MoveRelative
     THEN
 
-        bMoveRelExecute := TRUE;
+        stInternal.bMoveRelExecute := TRUE;
 
 
     //==========================================================
@@ -715,9 +680,9 @@ END_IF;
 // 5. Stop开始后撤销普通运动Execute
 //==============================================================
 
-IF bStopExecute THEN
-    bMoveAbsExecute := FALSE;
-    bMoveRelExecute := FALSE;
+IF stInternal.bStopExecute THEN
+    stInternal.bMoveAbsExecute := FALSE;
+    stInternal.bMoveRelExecute := FALSE;
 END_IF;
 
 
@@ -727,7 +692,7 @@ END_IF;
 
 fbMoveAbs(
     Axis         := ioAxisRef,
-    Execute      := bMoveAbsExecute,
+    Execute      := stInternal.bMoveAbsExecute,
     Position     := ioAxis.Set.Position.fAbsolutePosition,
     Velocity     := ioAxis.Set.Position.fVelocity,
     Acceleration := ioAxis.Set.Position.fAcceleration,
@@ -743,7 +708,7 @@ fbMoveAbs(
 
 fbMoveRel(
     Axis         := ioAxisRef,
-    Execute      := bMoveRelExecute,
+    Execute      := stInternal.bMoveRelExecute,
     Distance     := ioAxis.Set.Position.fRelativeDistance,
     Velocity     := ioAxis.Set.Position.fVelocity,
     Acceleration := ioAxis.Set.Position.fAcceleration,
@@ -759,17 +724,17 @@ fbMoveRel(
 
 IF fbMoveAbs.Done THEN
 
-    bMoveAbsExecute := FALSE;
+    stInternal.bMoveAbsExecute := FALSE;
     ioAxis.State.bDone := TRUE;
 
 ELSIF fbMoveAbs.CommandAborted THEN
 
-    bMoveAbsExecute := FALSE;
+    stInternal.bMoveAbsExecute := FALSE;
     ioAxis.State.bCommandAborted := TRUE;
 
 ELSIF fbMoveAbs.Error THEN
 
-    bMoveAbsExecute := FALSE;
+    stInternal.bMoveAbsExecute := FALSE;
 
 END_IF;
 
@@ -780,17 +745,17 @@ END_IF;
 
 IF fbMoveRel.Done THEN
 
-    bMoveRelExecute := FALSE;
+    stInternal.bMoveRelExecute := FALSE;
     ioAxis.State.bDone := TRUE;
 
 ELSIF fbMoveRel.CommandAborted THEN
 
-    bMoveRelExecute := FALSE;
+    stInternal.bMoveRelExecute := FALSE;
     ioAxis.State.bCommandAborted := TRUE;
 
 ELSIF fbMoveRel.Error THEN
 
-    bMoveRelExecute := FALSE;
+    stInternal.bMoveRelExecute := FALSE;
 
 END_IF;]]></ST>
       </Implementation>
@@ -820,7 +785,7 @@ bPowerEnable :=
     ioAxis.Cmd.bEnable
     OR
     (
-        (bStopExecute OR fbStop.Busy)
+        (stInternal.bStopExecute OR fbStop.Busy)
         AND fbPower.Status
     );
 
@@ -840,18 +805,18 @@ fbPower(
 
 
 //==============================================================
-// 4. Reset许可
+// 3. Reset许可
 //
 // 运动、点动和停止过程中不允许Reset。
 //==============================================================
 
 bResetAllowed :=
-    NOT bMotionActive
-    AND NOT bStopExecute
+    NOT stInternal.bMotionActive
+    AND NOT stInternal.bStopExecute
     AND NOT fbStop.Busy;
 
 //==============================================================
-// 5. 周期调用MC_Reset
+// 4. 周期调用MC_Reset
 //
 // Reset必须同时满足：
 // 1. 已被M_SelectCommand选中；
@@ -861,17 +826,17 @@ bResetAllowed :=
 fbReset(
     Axis := ioAxisRef,
     Execute :=
-        (eRequestedCommand = E_AxisCommand.Reset)
+        (stInternal.eRequestedCommand = E_AxisCommand.Reset)
         AND bResetAllowed
 );
 
 
 //==============================================================
-// 6. Reset命令被拒绝
+// 5. Reset命令被拒绝
 //==============================================================
 
 IF
-    (eRequestedCommand = E_AxisCommand.Reset)
+    (stInternal.eRequestedCommand = E_AxisCommand.Reset)
     AND NOT bResetAllowed
 THEN
     ioAxis.State.bCmdRejected := TRUE;
@@ -881,7 +846,7 @@ THEN
 END_IF;
 
 //==============================================================
-// 7. Reset成功
+// 6. Reset成功
 //
 // 清除PLC锁存的轴报警。
 //==============================================================
@@ -914,13 +879,13 @@ END_VAR
         <ST><![CDATA[//==============================================================
 // 1. Stop开始后撤销定位Execute
 //
-// 点动由bStopExecute使bJogAllowed变为FALSE，
+// 点动由stInternal.bStopExecute使bJogAllowed变为FALSE，
 // MC_Jog会撤销点动请求，MC_Stop负责最终停止。
 //==============================================================
 
-IF bStopExecute THEN
-    bMoveAbsExecute := FALSE;
-    bMoveRelExecute := FALSE;
+IF stInternal.bStopExecute THEN
+    stInternal.bMoveAbsExecute := FALSE;
+    stInternal.bMoveRelExecute := FALSE;
 END_IF;
 
 
@@ -947,7 +912,7 @@ END_IF;
 
 fbStop(
     Axis         := ioAxisRef,
-    Execute      := bStopExecute,
+    Execute      := stInternal.bStopExecute,
     Deceleration := fStopDeceleration,
     Jerk         := 0.0
 );
@@ -959,8 +924,8 @@ fbStop(
 // 外部Stop恢复FALSE后，撤销Execute并释放轴锁定。
 //==============================================================
 
-IF fbStop.Done AND NOT bStopRequest THEN
-    bStopExecute := FALSE;
+IF fbStop.Done AND NOT stInternal.bStopRequest THEN
+    stInternal.bStopExecute := FALSE;
 END_IF;
 
 
@@ -969,7 +934,7 @@ END_IF;
 //==============================================================
 
 IF fbStop.Error THEN
-    bStopExecute := FALSE;
+    stInternal.bStopExecute := FALSE;
 END_IF;]]></ST>
       </Implementation>
     </Method>
@@ -1211,15 +1176,15 @@ END_VAR]]></Declaration>
 // 避免命令已经接受但Busy尚未建立时出现一周期状态空缺。
 //==============================================================
 
-bAnyBusy :=
+stInternal.bAnyBusy :=
     fbReset.Busy
     OR fbStop.Busy
-    OR bStopExecute
+    OR stInternal.bStopExecute
     OR fbJog.Busy
     OR fbMoveAbs.Busy
     OR fbMoveRel.Busy
-    OR bMoveAbsExecute
-    OR bMoveRelExecute;
+    OR stInternal.bMoveAbsExecute
+    OR stInternal.bMoveRelExecute;
 
 
 //==============================================================
@@ -1239,7 +1204,7 @@ ioAxis.State.bPowerStatus :=
 //==============================================================
 
 ioAxis.State.bBusy :=
-    bAnyBusy;
+    stInternal.bAnyBusy;
 
 
 //==============================================================
@@ -1270,7 +1235,7 @@ ioAxis.State.bReady :=
     fbPower.Status
     AND bControlAllowed
     AND NOT ioAxis.Alarm.bError
-    AND NOT bAnyBusy;
+    AND NOT stInternal.bAnyBusy;
 
 
 //==============================================================
@@ -1506,7 +1471,7 @@ VAR CONSTANT
     // 速度方向判断死区。
     //
     // 防止轴在零速附近因浮点波动频繁切换正负方向。
-    // 当前单位取决于轴的工程单位，Axis1直线轴通常为mm/s。
+    // 当前单位取决于具体业务轴的工程单位，直线轴通常为mm/s。
     c_fVelocityDeadband : LREAL := 0.01;
 END_VAR
 
@@ -1648,11 +1613,11 @@ THEN
 //==============================================================
 // 2. 停止状态
 //
-// bStopExecute包含Stop已经锁存但Busy尚未建立的阶段。
+// stInternal.bStopExecute包含Stop已经锁存但Busy尚未建立的阶段。
 //==============================================================
 
 ELSIF
-    bStopExecute
+    stInternal.bStopExecute
     OR fbStop.Busy
 THEN
 
@@ -1689,8 +1654,8 @@ ELSIF fbJog.Busy THEN
 ELSIF
     fbMoveAbs.Busy
     OR fbMoveRel.Busy
-    OR bMoveAbsExecute
-    OR bMoveRelExecute
+    OR stInternal.bMoveAbsExecute
+    OR stInternal.bMoveRelExecute
 THEN
 
     ioAxis.State.eMotionState :=
@@ -1770,7 +1735,7 @@ END_VAR]]></Declaration>
 // 1. 读取是否启用软件限位
 //==============================================================
 
-stSoftLimitResult.bEnabled :=
+stInternal.stSoftLimitResult.bEnabled :=
     iLimit.bSoftLimitEnable;
 
 
@@ -1783,7 +1748,7 @@ stSoftLimitResult.bEnabled :=
 // 3. 两侧Margin之间仍然存在有效运动范围。
 //==============================================================
 
-stSoftLimitResult.bConfigValid :=
+stInternal.stSoftLimitResult.bConfigValid :=
     iLimit.fSoftwareLimitNeg
         < iLimit.fSoftwareLimitPos
 
@@ -1808,7 +1773,7 @@ stSoftLimitResult.bConfigValid :=
 // 要求回零时，必须等待AxisRef.Status.Homed为TRUE。
 //==============================================================
 
-stSoftLimitResult.bReferenceValid :=
+stInternal.stSoftLimitResult.bReferenceValid :=
     NOT iLimit.bRequireHomed
     OR ioAxisRef.Status.Homed;
 
@@ -1820,12 +1785,12 @@ stSoftLimitResult.bReferenceValid :=
 // 启用时，配置和坐标基准必须同时有效。
 //==============================================================
 
-stSoftLimitResult.bReady :=
-    NOT stSoftLimitResult.bEnabled
+stInternal.stSoftLimitResult.bReady :=
+    NOT stInternal.stSoftLimitResult.bEnabled
     OR
     (
-        stSoftLimitResult.bConfigValid
-        AND stSoftLimitResult.bReferenceValid
+        stInternal.stSoftLimitResult.bConfigValid
+        AND stInternal.stSoftLimitResult.bReferenceValid
     );
 
 
@@ -1836,7 +1801,7 @@ stSoftLimitResult.bReady :=
 // 不应使用ActPos计算相对运动最终目标。
 //==============================================================
 
-stSoftLimitResult.fRelativeTargetPosition :=
+stInternal.stSoftLimitResult.fRelativeTargetPosition :=
     ioAxisRef.NcToPlc.SetPos
     + ioAxis.Set.Position.fRelativeDistance;
 
@@ -1847,26 +1812,26 @@ stSoftLimitResult.fRelativeTargetPosition :=
 // 所有运动方向和目标均允许。
 //==============================================================
 
-IF NOT stSoftLimitResult.bEnabled THEN
+IF NOT stInternal.stSoftLimitResult.bEnabled THEN
 
-    stSoftLimitResult.bPositiveActive := FALSE;
-    stSoftLimitResult.bNegativeActive := FALSE;
+    stInternal.stSoftLimitResult.bPositiveActive := FALSE;
+    stInternal.stSoftLimitResult.bNegativeActive := FALSE;
 
-    stSoftLimitResult.bJogPositiveAllowed := TRUE;
-    stSoftLimitResult.bJogNegativeAllowed := TRUE;
+    stInternal.stSoftLimitResult.bJogPositiveAllowed := TRUE;
+    stInternal.stSoftLimitResult.bJogNegativeAllowed := TRUE;
 
-    stSoftLimitResult.bAbsoluteTargetValid := TRUE;
-    stSoftLimitResult.bRelativeTargetValid := TRUE;
+    stInternal.stSoftLimitResult.bAbsoluteTargetValid := TRUE;
+    stInternal.stSoftLimitResult.bRelativeTargetValid := TRUE;
 
 
 //==============================================================
 // 7. 软件限位启用且状态有效
 //==============================================================
 
-ELSIF stSoftLimitResult.bReady THEN
+ELSIF stInternal.stSoftLimitResult.bReady THEN
 
     // 使用实际位置生成WPF限位指示
-    stSoftLimitResult.bPositiveActive :=
+    stInternal.stSoftLimitResult.bPositiveActive :=
         ioAxisRef.NcToPlc.ActPos
         >=
         (
@@ -1874,7 +1839,7 @@ ELSIF stSoftLimitResult.bReady THEN
             - iLimit.fSoftLimitMargin
         );
 
-    stSoftLimitResult.bNegativeActive :=
+    stInternal.stSoftLimitResult.bNegativeActive :=
         ioAxisRef.NcToPlc.ActPos
         <=
         (
@@ -1884,7 +1849,7 @@ ELSIF stSoftLimitResult.bReady THEN
 
 
     // 正向点动进入正向缓冲区域后停止继续向外运动
-    stSoftLimitResult.bJogPositiveAllowed :=
+    stInternal.stSoftLimitResult.bJogPositiveAllowed :=
         ioAxisRef.NcToPlc.SetPos
         <
         (
@@ -1894,7 +1859,7 @@ ELSIF stSoftLimitResult.bReady THEN
 
 
     // 负向点动进入负向缓冲区域后停止继续向外运动
-    stSoftLimitResult.bJogNegativeAllowed :=
+    stInternal.stSoftLimitResult.bJogNegativeAllowed :=
         ioAxisRef.NcToPlc.SetPos
         >
         (
@@ -1904,7 +1869,7 @@ ELSIF stSoftLimitResult.bReady THEN
 
 
     // 检查绝对目标
-    stSoftLimitResult.bAbsoluteTargetValid :=
+    stInternal.stSoftLimitResult.bAbsoluteTargetValid :=
         ioAxis.Set.Position.fAbsolutePosition
             >= iLimit.fSoftwareLimitNeg
         AND
@@ -1913,11 +1878,11 @@ ELSIF stSoftLimitResult.bReady THEN
 
 
     // 检查相对运动计算得到的最终目标
-    stSoftLimitResult.bRelativeTargetValid :=
-        stSoftLimitResult.fRelativeTargetPosition
+    stInternal.stSoftLimitResult.bRelativeTargetValid :=
+        stInternal.stSoftLimitResult.fRelativeTargetPosition
             >= iLimit.fSoftwareLimitNeg
         AND
-        stSoftLimitResult.fRelativeTargetPosition
+        stInternal.stSoftLimitResult.fRelativeTargetPosition
             <= iLimit.fSoftwareLimitPos;
 
 
@@ -1929,14 +1894,14 @@ ELSIF stSoftLimitResult.bReady THEN
 
 ELSE
 
-    stSoftLimitResult.bPositiveActive := FALSE;
-    stSoftLimitResult.bNegativeActive := FALSE;
+    stInternal.stSoftLimitResult.bPositiveActive := FALSE;
+    stInternal.stSoftLimitResult.bNegativeActive := FALSE;
 
-    stSoftLimitResult.bJogPositiveAllowed := FALSE;
-    stSoftLimitResult.bJogNegativeAllowed := FALSE;
+    stInternal.stSoftLimitResult.bJogPositiveAllowed := FALSE;
+    stInternal.stSoftLimitResult.bJogNegativeAllowed := FALSE;
 
-    stSoftLimitResult.bAbsoluteTargetValid := FALSE;
-    stSoftLimitResult.bRelativeTargetValid := FALSE;
+    stInternal.stSoftLimitResult.bAbsoluteTargetValid := FALSE;
+    stInternal.stSoftLimitResult.bRelativeTargetValid := FALSE;
 
 END_IF;
 
@@ -1946,16 +1911,16 @@ END_IF;
 //==============================================================
 
 ioAxis.State.bSoftLimitEnabled :=
-    stSoftLimitResult.bEnabled;
+    stInternal.stSoftLimitResult.bEnabled;
 
 ioAxis.State.bSoftLimitReady :=
-    stSoftLimitResult.bReady;
+    stInternal.stSoftLimitResult.bReady;
 
 ioAxis.State.bSoftLimitPositive :=
-    stSoftLimitResult.bPositiveActive;
+    stInternal.stSoftLimitResult.bPositiveActive;
 
 ioAxis.State.bSoftLimitNegative :=
-    stSoftLimitResult.bNegativeActive;]]></ST>
+    stInternal.stSoftLimitResult.bNegativeActive;]]></ST>
       </Implementation>
     </Method>
   </POU>

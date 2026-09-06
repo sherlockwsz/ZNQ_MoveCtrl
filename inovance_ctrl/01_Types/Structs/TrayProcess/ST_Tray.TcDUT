@@ -1,0 +1,20 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="ST_Tray" Id="{8f3fc1d4-d785-4880-a667-d410a998673a}">
+    <Declaration><![CDATA[(*
+    单层料盘数据：
+    1. fHighPosition：Z轴抬起托盘后的高位；
+    2. fLowPosition ：Z轴伸入托盘下方的低位；
+    3. eState       ：当前料盘状态。
+
+    位置统一使用LREAL，与ST_PositionSet中的轴位置类型保持一致。
+*)
+TYPE ST_Tray :
+STRUCT
+    fHighPosition : LREAL;
+    fLowPosition  : LREAL;
+    eState        : E_Tray;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

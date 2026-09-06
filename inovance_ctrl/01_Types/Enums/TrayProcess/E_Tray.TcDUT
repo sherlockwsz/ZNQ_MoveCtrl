@@ -1,0 +1,18 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="E_Tray" Id="{b6fe4944-a29c-4c67-aaa9-d7f76c5343ec}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+(*料盘状态(枚举):无料盘，待检，检测中，已检*)
+TYPE E_Tray :
+(
+	NoTray := 0,
+	WaitInspect,
+	Inspecting,
+	Inspected
+);
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

@@ -1,0 +1,38 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="E_TrayProcessStep" Id="{09dc1546-1a57-441e-9ac2-d53cd955fba0}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+
+//==============================================================
+// 五层料盘循环流程步骤
+//
+// 当前版本只描述正常取盘、放盘顺序，不包含安全互锁、
+// 超时、报警恢复和外部检测完成条件。
+//==============================================================
+TYPE E_TrayProcessStep :
+(
+    Idle                    := 0,
+
+    TakeMoveXRear           := 10,
+    TakeMoveZLow            := 20,
+    TakeMoveXForward        := 30,
+    TakeMoveZHigh           := 40,
+    TakeMoveXRearWithTray   := 50,
+    TakeMoveZDamperPosition := 60,
+
+    WaitInspection          := 70,
+
+    ReturnEnsureXRear       := 80,
+    ReturnMoveZHigh         := 90,
+    ReturnMoveXForward      := 100,
+    ReturnMoveZLow          := 110,
+    ReturnMoveXRear         := 120,
+
+    NextLayer               := 130,
+    Completed               := 200
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

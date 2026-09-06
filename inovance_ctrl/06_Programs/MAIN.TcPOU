@@ -17,6 +17,9 @@ VAR
     bAnyAxisConfigured : BOOL;
     bAllAxesControlAllowed : BOOL;
     bAnyAxisRequireEnableReset : BOOL;
+	
+	fbTrayProcess : FB_TrayProcess;//料盘自动运送流程
+	bControlAuto : BOOL;//料盘自动运送开始标志
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[//==============================================================
@@ -27,7 +30,19 @@ fbHmiWatchdog(
     udiHeartbeat := GVL_HMI.Comm.udiHeartbeat,
     tTimeout := GVL_System.tHmiWatchdogTimeout
 );
-
+//==============================================================
+// 2. 执行五层料盘循环流程
+//
+// 流程FB放在轴管理器之前调用：
+// 1. 本周期生成的bMoveAbs命令可在本周期被轴管理器读取；
+// 2. 流程读取的是上一周期轴管理器发布的bDone脉冲；
+// 3. 这种一个PLC周期的反馈链路是确定且可重复的。
+//==============================================================
+fbTrayProcess(
+    bStart := bControlAuto,
+    stAxisX := GVL_AxisRuntime.Axes[GVL_AxisIndex.TrayX],
+    stAxisZ := GVL_AxisRuntime.Axes[GVL_AxisIndex.TrayZ]
+);
 
 //==============================================================
 // 2. 统一管理14轴

@@ -1,0 +1,429 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <POU Name="FB_TrayProcess" Id="{47eb50cc-9cfe-4031-a99f-c6dfae995953}" SpecialFunc="None">
+    <Declaration><![CDATA[//==============================================================
+// 五层料盘自动取放流程
+//
+// 启动方式：
+// bStart由FALSE变为TRUE时启动一次完整循环。
+// 一次循环依次取放第1～5层，第5层放回后结束。
+// bStart必须重新回到FALSE，下一次上升沿才可再次启动。
+//
+// 当前版本边界：
+// 1. 只实现正常主流程；
+// 2. 不判断料盘初始状态；
+// 3. 不实现安全互锁、超时和异常恢复；
+// 4. 到达阻尼器取料位后直接进入放盘流程；
+// 5. 启动前两根轴应已使能并可执行绝对运动。
+//==============================================================
+
+FUNCTION_BLOCK FB_TrayProcess
+
+VAR_INPUT
+    bStart : BOOL; // 五层循环启动信号，上升沿有效
+END_VAR
+
+VAR_IN_OUT
+    stAxisX : ST_AxisInterface; // 料仓X轴接口，MAIN中映射Axis1
+    stAxisZ : ST_AxisInterface; // 料仓Z轴接口，MAIN中映射Warehouse_Z
+END_VAR
+
+VAR_OUTPUT
+    bBusy : BOOL;                         // TRUE：五层循环正在执行
+    bDone : BOOL;                         // TRUE：第5层已经放回
+    nCurrentLayer : INT;                  // 当前处理层号，范围1～5
+    eCurrentStep : E_TrayProcessStep;     // 当前流程步骤
+END_VAR
+
+VAR
+    trigStart : R_TRIG;
+
+    // 当前步骤的绝对运动命令是否已经发送。
+    // 用于保证每个bMoveAbs只产生一个PLC周期的脉冲。
+    bCommandIssued : BOOL;
+
+    nInitIndex : INT;
+
+    //==========================================================
+    // 公共位置与速度
+    //
+    // 数值沿用原FB_AutoFlow中的调试值。
+    // 实机调试前应再次核对机械坐标方向和实际位置。
+    //==========================================================
+    fTrayForwardPosition : LREAL := 385.0;//料架位
+    fTrayRearPosition    : LREAL := -6.0;//升降位
+    fDamperPickPosition  : LREAL := 597.0;//阻尼器取料位
+
+    fXAxisVelocity : LREAL := 50.0;
+    fZAxisVelocity : LREAL := 50.0;
+
+    //==========================================================
+    // 五层料盘数据
+    // 每层分别保存Z轴高位、低位和料盘状态。
+    // 当前测试流程默认五层均有待检料盘。
+    //==========================================================
+    aTray : ARRAY[1..5] OF ST_Tray := [
+        (fHighPosition := -100.0, fLowPosition := -140.0, eState := E_Tray.WaitInspect),
+        (fHighPosition :=   20.0, fLowPosition :=  -20.0, eState := E_Tray.WaitInspect),
+        (fHighPosition :=  140.0, fLowPosition :=  100.0, eState := E_Tray.WaitInspect),
+        (fHighPosition :=  260.0, fLowPosition :=  230.0, eState := E_Tray.WaitInspect),
+        (fHighPosition :=  390.0, fLowPosition :=  355.0, eState := E_Tray.WaitInspect)
+    ];
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[//==============================================================
+// 1. 更新启动上升沿
+//==============================================================
+trigStart(CLK := bStart);
+
+
+//==============================================================
+// 2. 自动流程运行期间，先清除上一周期的运动命令脉冲
+//
+// 每个具体步骤只有在bCommandIssued=FALSE时才重新置TRUE，
+// 因此FB_AxisControl能够收到清晰的bMoveAbs上升沿。
+// 空闲时不写轴命令，避免影响手动调试。
+//==============================================================
+IF bBusy THEN
+    stAxisX.Cmd.bMoveAbs := FALSE;
+    stAxisZ.Cmd.bMoveAbs := FALSE;
+END_IF;
+
+
+//==============================================================
+// 3. 五层循环主状态机
+//==============================================================
+CASE eCurrentStep OF
+
+    E_TrayProcessStep.Idle:
+        bBusy := FALSE;
+        bDone := FALSE;
+        nCurrentLayer := 0;
+        bCommandIssued := FALSE;
+
+        IF trigStart.Q THEN
+            // 每次启动新的测试循环时，将五层恢复为待检状态。
+            FOR nInitIndex := 1 TO 5 DO
+                aTray[nInitIndex].eState := E_Tray.WaitInspect;
+            END_FOR;
+
+            nCurrentLayer := 1;
+            bBusy := TRUE;
+            eCurrentStep := E_TrayProcessStep.TakeMoveXRear;
+        END_IF;
+
+
+    //==========================================================
+    // 取盘子流程
+    //==========================================================
+    E_TrayProcessStep.TakeMoveXRear,
+    E_TrayProcessStep.TakeMoveZLow,
+    E_TrayProcessStep.TakeMoveXForward,
+    E_TrayProcessStep.TakeMoveZHigh,
+    E_TrayProcessStep.TakeMoveXRearWithTray,
+    E_TrayProcessStep.TakeMoveZDamperPosition:
+
+        M_TakeTray(
+            ioAxisX := stAxisX,
+            ioAxisZ := stAxisZ
+        );
+
+
+    //==========================================================
+    // 当前测试版本不等待外部检测完成信号。
+    // 后续增加实际检测时，只需在本步骤增加完成条件，
+    // 条件满足后再进入ReturnEnsureXRear。
+    //==========================================================
+    E_TrayProcessStep.WaitInspection:
+        aTray[nCurrentLayer].eState := E_Tray.Inspecting;
+        bCommandIssued := FALSE;
+        eCurrentStep := E_TrayProcessStep.ReturnEnsureXRear;
+
+
+    //==========================================================
+    // 放盘子流程
+    //==========================================================
+    E_TrayProcessStep.ReturnEnsureXRear,
+    E_TrayProcessStep.ReturnMoveZHigh,
+    E_TrayProcessStep.ReturnMoveXForward,
+    E_TrayProcessStep.ReturnMoveZLow,
+    E_TrayProcessStep.ReturnMoveXRear:
+
+        M_ReturnTray(
+            ioAxisX := stAxisX,
+            ioAxisZ := stAxisZ
+        );
+
+
+    //==========================================================
+    // 当前层已经放回：进入下一层或结束五层循环
+    //==========================================================
+    E_TrayProcessStep.NextLayer:
+        bCommandIssued := FALSE;
+
+        IF nCurrentLayer < 5 THEN
+            nCurrentLayer := nCurrentLayer + 1;
+            eCurrentStep := E_TrayProcessStep.TakeMoveXRear;
+        ELSE
+            eCurrentStep := E_TrayProcessStep.Completed;
+        END_IF;
+
+
+    //==========================================================
+    // 第5层放回完成
+    // bDone保持TRUE，直到外部将bStart恢复为FALSE。
+    //==========================================================
+    E_TrayProcessStep.Completed:
+        bBusy := FALSE;
+        bDone := TRUE;
+        bCommandIssued := FALSE;
+
+        IF NOT bStart THEN
+            bDone := FALSE;
+            eCurrentStep := E_TrayProcessStep.Idle;
+        END_IF;
+
+
+ELSE
+    // 非法步骤回到空闲状态。
+    bBusy := FALSE;
+    bDone := FALSE;
+    nCurrentLayer := 0;
+    bCommandIssued := FALSE;
+    eCurrentStep := E_TrayProcessStep.Idle;
+
+END_CASE;]]></ST>
+    </Implementation>
+    <Method Name="M_ReturnTray" Id="{4dc49e83-450b-4620-bff3-771220373c05}">
+      <Declaration><![CDATA[//==============================================================
+// 将当前层料盘放回原位
+//
+// 顺序：
+// X回升降位 → Z到原层高位 → X到前方送入托盘架
+// → Z下降到低位放盘 → X回后方退出。
+//==============================================================
+METHOD PRIVATE M_ReturnTray
+
+VAR_IN_OUT
+    ioAxisX : ST_AxisInterface;
+    ioAxisZ : ST_AxisInterface;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[CASE eCurrentStep OF
+
+    //==========================================================
+    // 1. 放盘开始前再次保证X轴位于后方
+    //==========================================================
+    E_TrayProcessStep.ReturnEnsureXRear:
+        IF NOT bCommandIssued THEN
+            ioAxisX.Set.Position.fAbsolutePosition := fTrayRearPosition;
+            ioAxisX.Set.Position.fVelocity := fXAxisVelocity;
+            ioAxisX.Cmd.bMoveAbs := TRUE;
+            bCommandIssued := TRUE;
+        END_IF;
+
+        IF bCommandIssued AND ioAxisX.State.bDone THEN
+            bCommandIssued := FALSE;
+            eCurrentStep := E_TrayProcessStep.ReturnMoveZHigh;
+        END_IF;
+
+
+    //==========================================================
+    // 2. Z轴移动到刚才取出料盘所在层的高位
+    //==========================================================
+    E_TrayProcessStep.ReturnMoveZHigh:
+        IF NOT bCommandIssued THEN
+            ioAxisZ.Set.Position.fAbsolutePosition :=
+                aTray[nCurrentLayer].fHighPosition;
+            ioAxisZ.Set.Position.fVelocity := fZAxisVelocity;
+            ioAxisZ.Cmd.bMoveAbs := TRUE;
+            bCommandIssued := TRUE;
+        END_IF;
+
+        IF bCommandIssued AND ioAxisZ.State.bDone THEN
+            bCommandIssued := FALSE;
+            eCurrentStep := E_TrayProcessStep.ReturnMoveXForward;
+        END_IF;
+
+
+    //==========================================================
+    // 3. X轴前移，将托盘送入托盘架
+    //==========================================================
+    E_TrayProcessStep.ReturnMoveXForward:
+        IF NOT bCommandIssued THEN
+            ioAxisX.Set.Position.fAbsolutePosition := fTrayForwardPosition;
+            ioAxisX.Set.Position.fVelocity := fXAxisVelocity;
+            ioAxisX.Cmd.bMoveAbs := TRUE;
+            bCommandIssued := TRUE;
+        END_IF;
+
+        IF bCommandIssued AND ioAxisX.State.bDone THEN
+            bCommandIssued := FALSE;
+            eCurrentStep := E_TrayProcessStep.ReturnMoveZLow;
+        END_IF;
+
+
+    //==========================================================
+    // 4. Z轴下降到当前层低位，将托盘放在支撑位置
+    //==========================================================
+    E_TrayProcessStep.ReturnMoveZLow:
+        IF NOT bCommandIssued THEN
+            ioAxisZ.Set.Position.fAbsolutePosition :=
+                aTray[nCurrentLayer].fLowPosition;
+            ioAxisZ.Set.Position.fVelocity := fZAxisVelocity;
+            ioAxisZ.Cmd.bMoveAbs := TRUE;
+            bCommandIssued := TRUE;
+        END_IF;
+
+        IF bCommandIssued AND ioAxisZ.State.bDone THEN
+            bCommandIssued := FALSE;
+            eCurrentStep := E_TrayProcessStep.ReturnMoveXRear;
+        END_IF;
+
+
+    //==========================================================
+    // 5. X轴回到升降位，完成当前层放盘
+    //==========================================================
+    E_TrayProcessStep.ReturnMoveXRear:
+        IF NOT bCommandIssued THEN
+            ioAxisX.Set.Position.fAbsolutePosition := fTrayRearPosition;
+            ioAxisX.Set.Position.fVelocity := fXAxisVelocity;
+            ioAxisX.Cmd.bMoveAbs := TRUE;
+            bCommandIssued := TRUE;
+        END_IF;
+
+        IF bCommandIssued AND ioAxisX.State.bDone THEN
+            bCommandIssued := FALSE;
+            aTray[nCurrentLayer].eState := E_Tray.Inspected;
+            eCurrentStep := E_TrayProcessStep.NextLayer;
+        END_IF;
+
+END_CASE;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_TakeTray" Id="{6aa3b8c5-8649-438d-bc09-152dae8d529b}">
+      <Declaration><![CDATA[//==============================================================
+// 取出当前层料盘
+//
+// 顺序：
+// X回后方 → Z到低位 → X到前方 → Z到高位抬盘
+// → X回后方取出 → Z到阻尼器取料位。
+//==============================================================
+METHOD PRIVATE M_TakeTray
+
+VAR_IN_OUT
+    ioAxisX : ST_AxisInterface;
+    ioAxisZ : ST_AxisInterface;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[CASE eCurrentStep OF
+
+    //==========================================================
+    // 1. 流程开始时先保证X轴回到后方位
+    //==========================================================
+    E_TrayProcessStep.TakeMoveXRear:
+        IF NOT bCommandIssued THEN
+            ioAxisX.Set.Position.fAbsolutePosition := fTrayRearPosition;
+            ioAxisX.Set.Position.fVelocity := fXAxisVelocity;
+            ioAxisX.Cmd.bMoveAbs := TRUE;
+            bCommandIssued := TRUE;
+        END_IF;
+
+        IF bCommandIssued AND ioAxisX.State.bDone THEN
+            bCommandIssued := FALSE;
+            eCurrentStep := E_TrayProcessStep.TakeMoveZLow;
+        END_IF;
+
+
+    //==========================================================
+    // 2. Z轴移动到当前层托盘下方
+    //==========================================================
+    E_TrayProcessStep.TakeMoveZLow:
+        IF NOT bCommandIssued THEN
+            ioAxisZ.Set.Position.fAbsolutePosition :=
+                aTray[nCurrentLayer].fLowPosition;
+            ioAxisZ.Set.Position.fVelocity := fZAxisVelocity;
+            ioAxisZ.Cmd.bMoveAbs := TRUE;
+            bCommandIssued := TRUE;
+        END_IF;
+
+        IF bCommandIssued AND ioAxisZ.State.bDone THEN
+            bCommandIssued := FALSE;
+            eCurrentStep := E_TrayProcessStep.TakeMoveXForward;
+        END_IF;
+
+
+    //==========================================================
+    // 3. X轴前移，伸入托盘架
+    //==========================================================
+    E_TrayProcessStep.TakeMoveXForward:
+        IF NOT bCommandIssued THEN
+            ioAxisX.Set.Position.fAbsolutePosition := fTrayForwardPosition;
+            ioAxisX.Set.Position.fVelocity := fXAxisVelocity;
+            ioAxisX.Cmd.bMoveAbs := TRUE;
+            bCommandIssued := TRUE;
+        END_IF;
+
+        IF bCommandIssued AND ioAxisX.State.bDone THEN
+            bCommandIssued := FALSE;
+            eCurrentStep := E_TrayProcessStep.TakeMoveZHigh;
+        END_IF;
+
+
+    //==========================================================
+    // 4. Z轴抬升到当前层高位，将托盘托起
+    //==========================================================
+    E_TrayProcessStep.TakeMoveZHigh:
+        IF NOT bCommandIssued THEN
+            ioAxisZ.Set.Position.fAbsolutePosition :=
+                aTray[nCurrentLayer].fHighPosition;
+            ioAxisZ.Set.Position.fVelocity := fZAxisVelocity;
+            ioAxisZ.Cmd.bMoveAbs := TRUE;
+            bCommandIssued := TRUE;
+        END_IF;
+
+        IF bCommandIssued AND ioAxisZ.State.bDone THEN
+            bCommandIssued := FALSE;
+            eCurrentStep := E_TrayProcessStep.TakeMoveXRearWithTray;
+        END_IF;
+
+
+    //==========================================================
+    // 5. X轴带着托盘回到后方位
+    //==========================================================
+    E_TrayProcessStep.TakeMoveXRearWithTray:
+        IF NOT bCommandIssued THEN
+            ioAxisX.Set.Position.fAbsolutePosition := fTrayRearPosition;
+            ioAxisX.Set.Position.fVelocity := fXAxisVelocity;
+            ioAxisX.Cmd.bMoveAbs := TRUE;
+            bCommandIssued := TRUE;
+        END_IF;
+
+        IF bCommandIssued AND ioAxisX.State.bDone THEN
+            bCommandIssued := FALSE;
+            eCurrentStep := E_TrayProcessStep.TakeMoveZDamperPosition;
+        END_IF;
+
+
+    //==========================================================
+    // 6. Z轴移动到固定阻尼器取料位
+    //==========================================================
+    E_TrayProcessStep.TakeMoveZDamperPosition:
+        IF NOT bCommandIssued THEN
+            ioAxisZ.Set.Position.fAbsolutePosition := fDamperPickPosition;
+            ioAxisZ.Set.Position.fVelocity := fZAxisVelocity;
+            ioAxisZ.Cmd.bMoveAbs := TRUE;
+            bCommandIssued := TRUE;
+        END_IF;
+
+        IF bCommandIssued AND ioAxisZ.State.bDone THEN
+            bCommandIssued := FALSE;
+            aTray[nCurrentLayer].eState := E_Tray.Inspecting;
+            eCurrentStep := E_TrayProcessStep.WaitInspection;
+        END_IF;
+
+END_CASE;]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

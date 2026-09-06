@@ -36,6 +36,12 @@
     <Compile Include="01_Types\Enums\Axes\Alarms\E_AxisRejectReason.TcDUT">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="01_Types\Enums\TrayProcess\E_Tray.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Enums\TrayProcess\E_TrayProcessStep.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="01_Types\Structs\Axes\Commands\ST_AxisCmd.TcDUT">
       <SubType>Code</SubType>
     </Compile>
@@ -75,6 +81,9 @@
     <Compile Include="01_Types\Structs\Communication\ST_HmiCommunication.TcDUT">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="01_Types\Structs\TrayProcess\ST_Tray.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="02_GVLs\Axes\Configuration\GVL_AxisConfig.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
@@ -112,6 +121,9 @@
     <Compile Include="03_AxisControl\Management\FB_AxisManager.TcPOU">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="03_AxisControl\TrayProcess\FB_TrayProcess.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="04_SystemControl\Communication\FB_HmiWatchdog.TcPOU">
       <SubType>Code</SubType>
     </Compile>
@@ -130,6 +142,7 @@
     <Folder Include="01_Types\Enums\Axes\States" />
     <Folder Include="01_Types\Enums\Axes\Modes" />
     <Folder Include="01_Types\Enums\Axes\Alarms" />
+    <Folder Include="01_Types\Enums\TrayProcess" />
     <Folder Include="01_Types\Structs" />
     <Folder Include="01_Types\Structs\Axes" />
     <Folder Include="01_Types\Structs\Axes\Interface" />
@@ -141,6 +154,7 @@
     <Folder Include="01_Types\Structs\Axes\Interlocks" />
     <Folder Include="01_Types\Structs\Axes\Internal" />
     <Folder Include="01_Types\Structs\Communication" />
+    <Folder Include="01_Types\Structs\TrayProcess" />
     <Folder Include="02_GVLs" />
     <Folder Include="02_GVLs\Axes" />
     <Folder Include="02_GVLs\Axes\Configuration" />
@@ -152,6 +166,7 @@
     <Folder Include="03_AxisControl" />
     <Folder Include="03_AxisControl\Core" />
     <Folder Include="03_AxisControl\Management" />
+    <Folder Include="03_AxisControl\TrayProcess" />
     <Folder Include="03_AxisControl\Supervision" />
     <Folder Include="04_SystemControl" />
     <Folder Include="04_SystemControl\Communication" />

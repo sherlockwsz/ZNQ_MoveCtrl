@@ -20,6 +20,19 @@ VAR
 	
 	fbTrayProcess : FB_TrayProcess;//料盘自动运送流程
 	bControlAuto : BOOL;//料盘自动运送开始标志
+	
+	// 阻尼器料位数据和初始化管理。
+	// 当前只管理数据，不产生任何轴运动命令。
+	fbDamperProcess : FB_DamperProcess;
+	
+	// 在线调试时置TRUE产生一次上升沿，重新计算全部坐标。
+	// 使用后应恢复FALSE，再次使用时重新产生上升沿。
+	bReinitializeDamperCoordinates : BOOL;
+	
+	// 在线测试启动：先置FALSE，再置TRUE。
+	bStartDamperProcess : BOOL;
+	
+	
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[//==============================================================
@@ -43,9 +56,23 @@ fbTrayProcess(
     stAxisX := GVL_AxisRuntime.Axes[GVL_AxisIndex.TrayX],
     stAxisZ := GVL_AxisRuntime.Axes[GVL_AxisIndex.TrayZ]
 );
-
 //==============================================================
-// 2. 统一管理14轴
+// 五盘阻尼器上下料测试流程
+//
+// 必须放在DamperX/Y/Z三个轴管理器之前，
+// 使本周期生成的运动命令能够在同周期被轴管理器读取。
+//==============================================================
+fbDamperProcess(
+    bStart := bStartDamperProcess,
+
+    bReinitializeCoordinates :=
+        bReinitializeDamperCoordinates,
+
+    stAxisX := GVL_AxisRuntime.Axes[GVL_AxisIndex.DamperX],
+    stAxisY := GVL_AxisRuntime.Axes[GVL_AxisIndex.DamperY],
+    stAxisZ := GVL_AxisRuntime.Axes[GVL_AxisIndex.DamperZ]
+);//==============================================================
+// 4. 统一管理14轴
 //
 // 所有轴引用、配置、运行数据和管理器实例使用同一个业务下标。
 // DamperGripper[7]当前bConfigured=FALSE，
@@ -78,7 +105,7 @@ END_FOR;
 
 
 //==============================================================
-// 3. 发布HMI通信与全轴汇总状态
+// 5. 发布HMI通信与全轴汇总状态
 //==============================================================
 GVL_HMI.Comm.bOnline := fbHmiWatchdog.bOnline;
 GVL_HMI.Comm.bTimeout := fbHmiWatchdog.bTimeout;

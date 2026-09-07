@@ -1,0 +1,28 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="E_DamperProcessStep" Id="{2e7ea138-97d0-4766-a9f5-3f9bcc9b1a71}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+
+(*
+    五盘阻尼器上下料主流程步骤。
+    当前转台、夹爪和调整动作均使用占位步骤直接通过。
+*)
+TYPE E_DamperProcessStep :
+(
+    Idle                       := 0,
+    TakeCurrentDamper          := 10,
+    WaitPreviousAdjustment     := 20,
+    RotateTurntable            := 30,
+    PlacePreviousDamper        := 40,
+    FinishCurrentSlot          := 50,
+    WaitTrayChange             := 60,
+    FinalWaitAdjustment        := 70,
+    FinalRotateTurntable       := 80,
+    PlaceFinalDamperToBuffer   := 90,
+    Completed                  := 100
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

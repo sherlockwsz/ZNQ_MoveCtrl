@@ -18,6 +18,9 @@
     <LibraryReferences>{019a77e5-ff0d-4ac9-99c8-1675a70892e9}</LibraryReferences>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="01_Types\Arrays\Damper\A_DamperSlotGrid.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="01_Types\Enums\Axes\Commands\E_AxisCommand.TcDUT">
       <SubType>Code</SubType>
     </Compile>
@@ -36,10 +39,22 @@
     <Compile Include="01_Types\Enums\Axes\Alarms\E_AxisRejectReason.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\TrayProcess\E_Tray.TcDUT">
+    <Compile Include="01_Types\Enums\Damper\E_DamperPlaceStep.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\TrayProcess\E_TrayProcessStep.TcDUT">
+    <Compile Include="01_Types\Enums\Damper\E_DamperProcessStep.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Enums\Damper\E_DamperSlotState.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Enums\Damper\E_DamperTakeStep.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Enums\Tray\E_Tray.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Enums\Tray\E_TrayProcessStep.TcDUT">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="01_Types\Structs\Axes\Commands\ST_AxisCmd.TcDUT">
@@ -81,7 +96,10 @@
     <Compile Include="01_Types\Structs\Communication\ST_HmiCommunication.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\TrayProcess\ST_Tray.TcDUT">
+    <Compile Include="01_Types\Structs\Damper\ST_DamperSlot.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\Tray\ST_Tray.TcDUT">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="02_GVLs\Axes\Configuration\GVL_AxisConfig.TcGVL">
@@ -115,6 +133,9 @@
     <Compile Include="03_AxisControl\Core\FB_AxisControl.TcPOU">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="03_AxisControl\DamperProcess\FB_DamperProcess.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="03_AxisControl\Supervision\FB_AxisCommandGuard.TcPOU">
       <SubType>Code</SubType>
     </Compile>
@@ -136,13 +157,16 @@
   </ItemGroup>
   <ItemGroup>
     <Folder Include="01_Types" />
+    <Folder Include="01_Types\Arrays\Damper" />
     <Folder Include="01_Types\Enums" />
     <Folder Include="01_Types\Enums\Axes" />
     <Folder Include="01_Types\Enums\Axes\Commands" />
     <Folder Include="01_Types\Enums\Axes\States" />
     <Folder Include="01_Types\Enums\Axes\Modes" />
     <Folder Include="01_Types\Enums\Axes\Alarms" />
-    <Folder Include="01_Types\Enums\TrayProcess" />
+    <Folder Include="01_Types\Enums\Damper" />
+    <Folder Include="01_Types\Enums\Tray" />
+    <Folder Include="01_Types\Arrays" />
     <Folder Include="01_Types\Structs" />
     <Folder Include="01_Types\Structs\Axes" />
     <Folder Include="01_Types\Structs\Axes\Interface" />
@@ -154,7 +178,8 @@
     <Folder Include="01_Types\Structs\Axes\Interlocks" />
     <Folder Include="01_Types\Structs\Axes\Internal" />
     <Folder Include="01_Types\Structs\Communication" />
-    <Folder Include="01_Types\Structs\TrayProcess" />
+    <Folder Include="01_Types\Structs\Damper" />
+    <Folder Include="01_Types\Structs\Tray" />
     <Folder Include="02_GVLs" />
     <Folder Include="02_GVLs\Axes" />
     <Folder Include="02_GVLs\Axes\Configuration" />
@@ -166,6 +191,7 @@
     <Folder Include="03_AxisControl" />
     <Folder Include="03_AxisControl\Core" />
     <Folder Include="03_AxisControl\Management" />
+    <Folder Include="03_AxisControl\DamperProcess" />
     <Folder Include="03_AxisControl\TrayProcess" />
     <Folder Include="03_AxisControl\Supervision" />
     <Folder Include="04_SystemControl" />

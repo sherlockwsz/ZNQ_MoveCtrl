@@ -1,0 +1,24 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="E_DamperTakeStep" Id="{fe8c8926-3cc4-420e-b47a-707e2480c41b}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+
+TYPE E_DamperTakeStep :
+(
+    Idle                 := 0,
+    EnsureSafeZ          := 10,
+    MoveXYToSlot         := 20,
+    LowerZToSlot         := 30,
+    ClampPlaceholder     := 40,
+    LiftZFromSlot        := 50,
+    MoveXYToTransfer     := 60,
+    LowerZToTransfer     := 70,
+    ReleasePlaceholder   := 80,
+    LiftZFromTransfer    := 90,
+    Completed            := 100
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

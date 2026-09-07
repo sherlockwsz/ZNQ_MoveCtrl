@@ -1,0 +1,42 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="E_DamperSlotState" Id="{33fbf3a9-65ef-4e71-a984-3a860fae93f3}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+
+(*
+    阻尼器料位/工件状态。
+
+    使用说明：
+    1. ST_DamperSlot.eState主要表示物理料位中当前放置的内容；
+    2. PendingAdjustment和Adjusting预留给后续转台工件状态；
+    3. 通过显式数值为以后ADS通信和日志记录保留稳定映射；
+    4. 新增状态时不要修改已有状态的数值。
+*)
+TYPE E_DamperSlotState :
+(
+    // 当前物理料位中没有阻尼器。
+    Empty := 0,
+
+    // 当前物理料位中放有尚未进行同轴度调整的阻尼器。
+    Unadjusted := 10,
+
+    // 阻尼器已经放入转台备料位，等待进入调整位置。
+    // 该状态主要供后续转台工件状态变量使用。
+    PendingAdjustment := 20,
+
+    // 阻尼器位于调整位置，正在进行同轴度调整。
+    // 该状态主要供后续转台工件状态变量使用。
+    Adjusting := 30,
+
+    // 当前物理料位中放有调整完成且检测合格的阻尼器。
+    Qualified := 40,
+
+    // 阻尼器调整或检测不合格。
+    // 后续接入不合格料盘后，应将其转移到不合格料盘。
+    Unqualified := 50
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

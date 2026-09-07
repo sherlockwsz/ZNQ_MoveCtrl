@@ -103,10 +103,7 @@ CASE eCurrentStep OF
 
         IF trigStart.Q THEN
             // 每次启动新的测试循环时，将五层恢复为待检状态。
-            FOR nInitIndex := 1 TO 5 DO
-                aTray[nInitIndex].eState := E_Tray.WaitInspect;
-            END_FOR;
-
+			M_ResetTrayStates();
             nCurrentLayer := 1;
             bBusy := TRUE;
             eCurrentStep := E_TrayProcessStep.TakeMoveXRear;
@@ -194,6 +191,24 @@ ELSE
 
 END_CASE;]]></ST>
     </Implementation>
+    <Method Name="M_ResetTrayStates" Id="{c28507a6-5dc3-4d81-8e05-5412d1d6f331}">
+      <Declaration><![CDATA[METHOD PRIVATE M_ResetTrayStates
+
+VAR
+    nLayer : INT;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[(*
+    每次启动新的五层料盘循环时，
+    将五层料盘状态恢复为待检。
+    不修改每层的高位和低位坐标。
+*)
+FOR nLayer := 1 TO 5 DO
+    aTray[nLayer].eState :=
+        E_Tray.WaitInspect;
+END_FOR;]]></ST>
+      </Implementation>
+    </Method>
     <Method Name="M_ReturnTray" Id="{4dc49e83-450b-4620-bff3-771220373c05}">
       <Declaration><![CDATA[//==============================================================
 // 将当前层料盘放回原位

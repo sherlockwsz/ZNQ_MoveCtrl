@@ -1,0 +1,31 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="A_DamperSlotGrid" Id="{f0608153-252c-454c-a0d9-43a0e34ac182}">
+    <Declaration><![CDATA[(*
+    单盘阻尼器料位二维数组。
+
+    数组定义：
+    1. 第一维为行号，范围1～4；
+    2. 第二维为列号，范围1～6；
+    3. 共4×6=24个物理料位；
+    4. 数组只描述当前送到工作位置的料盘；
+    5. 切换下一盘时，由后续流程重新初始化数组内容。
+
+    访问示例：
+    aSlots[1,1]：第一行第一列；
+    aSlots[1,2]：第一行第二列；
+    aSlots[4,6]：第四行第六列。
+
+    运动方向：
+    aSlots[1,1] → aSlots[1,2]：
+        DamperX不变，DamperY增加。
+
+    aSlots[1,6] → aSlots[2,1]：
+        DamperY回到第一列坐标，
+        DamperX增加一个行间距。
+*)
+TYPE A_DamperSlotGrid :
+ARRAY[1..4, 1..6] OF ST_DamperSlot;
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

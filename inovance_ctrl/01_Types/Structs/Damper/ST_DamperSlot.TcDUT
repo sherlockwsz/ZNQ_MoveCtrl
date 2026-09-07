@@ -1,0 +1,47 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="ST_DamperSlot" Id="{3dd86acb-eb4f-4d1d-9589-0cd6ac8c0fd0}">
+    <Declaration><![CDATA[(*
+    单个阻尼器物理料位数据。
+
+    数组下标已经代表行号和列号，因此结构体中不重复保存：
+    1. 行号；
+    2. 列号；
+    3. 1～24顺序编号。
+
+    Z轴位置对全部料位相同，因此不在每个料位中重复保存。
+    后续统一使用：
+    1. 料盘取放高度：-71 mm；
+    2. XY移动临时安全高度：15 mm；
+    3. 转台备料/取回高度：8 mm；
+    4. 最终缓冲位取放高度：-77 mm。
+	
+    fXPosition和fYPosition均为PLC绝对坐标，
+    类型使用LREAL，与现有轴定位参数保持一致。
+*)
+TYPE ST_DamperSlot :
+STRUCT
+    // 阻尼器X轴绝对位置，单位mm。
+    //
+    // X轴对应料盘行方向：
+    // 从上一行进入下一行时，X坐标增加一个行间距。
+    fXPosition : LREAL;
+
+    // 阻尼器Y轴绝对位置，单位mm。
+    //
+    // Y轴对应同一行内的逐列运动：
+    // 从(1,1)到(1,2)时，只有Y坐标增加。
+    fYPosition : LREAL;
+
+    // 当前物理料位中放置内容的状态。
+    //
+    // 典型状态变化：
+    // Unadjusted → Empty → Qualified
+    //
+    // 如果调整结果不合格且转移到不合格料盘，
+    // 当前物理料位通常继续保持Empty。
+    eState : E_DamperSlotState;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

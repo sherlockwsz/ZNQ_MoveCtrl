@@ -1,0 +1,41 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="ST_DamperTurntableInput" Id="{756521ca-292f-48ef-b69f-a37c1f7de9a4}">
+    <Declaration><![CDATA[(*
+    转台协调流程输入及保持型握手信号。
+*)
+TYPE ST_DamperTurntableInput :
+STRUCT
+    bEnable : BOOL; // 转台协调功能允许运行
+
+    // 机械手已经离开转台运动区域，允许进行一次位置交换。
+    // 请求方必须保持TRUE，直到收到bExchangeDone。
+    bExchangeRequest : BOOL;
+
+    // TRUE：后续不会再有新的未调整阻尼器进入备料位。
+    // 用于识别第五盘最后一件的最终排出流程。
+    bNoMorePartsToLoad : BOOL;
+
+    // 后续调整流程已经接受bAdjustmentRequest。
+    bAdjustmentAccepted : BOOL;
+
+    // 调整完成信号，保持到收到bAdjustmentDoneAck。
+    bAdjustmentDone : BOOL;
+
+    // TRUE：本次调整结果合格；FALSE：调整结果不合格。
+    bAdjustmentQualified : BOOL;
+
+    // 机械手已将最后一件从转台取回位搬至缓冲位。
+    // 保持到bFinalUnloadRequest撤销。
+    bFinalUnloadDone : BOOL;
+
+    // 相机捕获结果预留。
+    // bUseVisionValidation=FALSE时不参与流程判断。
+    bTransferCaptureOK   : BOOL;
+    bAdjustmentCaptureOK : BOOL;
+
+    bReset : BOOL; // 流程故障复位，上升沿触发
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

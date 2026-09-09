@@ -8,12 +8,19 @@
 TYPE E_DamperTakeStep :
 (
     Idle                 := 0,
-    EnsureSafeZ          := 10,
-    MoveXYToSlot         := 20,
-    LowerZToSlot         := 30,
-    ClampPlaceholder     := 40,
-    LiftZFromSlot        := 50,
-    MoveXYToTransfer     := 60,
+    EnsureSafeZ          := 10,// 确认DamperZ位于安全高度。
+    MoveXYToVisionPosition     := 11,// XY移动，使相机中心对准当前阻尼器。
+
+    SimulateVisionDetection    := 12,// 延时模拟相机检测，并锁存相对修正角。
+
+    MoveXYToSlot               := 20,// 检测完成后，XY回到阻尼器理论料位。
+    LowerZToSlot         := 30,// Z轴下降到料盘取料高度。
+    ClampPlaceholder     := 40,// 夹爪夹紧占位。
+    LiftZFromSlot        := 50,// Z轴抬升和DamperRotation相对旋转并行执行。
+    MoveXYToTransfer     := 60, // 两个并行动作均完成后，XY移动到转台备料位。
+	// XY到达备料位、Z保持110mm时，
+	// DamperRotation旋转360°模拟二维码扫描。
+	RotateForQrScan := 65,
     LowerZToTransfer     := 70,
     ReleasePlaceholder   := 80,
     LiftZFromTransfer    := 90,

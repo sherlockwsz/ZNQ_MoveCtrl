@@ -1,0 +1,22 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="E_DamperTurntablePosition" Id="{605504db-6ab1-4c2d-9a99-08c32805752d}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+
+(*
+    转台当前确认到达的绝对位置。
+
+    每次交换在0°和180°之间正反交替运动，
+    避免角度不断累加。
+*)
+TYPE E_DamperTurntablePosition :
+(
+    Unknown     := 0,   // 尚未确认位置
+    Position0   := 10,  // 转台位于0°
+    Position180 := 20   // 转台位于180°
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

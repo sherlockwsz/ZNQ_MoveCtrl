@@ -24,15 +24,16 @@ VAR
 	// 阻尼器料位数据和初始化管理。
 	// 当前只管理数据，不产生任何轴运动命令。
 	fbDamperProcess : FB_DamperProcess;
+	// 转台与夹紧轴协调流程。
+	fbTurntableProcess : FB_TurntableProcess;
 	
 	// 在线调试时置TRUE产生一次上升沿，重新计算全部坐标。
 	// 使用后应恢复FALSE，再次使用时重新产生上升沿。
 	bReinitializeDamperCoordinates : BOOL;
-	
-	// 在线测试启动：先置FALSE，再置TRUE。
-	bStartDamperProcess : BOOL;
-	
-	
+		
+	// 整套五盘联动流程状态。
+	bAutoProcessBusy : BOOL;
+	bAutoProcessDone : BOOL;
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[//==============================================================
@@ -44,34 +45,102 @@ fbHmiWatchdog(
     tTimeout := GVL_System.tHmiWatchdogTimeout
 );
 //==============================================================
-// 2. 执行五层料盘循环流程
+// 1. 料盘流程
 //
-// 流程FB放在轴管理器之前调用：
-// 1. 本周期生成的bMoveAbs命令可在本周期被轴管理器读取；
-// 2. 流程读取的是上一周期轴管理器发布的bDone脉冲；
-// 3. 这种一个PLC周期的反馈链路是确定且可重复的。
+// 读取FB_DamperProcess上一扫描周期的请求和完成状态。
 //==============================================================
 fbTrayProcess(
     bStart := bControlAuto,
-    stAxisX := GVL_AxisRuntime.Axes[GVL_AxisIndex.TrayX],
-    stAxisZ := GVL_AxisRuntime.Axes[GVL_AxisIndex.TrayZ]
+	
+    // Damper三轴完成启动预定位后，
+    // 才允许Tray机构开始取第一盘。
+    bDamperPrePositionDone :=
+        fbDamperProcess.bPrePositionDone,
+		
+    bTrayChangeRequest :=
+        fbDamperProcess.bTrayChangeRequest,
+
+    bDamperProcessDone :=
+        fbDamperProcess.bDone,
+
+    stAxisX :=
+        GVL_AxisRuntime.Axes[GVL_AxisIndex.TrayX],
+
+    stAxisZ :=
+        GVL_AxisRuntime.Axes[GVL_AxisIndex.TrayZ]
 );
+
+
 //==============================================================
-// 五盘阻尼器上下料测试流程
+// 2. 阻尼器上下料流程
 //
-// 必须放在DamperX/Y/Z三个轴管理器之前，
-// 使本周期生成的运动命令能够在同周期被轴管理器读取。
+// 读取FB_TrayProcess本扫描周期发布的料盘状态。
 //==============================================================
 fbDamperProcess(
-    bStart := bStartDamperProcess,
+    bStart := bControlAuto,
 
     bReinitializeCoordinates :=
         bReinitializeDamperCoordinates,
 
-    stAxisX := GVL_AxisRuntime.Axes[GVL_AxisIndex.DamperX],
-    stAxisY := GVL_AxisRuntime.Axes[GVL_AxisIndex.DamperY],
-    stAxisZ := GVL_AxisRuntime.Axes[GVL_AxisIndex.DamperZ]
-);//==============================================================
+    bTrayAtDamperPosition :=
+        fbTrayProcess.bTrayAtDamperPosition,
+
+    bTrayChangeDone :=
+        fbTrayProcess.bTrayChangeDone,
+
+    nTrayAtDamperLayer :=
+        fbTrayProcess.nCurrentLayer,
+
+    stTurntableStatus :=
+        fbTurntableProcess.stStatus,
+
+    stAxisX :=
+        GVL_AxisRuntime.Axes[GVL_AxisIndex.DamperX],
+
+    stAxisY :=
+        GVL_AxisRuntime.Axes[GVL_AxisIndex.DamperY],
+
+    stAxisZ :=
+        GVL_AxisRuntime.Axes[GVL_AxisIndex.DamperZ],
+
+    // 新增：阻尼器夹爪旋转轴。
+    stAxisRotation :=
+        GVL_AxisRuntime.Axes[
+            GVL_AxisIndex.DamperRotation
+        ]
+);
+//==============================================================
+// 转台夹紧流程测试
+//
+//==============================================================
+
+fbTurntableProcess(
+    // 读取上下料FB本周期生成的保持型请求。
+    stInput := fbDamperProcess.stTurntableInput,
+
+    stTurntableAxis :=
+        GVL_AxisRuntime.Axes[GVL_AxisIndex.Turntable],
+
+    stClampingAxis :=
+        GVL_AxisRuntime.Axes[GVL_AxisIndex.Clamping],
+
+    // 两个状态继续保存在fbDamperProcess下，保持现有ADS/WPF符号路径。
+    eTransferPositionState :=
+        fbDamperProcess.eTransferPositionState,
+
+    eAdjustmentPositionState :=
+        fbDamperProcess.eAdjustmentPositionState
+);
+
+	bAutoProcessBusy :=
+		fbTrayProcess.bBusy
+		OR fbDamperProcess.bBusy
+		OR fbTurntableProcess.stStatus.bBusy;
+	
+	// 最终Done只能以料盘机构完成最终复位为准。
+	bAutoProcessDone :=
+		fbTrayProcess.bDone;
+//==============================================================
 // 4. 统一管理14轴
 //
 // 所有轴引用、配置、运行数据和管理器实例使用同一个业务下标。

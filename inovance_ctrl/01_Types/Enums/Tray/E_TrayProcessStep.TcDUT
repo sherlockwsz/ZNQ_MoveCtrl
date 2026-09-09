@@ -31,6 +31,9 @@ TYPE E_TrayProcessStep :
     ReturnMoveXRear         := 120,
 
     NextLayer               := 130,
+	// 第五盘放回且TrayX退出后，
+    // TrayZ回到第一层下方。
+    FinalMoveZFirstLayerLow := 140,
     Completed               := 200
 );
 END_TYPE]]></Declaration>

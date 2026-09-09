@@ -12,6 +12,11 @@
 TYPE E_DamperProcessStep :
 (
     Idle                       := 0,
+	// 自动流程启动预定位：
+    // Z轴先到110mm，随后X/Y到第一料位上方。
+    InitializeSafeZ            := 1,
+    InitializeXYFirstSlot      := 2,
+    WaitFirstTray              := 3,
     TakeCurrentDamper          := 10,
     WaitPreviousAdjustment     := 20,
     RotateTurntable            := 30,

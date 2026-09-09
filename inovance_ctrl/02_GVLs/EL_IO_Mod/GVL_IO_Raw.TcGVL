@@ -1,0 +1,24 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <GVL Name="GVL_IO_Raw" Id="{1f007b7f-5745-4627-8565-39cbed462a4b}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+VAR_GLOBAL
+    // =========================================================
+    // EL1008数字量输入模块
+    // 由TwinCAT I/O Mapping写入，PLC程序禁止赋值
+    // =========================================================
+
+    aEL1008_01 AT %I* : ARRAY[1..8] OF BOOL;
+    aEL1008_02 AT %I* : ARRAY[1..8] OF BOOL;
+    aEL1008_03 AT %I* : ARRAY[1..8] OF BOOL;
+
+    // =========================================================
+    // EL2008数字量输出模块
+    // PLC程序写入，由TwinCAT发送到物理输出端口
+    // =========================================================
+
+    aEL2008_01 AT %Q* : ARRAY[1..8] OF BOOL;
+    aEL2008_02 AT %Q* : ARRAY[1..8] OF BOOL;
+END_VAR]]></Declaration>
+  </GVL>
+</TcPlcObject>

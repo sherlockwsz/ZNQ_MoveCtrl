@@ -21,6 +21,22 @@ FUNCTION_BLOCK FB_TrayProcess
 
 VAR_INPUT
     bStart : BOOL; // 五层循环启动信号，上升沿有效
+	
+    //==========================================================
+    // 来自FB_DamperProcess的预定位完成信号
+    //
+    // 只有DamperZ到达110mm且DamperX/Y到达(1,1)后，
+    // Tray机构才允许开始取第一盘。
+    //==========================================================
+    bDamperPrePositionDone : BOOL;	
+
+	// 来自FB_DamperProcess。
+    // 第1～4盘第24件进入调整位后保持TRUE，请求更换料盘。
+    bTrayChangeRequest : BOOL;
+
+    // 第五盘最后一件已经放入缓冲位。
+    // 保持到下一次自动流程启动。
+    bDamperProcessDone : BOOL;
 END_VAR
 
 VAR_IN_OUT
@@ -33,6 +49,13 @@ VAR_OUTPUT
     bDone : BOOL;                         // TRUE：第5层已经放回
     nCurrentLayer : INT;                  // 当前处理层号，范围1～5
     eCurrentStep : E_TrayProcessStep;     // 当前流程步骤
+	
+	// 当前料盘已经到达阻尼器取料工作位置。
+	bTrayAtDamperPosition : BOOL;
+	
+	// 新料盘已经完成更换并到达工作位置。
+	// 保持到bTrayChangeRequest撤销。
+	bTrayChangeDone : BOOL;
 END_VAR
 
 VAR
@@ -43,16 +66,21 @@ VAR
     bCommandIssued : BOOL;
 
     nInitIndex : INT;
-
+	// 锁存总启动上升沿，允许启动信号使用短脉冲。
+	bStartPending : BOOL;
+	
+	// TRUE表示正在执行一次料盘更换。
+	// 从接受换盘请求开始保持到请求方撤销请求。
+	bTrayChangeActive : BOOL;
     //==========================================================
     // 公共位置与速度
     //
     // 数值沿用原FB_AutoFlow中的调试值。
     // 实机调试前应再次核对机械坐标方向和实际位置。
     //==========================================================
-    fTrayForwardPosition : LREAL := 385.0;//料架位
-    fTrayRearPosition    : LREAL := -6.0;//升降位
-    fDamperPickPosition  : LREAL := 597.0;//阻尼器取料位
+    fTrayForwardPosition : LREAL := 288.5;//料架位
+    fTrayRearPosition    : LREAL := -95.0; //升降位
+    fDamperPickPosition  : LREAL := 3.0;//阻尼器取料位
 
     fXAxisVelocity : LREAL := 50.0;
     fZAxisVelocity : LREAL := 50.0;
@@ -63,11 +91,11 @@ VAR
     // 当前测试流程默认五层均有待检料盘。
     //==========================================================
     aTray : ARRAY[1..5] OF ST_Tray := [
-        (fHighPosition := -100.0, fLowPosition := -140.0, eState := E_Tray.WaitInspect),
-        (fHighPosition :=   20.0, fLowPosition :=  -20.0, eState := E_Tray.WaitInspect),
-        (fHighPosition :=  140.0, fLowPosition :=  100.0, eState := E_Tray.WaitInspect),
-        (fHighPosition :=  260.0, fLowPosition :=  230.0, eState := E_Tray.WaitInspect),
-        (fHighPosition :=  390.0, fLowPosition :=  355.0, eState := E_Tray.WaitInspect)
+        (fHighPosition := -705.0, fLowPosition := -734.0, eState := E_Tray.WaitInspect),
+        (fHighPosition := -575.0, fLowPosition := -615.0, eState := E_Tray.WaitInspect),
+        (fHighPosition := -455.0, fLowPosition := -490.0, eState := E_Tray.WaitInspect),
+        (fHighPosition := -330.0, fLowPosition := -365.0, eState := E_Tray.WaitInspect),
+        (fHighPosition := -205.0, fLowPosition := -240.0, eState := E_Tray.WaitInspect)
     ];
 END_VAR]]></Declaration>
     <Implementation>
@@ -76,7 +104,11 @@ END_VAR]]></Declaration>
 //==============================================================
 trigStart(CLK := bStart);
 
-
+// 锁存启动请求。
+// 即使外部bStart只保持一个PLC周期，流程也不会丢失启动命令。
+IF trigStart.Q THEN
+    bStartPending := TRUE;
+END_IF;
 //==============================================================
 // 2. 自动流程运行期间，先清除上一周期的运动命令脉冲
 //
@@ -95,20 +127,36 @@ END_IF;
 //==============================================================
 CASE eCurrentStep OF
 
-    E_TrayProcessStep.Idle:
-        bBusy := FALSE;
-        bDone := FALSE;
-        nCurrentLayer := 0;
-        bCommandIssued := FALSE;
-
-        IF trigStart.Q THEN
-            // 每次启动新的测试循环时，将五层恢复为待检状态。
+	E_TrayProcessStep.Idle:
+		bBusy := FALSE;
+		bDone := FALSE;
+		nCurrentLayer := 0;
+		bCommandIssued := FALSE;
+	
+		bTrayAtDamperPosition := FALSE;
+		bTrayChangeDone := FALSE;
+		bTrayChangeActive := FALSE;
+	
+		// TrayX、TrayZ已经Ready，且Damper三轴已经完成预定位，
+		// 才正式启动第一盘取料流程。
+		// 如果条件尚未满足，bStartPending会继续保持TRUE。
+		IF
+			bStartPending
+			AND bDamperPrePositionDone
+			AND stAxisX.State.bReady
+			AND stAxisZ.State.bReady
+		THEN
+			bStartPending := FALSE;
+		
 			M_ResetTrayStates();
-            nCurrentLayer := 1;
-            bBusy := TRUE;
-            eCurrentStep := E_TrayProcessStep.TakeMoveXRear;
-        END_IF;
-
+		
+			nCurrentLayer := 1;
+			bBusy := TRUE;
+		
+			// Tray机构的第一步仍然是TrayX回到升降位。
+			eCurrentStep :=
+				E_TrayProcessStep.TakeMoveXRear;
+		END_IF;
 
     //==========================================================
     // 取盘子流程
@@ -131,55 +179,101 @@ CASE eCurrentStep OF
     // 后续增加实际检测时，只需在本步骤增加完成条件，
     // 条件满足后再进入ReturnEnsureXRear。
     //==========================================================
-    E_TrayProcessStep.WaitInspection:
-        aTray[nCurrentLayer].eState := E_Tray.Inspecting;
-        bCommandIssued := FALSE;
-        eCurrentStep := E_TrayProcessStep.ReturnEnsureXRear;
-
+	E_TrayProcessStep.WaitInspection:
+		bCommandIssued := FALSE;
+		bTrayAtDamperPosition := TRUE;
+	
+		//==========================================================
+		// 1. 新料盘已经到位，等待阻尼器流程撤销换盘请求
+		//
+		// 这是保持型握手的最后一步，防止刚到位的新料盘
+		// 因为旧请求仍为TRUE而被立即再次送走。
+		//==========================================================
+		IF bTrayChangeActive AND bTrayChangeDone THEN
+			IF NOT bTrayChangeRequest THEN
+				bTrayChangeDone := FALSE;
+				bTrayChangeActive := FALSE;
+			END_IF;
+	
+		//==========================================================
+		// 2. 第1～4盘接受换盘请求
+		//==========================================================
+		ELSIF
+			(nCurrentLayer < 5)
+			AND bTrayChangeRequest
+		THEN
+			bTrayAtDamperPosition := FALSE;
+			bTrayChangeActive := TRUE;
+			bTrayChangeDone := FALSE;
+			bCommandIssued := FALSE;
+	
+			eCurrentStep :=
+				E_TrayProcessStep.ReturnEnsureXRear;
+	
+		//==========================================================
+		// 3. 第五盘等待阻尼器完整流程结束
+		//==========================================================
+		ELSIF
+			(nCurrentLayer = 5)
+			AND bDamperProcessDone
+		THEN
+			bTrayAtDamperPosition := FALSE;
+			bCommandIssued := FALSE;
+	
+			eCurrentStep :=
+				E_TrayProcessStep.ReturnEnsureXRear;
+		END_IF;
 
     //==========================================================
     // 放盘子流程
     //==========================================================
-    E_TrayProcessStep.ReturnEnsureXRear,
-    E_TrayProcessStep.ReturnMoveZHigh,
-    E_TrayProcessStep.ReturnMoveXForward,
-    E_TrayProcessStep.ReturnMoveZLow,
-    E_TrayProcessStep.ReturnMoveXRear:
-
-        M_ReturnTray(
-            ioAxisX := stAxisX,
-            ioAxisZ := stAxisZ
-        );
-
+	E_TrayProcessStep.ReturnEnsureXRear,
+	E_TrayProcessStep.ReturnMoveZHigh,
+	E_TrayProcessStep.ReturnMoveXForward,
+	E_TrayProcessStep.ReturnMoveZLow,
+	E_TrayProcessStep.ReturnMoveXRear,
+	E_TrayProcessStep.FinalMoveZFirstLayerLow:
+	
+		M_ReturnTray(
+			ioAxisX := stAxisX,
+			ioAxisZ := stAxisZ
+		);
 
     //==========================================================
     // 当前层已经放回：进入下一层或结束五层循环
     //==========================================================
     E_TrayProcessStep.NextLayer:
-        bCommandIssued := FALSE;
-
-        IF nCurrentLayer < 5 THEN
-            nCurrentLayer := nCurrentLayer + 1;
-            eCurrentStep := E_TrayProcessStep.TakeMoveXRear;
-        ELSE
-            eCurrentStep := E_TrayProcessStep.Completed;
-        END_IF;
+		bCommandIssued := FALSE;
+	
+		IF nCurrentLayer < 5 THEN
+			nCurrentLayer := nCurrentLayer + 1;
+	
+			eCurrentStep :=
+				E_TrayProcessStep.TakeMoveXRear;
+		ELSE
+			// 第五盘已经放回，并且TrayX已经退出到升降位。
+			// 最后让TrayZ回到第一层下方。
+			eCurrentStep :=
+				E_TrayProcessStep.FinalMoveZFirstLayerLow;
+		END_IF;
 
 
     //==========================================================
     // 第5层放回完成
     // bDone保持TRUE，直到外部将bStart恢复为FALSE。
     //==========================================================
-    E_TrayProcessStep.Completed:
-        bBusy := FALSE;
-        bDone := TRUE;
-        bCommandIssued := FALSE;
-
-        IF NOT bStart THEN
-            bDone := FALSE;
-            eCurrentStep := E_TrayProcessStep.Idle;
-        END_IF;
-
+	E_TrayProcessStep.Completed:
+		bBusy := FALSE;
+		bDone := TRUE;
+		bCommandIssued := FALSE;
+		bTrayAtDamperPosition := FALSE;
+	
+		// 下一次总启动上升沿到来后退出完成状态。
+		// bStartPending保留到下一扫描周期在Idle中消费。
+		IF bStartPending THEN
+			bDone := FALSE;
+			eCurrentStep := E_TrayProcessStep.Idle;
+		END_IF;
 
 ELSE
     // 非法步骤回到空闲状态。
@@ -312,7 +406,31 @@ END_VAR]]></Declaration>
             aTray[nCurrentLayer].eState := E_Tray.Inspected;
             eCurrentStep := E_TrayProcessStep.NextLayer;
         END_IF;
-
+	//==============================================================
+	// 6. 整套流程结束前，TrayZ回到第一层下方
+	//
+	// 进入本步骤时：
+	// 1. 第五盘已经放回第五层；
+	// 2. TrayX已经退出到升降位。
+	//==============================================================
+	E_TrayProcessStep.FinalMoveZFirstLayerLow:
+		IF NOT bCommandIssued THEN
+			ioAxisZ.Set.Position.fAbsolutePosition :=
+				aTray[1].fLowPosition;
+	
+			ioAxisZ.Set.Position.fVelocity :=
+				fZAxisVelocity;
+	
+			ioAxisZ.Cmd.bMoveAbs := TRUE;
+			bCommandIssued := TRUE;
+		END_IF;
+	
+		IF bCommandIssued AND ioAxisZ.State.bDone THEN
+			bCommandIssued := FALSE;
+	
+			eCurrentStep :=
+				E_TrayProcessStep.Completed;
+		END_IF;
 END_CASE;]]></ST>
       </Implementation>
     </Method>
@@ -421,22 +539,35 @@ END_VAR]]></Declaration>
 
 
     //==========================================================
-    // 6. Z轴移动到固定阻尼器取料位
-    //==========================================================
-    E_TrayProcessStep.TakeMoveZDamperPosition:
-        IF NOT bCommandIssued THEN
-            ioAxisZ.Set.Position.fAbsolutePosition := fDamperPickPosition;
-            ioAxisZ.Set.Position.fVelocity := fZAxisVelocity;
-            ioAxisZ.Cmd.bMoveAbs := TRUE;
-            bCommandIssued := TRUE;
-        END_IF;
-
-        IF bCommandIssued AND ioAxisZ.State.bDone THEN
-            bCommandIssued := FALSE;
-            aTray[nCurrentLayer].eState := E_Tray.Inspecting;
-            eCurrentStep := E_TrayProcessStep.WaitInspection;
-        END_IF;
-
+	// 6. TrayZ将托盘举到阻尼器取料工作位置
+	//==========================================================
+	E_TrayProcessStep.TakeMoveZDamperPosition:
+		IF NOT bCommandIssued THEN
+			ioAxisZ.Set.Position.fAbsolutePosition :=
+				fDamperPickPosition;
+	
+			ioAxisZ.Set.Position.fVelocity :=
+				fZAxisVelocity;
+	
+			ioAxisZ.Cmd.bMoveAbs := TRUE;
+			bCommandIssued := TRUE;
+		END_IF;
+	
+		IF bCommandIssued AND ioAxisZ.State.bDone THEN
+			bCommandIssued := FALSE;
+	
+			aTray[nCurrentLayer].eState :=
+				E_Tray.Inspecting;
+	
+			bTrayAtDamperPosition := TRUE;
+	
+			IF bTrayChangeActive THEN
+				bTrayChangeDone := TRUE;
+			END_IF;
+	
+			eCurrentStep :=
+				E_TrayProcessStep.WaitInspection;
+		END_IF;
 END_CASE;]]></ST>
       </Implementation>
     </Method>

@@ -1,0 +1,49 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="E_DamperTurntableStep" Id="{b3c25584-0887-40cf-850b-8d3173f32a14}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+
+(*
+    转台与夹紧轴协调主流程步骤。
+
+    不区分第一件、中间件和最后一件，
+    统一根据备料位、调整位状态以及
+    bNoMorePartsToLoad进行判断。
+*)
+TYPE E_DamperTurntableStep :
+(
+    Idle                     := 0,   // 等待使能或交换请求
+	
+	// 上电模拟初始化：夹紧轴先松开，随后转台回到0°。
+    InitializeClampOpen      := 2,	//初始化夹紧轴松开
+    WaitInitialClampOpen     := 4,	//等待夹紧轴松开
+    InitializeTurntable      := 6,	//初始化转台回零
+    WaitInitialTurntable     := 8,	//等待转台回零
+	
+    EvaluatePositionStates   := 10,  // 判断备料位和调整位状态
+    WaitAdjustmentDone       := 20,  // 调整位有料且尚未调整完成
+    WaitTransferPart         := 30,  // 调整完成，但下一件尚未进入备料位
+
+    ReleaseClamp             := 40,  // 请求夹紧轴松开
+    WaitClampOpen            := 50,  // 等待夹紧轴确认松开
+
+    RotateExchange           := 60,  // 转台在0°/180°之间交换
+    WaitTurntableInPosition  := 70,  // 等待转台绝对位置到位
+    ExchangePositionStates   := 80,  // 交换备料位和调整位软件状态
+
+    ClampAdjustmentPart      := 90,  // 夹紧进入调整位的新阻尼器
+    WaitClampHolding         := 100, // 等待转矩达到并稳定
+    RequestAdjustment        := 110, // 向后续调整流程发送保持型请求
+
+    RequestFinalUnload       := 120, // 最后一件请求机械手搬到缓冲位
+    WaitFinalUnloadDone      := 130, // 等待最后一件搬运完成
+
+    ExchangeComplete         := 140, // 本轮转台交换完成
+    ProcessComplete          := 150, // 五盘流水全部完成
+    Error                    := 900  // 转台协调流程异常
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

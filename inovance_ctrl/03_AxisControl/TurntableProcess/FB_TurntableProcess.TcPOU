@@ -1,0 +1,962 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <POU Name="FB_TurntableProcess" Id="{e1cd4f36-8de1-47fb-8826-32ee654f2542}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_TurntableProcess
+
+VAR_IN_OUT
+    // 已经存在的统一轴接口。
+    stTurntableAxis : ST_AxisInterface; // GVL_AxisRef.Turntable
+    stClampingAxis  : ST_AxisInterface; // GVL_AxisRef.Clamping
+
+    // 与FB_DamperProcess共享两个物理位置的内容状态。
+    eTransferPositionState   : E_DamperSlotState;
+    eAdjustmentPositionState : E_DamperSlotState;
+END_VAR
+
+VAR_INPUT
+    stInput : ST_DamperTurntableInput;
+END_VAR
+
+VAR_OUTPUT
+    stStatus : ST_DamperTurntableStatus;
+END_VAR
+
+VAR
+    //==========================================================
+    // 当前均为模拟临时参数，实机调试前必须重新确认。
+    //==========================================================
+    stConfig : ST_DamperTurntableConfig := (
+        bSimulationMode := TRUE,
+        bRequireHomed := FALSE,
+        bUseVisionValidation := FALSE,
+
+        fTurntablePosition0 := 10.5,
+        fTurntablePosition180 := 190.5,
+        fTurntableVelocity := 60.0,
+        fTurntableAcceleration := 100.0,
+        fTurntableDeceleration := 100.0,
+        fTurntableJerk := 1000.0,
+        fTurntablePositionTolerance := 0.1,
+        tTurntableMoveTimeout := T#10S,
+
+        // 仅用于TwinCAT模拟，不能直接用于真实夹紧机构。
+        fClampOpenPosition := 93.0,
+        fClampApproachPosition := 40.0,
+        fClampPositionVelocity := 15.0,
+        fClampPositionAcceleration := 20.0,
+        fClampPositionDeceleration := 20.0,
+        fClampPositionJerk := 100.0,
+        fClampPositionTolerance := 0.01,
+        tClampPositionTimeout := T#5S,
+
+        ClampTorque := (
+            // 正负方向尚未确认，临时按正方向定义。
+            fTargetTorquePercent := 10.0,
+            fMaxAbsTorquePercent := 20.0,
+            fTorqueRampPercentPerSecond := 20.0,
+            fVelocityLimitHigh := 5.0,
+            fVelocityLimitLow := -5.0,
+            fReachedMinAbsTorquePercent := 8.0,
+            tReachedStableTime := T#300MS,
+            tTorqueBuildTimeout := T#3S,
+            tModeSwitchTimeout := T#2S
+        ),
+
+        tSimulatedClampAction := T#500MS,
+        tSimulatedAdjustment := T#3S
+    );
+	
+	//==========================================================
+    // 位置模式模拟内部状态
+    //==========================================================
+    fbSimulatedClampAction : TON;
+    fbSimulatedAdjustment  : TON;
+
+    trigReset : R_TRIG;
+
+    bInitialized : BOOL;
+    bFinalExchange : BOOL;
+	bOwnsAxes : BOOL;
+    bTurntableCommandIssued : BOOL;
+    bClampCommandIssued     : BOOL;
+    bClampDelayEnable       : BOOL;
+
+    // RequestAdjustment步骤使用，确保模拟模式下请求至少保持一个扫描周期。
+    bAdjustmentRequestIssued : BOOL;
+
+    fTurntableTargetPosition : LREAL;
+    eTurntableTargetPosition : E_DamperTurntablePosition;
+
+    ePositionStateTemp : E_DamperSlotState;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[//==============================================================
+// 1. 输入沿与模拟定时器
+//==============================================================
+	trigReset(CLK := stInput.bReset);
+
+	fbSimulatedClampAction(
+		IN := bClampDelayEnable,
+		PT := stConfig.tSimulatedClampAction
+	);
+
+	// 调整定时器独立于转台主CASE运行，允许机械手并行装下一件。
+	fbSimulatedAdjustment(
+		IN :=
+			stConfig.bSimulationMode
+			AND
+			(
+				eAdjustmentPositionState
+				= E_DamperSlotState.Adjusting
+			),
+		PT := stConfig.tSimulatedAdjustment
+	);
+
+
+	//==============================================================
+	// 2. 默认清除一次性轴命令
+	//
+	// 初始化、交换请求或转台流程执行期间才接管轴命令。
+	// 空闲状态下不清除WPF的手动运动命令。
+	//==============================================================
+	bOwnsAxes :=
+		stInput.bEnable
+		AND
+		(
+			NOT bInitialized
+			OR stInput.bExchangeRequest
+			OR
+			(
+				stStatus.eStep
+				<> E_DamperTurntableStep.Idle
+			)
+		);
+	
+	IF bOwnsAxes THEN
+		
+		stTurntableAxis.Cmd.bMoveAbs := FALSE;
+		stClampingAxis.Cmd.bMoveAbs := FALSE;
+	
+		// 当前版本只使用位置模式。
+		stClampingAxis.Cmd.bTorqueControl := FALSE;
+	END_IF;
+//==============================================================
+// 3. 模拟或实际调整完成处理
+//==============================================================
+IF
+    stConfig.bSimulationMode
+    AND fbSimulatedAdjustment.Q
+    AND
+    (
+        eAdjustmentPositionState
+        = E_DamperSlotState.Adjusting
+    )
+THEN
+    // 当前模拟版本默认调整结果合格。
+    eAdjustmentPositionState := E_DamperSlotState.Qualified;
+END_IF;
+
+// 实机调整流程预留：根据外部结果更新调整位状态。
+IF
+    (NOT stConfig.bSimulationMode)
+    AND stInput.bAdjustmentDone
+    AND
+    (
+        eAdjustmentPositionState
+        = E_DamperSlotState.Adjusting
+    )
+THEN
+    IF stInput.bAdjustmentQualified THEN
+        eAdjustmentPositionState := E_DamperSlotState.Qualified;
+    ELSE
+        eAdjustmentPositionState := E_DamperSlotState.Unqualified;
+    END_IF;
+
+    stStatus.bAdjustmentDoneAck := TRUE;
+END_IF;
+
+// 完成方撤销bAdjustmentDone后，接收方撤销Ack。
+IF NOT stInput.bAdjustmentDone THEN
+    stStatus.bAdjustmentDoneAck := FALSE;
+END_IF;
+
+
+//==============================================================
+// 4. 禁用或复位
+//
+// 不清空两个工位的物料状态，避免软件状态与现场物料不一致。
+//==============================================================
+IF (NOT stInput.bEnable) OR trigReset.Q THEN
+    bInitialized := FALSE;
+    bFinalExchange := FALSE;
+
+    bTurntableCommandIssued := FALSE;
+    bClampCommandIssued := FALSE;
+    bClampDelayEnable := FALSE;
+    bAdjustmentRequestIssued := FALSE;
+
+    stStatus.bReady := FALSE;
+    stStatus.bBusy := FALSE;
+    stStatus.bExchangeDone := FALSE;
+    stStatus.bAdjustmentRequest := FALSE;
+    stStatus.bFinalUnloadRequest := FALSE;
+    stStatus.bReadyForTransferLoad := FALSE;
+    stStatus.bTurntableInPosition := FALSE;
+    stStatus.bClampOpen := FALSE;
+    stStatus.bClampHolding := FALSE;
+    stStatus.bComplete := FALSE;
+    stStatus.bError := FALSE;
+	stStatus.bRotationDone := FALSE;
+    stStatus.nErrorID := 0;
+
+    stStatus.eTurntablePosition :=
+        E_DamperTurntablePosition.Unknown;
+    stStatus.eClampStep := E_DamperClampStep.Idle;
+    stStatus.eStep := E_DamperTurntableStep.Idle;
+
+ELSE
+    //==========================================================
+    // 5. 转台、夹紧与调整协调状态机
+    //==========================================================
+    CASE stStatus.eStep OF
+
+        E_DamperTurntableStep.Idle:
+            stStatus.bBusy := FALSE;
+            stStatus.bExchangeDone := FALSE;
+            stStatus.bComplete := FALSE;
+
+            IF NOT bInitialized THEN
+                stStatus.eStep :=
+                    E_DamperTurntableStep.InitializeClampOpen;
+            ELSIF stInput.bExchangeRequest THEN
+                stStatus.eStep :=
+                    E_DamperTurntableStep.EvaluatePositionStates;
+            END_IF;
+
+
+        //======================================================
+		// 初始化：夹紧轴先运动到松开位置
+		//
+		// 即使位置反馈等于松开位置，也必须确认轴已经Ready，
+		// 防止未使能轴的默认0位置被误认为初始化完成。
+		//======================================================
+		E_DamperTurntableStep.InitializeClampOpen:
+			stStatus.bBusy := TRUE;
+			stStatus.bClampOpen := FALSE;
+			stStatus.bClampHolding := FALSE;
+			stStatus.eClampStep :=
+				E_DamperClampStep.MoveToOpen;
+		
+			IF stClampingAxis.State.bReady THEN
+				IF
+					ABS(
+						stClampingAxis.Data.fActPosition
+						- stConfig.fClampOpenPosition
+					)
+					<= stConfig.fClampPositionTolerance
+				THEN
+					// 轴已Ready，并且已经位于松开位置。
+					bClampCommandIssued := FALSE;
+					bClampDelayEnable := TRUE;
+		
+					stStatus.eStep :=
+						E_DamperTurntableStep.WaitInitialClampOpen;
+		
+				ELSE
+					// 轴已Ready，但尚未到达松开位置。
+					stClampingAxis.Set.Position.fAbsolutePosition :=
+						stConfig.fClampOpenPosition;
+		
+					stClampingAxis.Set.Position.fVelocity :=
+						stConfig.fClampPositionVelocity;
+		
+					stClampingAxis.Set.Position.fAcceleration :=
+						stConfig.fClampPositionAcceleration;
+		
+					stClampingAxis.Set.Position.fDeceleration :=
+						stConfig.fClampPositionDeceleration;
+		
+					stClampingAxis.Cmd.bMoveAbs := TRUE;
+					bClampCommandIssued := TRUE;
+					bClampDelayEnable := FALSE;
+		
+					stStatus.eStep :=
+						E_DamperTurntableStep.WaitInitialClampOpen;
+				END_IF;
+			END_IF;
+
+
+        E_DamperTurntableStep.WaitInitialClampOpen:
+            stStatus.eClampStep := E_DamperClampStep.WaitOpen;
+
+			IF
+				stClampingAxis.State.bCmdRejected
+				OR stClampingAxis.State.bCommandAborted
+			THEN
+				bClampCommandIssued := FALSE;
+				bClampDelayEnable := FALSE;
+			
+				// 等轴重新Ready后再次发送初始化松开命令。
+				stStatus.eStep :=
+					E_DamperTurntableStep.InitializeClampOpen;
+			
+			ELSIF
+				bClampCommandIssued
+				AND
+				(
+					stClampingAxis.State.bDone
+					OR
+					(
+						ABS(
+							stClampingAxis.Data.fActPosition
+							- stConfig.fClampOpenPosition
+						)
+						<= stConfig.fClampPositionTolerance
+					)
+				)
+			THEN
+				bClampCommandIssued := FALSE;
+				bClampDelayEnable := TRUE;
+			END_IF;
+
+            IF fbSimulatedClampAction.Q THEN
+                bClampDelayEnable := FALSE;
+                stStatus.bClampOpen := TRUE;
+                stStatus.bClampHolding := FALSE;
+                stStatus.eClampStep := E_DamperClampStep.Complete;
+                stStatus.eStep :=
+                    E_DamperTurntableStep.InitializeTurntable;
+            END_IF;
+
+
+        //======================================================
+		// 初始化：转台绝对运动到0°
+		//
+		// 必须同时满足轴Ready和位置进入公差，
+		// 才允许确认转台初始化完成。
+		//======================================================
+		E_DamperTurntableStep.InitializeTurntable:
+			stStatus.bTurntableInPosition := FALSE;
+		
+			IF stTurntableAxis.State.bReady THEN
+				IF
+					ABS(
+						stTurntableAxis.Data.fActPosition
+						- stConfig.fTurntablePosition0
+					)
+					<= stConfig.fTurntablePositionTolerance
+				THEN
+					// 轴已Ready，并且转台已经位于0°。
+					bTurntableCommandIssued := FALSE;
+		
+					stStatus.eTurntablePosition :=
+						E_DamperTurntablePosition.Position0;
+		
+					stStatus.bTurntableInPosition := TRUE;
+					bInitialized := TRUE;
+		
+					stStatus.eStep :=
+						E_DamperTurntableStep.Idle;
+		
+				ELSE
+					// 轴已Ready，但不在0°，发送绝对运动命令。
+					stTurntableAxis.Set.Position.fAbsolutePosition :=
+						stConfig.fTurntablePosition0;
+		
+					stTurntableAxis.Set.Position.fVelocity :=
+						stConfig.fTurntableVelocity;
+		
+					stTurntableAxis.Set.Position.fAcceleration :=
+						stConfig.fTurntableAcceleration;
+		
+					stTurntableAxis.Set.Position.fDeceleration :=
+						stConfig.fTurntableDeceleration;
+		
+					stTurntableAxis.Cmd.bMoveAbs := TRUE;
+					bTurntableCommandIssued := TRUE;
+		
+					stStatus.eStep :=
+						E_DamperTurntableStep.WaitInitialTurntable;
+				END_IF;
+			END_IF;
+		
+		
+		E_DamperTurntableStep.WaitInitialTurntable:
+			IF
+				stTurntableAxis.State.bCmdRejected
+				OR stTurntableAxis.State.bCommandAborted
+			THEN
+				// 命令未执行成功，清除锁存并返回发令步骤。
+				// 等轴重新Ready后再次发送。
+				bTurntableCommandIssued := FALSE;
+		
+				stStatus.eStep :=
+					E_DamperTurntableStep.InitializeTurntable;
+		
+			ELSIF
+				bTurntableCommandIssued
+				AND
+				(
+					stTurntableAxis.State.bDone
+					OR
+					(
+						ABS(
+							stTurntableAxis.Data.fActPosition
+							- stConfig.fTurntablePosition0
+						)
+						<= stConfig.fTurntablePositionTolerance
+					)
+				)
+			THEN
+				bTurntableCommandIssued := FALSE;
+		
+				stStatus.eTurntablePosition :=
+					E_DamperTurntablePosition.Position0;
+		
+				stStatus.bTurntableInPosition := TRUE;
+				bInitialized := TRUE;
+		
+				stStatus.eStep :=
+					E_DamperTurntableStep.Idle;
+			END_IF;
+
+
+        //======================================================
+        // 根据两个物理工位的内容状态统一判断流程
+        //======================================================
+        E_DamperTurntableStep.EvaluatePositionStates:
+            stStatus.bBusy := TRUE;
+			// 新一轮转台交换尚未完成。
+    		stStatus.bRotationDone := FALSE;
+            // 正常交换：备料位已有下一件。
+            IF
+                eTransferPositionState
+                = E_DamperSlotState.PendingAdjustment
+            THEN
+                bFinalExchange := FALSE;
+
+                IF
+                    eAdjustmentPositionState
+                    = E_DamperSlotState.Empty
+                THEN
+                    // 第一件：调整位为空，可直接旋转。
+                    stStatus.eStep :=
+                        E_DamperTurntableStep.ReleaseClamp;
+
+                ELSIF
+                    (
+                        eAdjustmentPositionState
+                        = E_DamperSlotState.Qualified
+                    )
+                    OR
+                    (
+                        eAdjustmentPositionState
+                        = E_DamperSlotState.Unqualified
+                    )
+                THEN
+                    // 上一件已经调整完，可以松开并交换。
+                    stStatus.eStep :=
+                        E_DamperTurntableStep.ReleaseClamp;
+                ELSE
+                    // 上一件仍在调整，下一件可以留在备料位等待。
+                    stStatus.eStep :=
+                        E_DamperTurntableStep.WaitAdjustmentDone;
+                END_IF;
+
+            // 最后一件排出：不再有下一件，备料位为空。
+            ELSIF
+                stInput.bNoMorePartsToLoad
+                AND
+                (
+                    eTransferPositionState
+                    = E_DamperSlotState.Empty
+                )
+                AND
+                (
+                    (
+                        eAdjustmentPositionState
+                        = E_DamperSlotState.Qualified
+                    )
+                    OR
+                    (
+                        eAdjustmentPositionState
+                        = E_DamperSlotState.Unqualified
+                    )
+                )
+            THEN
+                bFinalExchange := TRUE;
+                stStatus.eStep :=
+                    E_DamperTurntableStep.ReleaseClamp;
+
+            ELSIF
+                (
+                    eAdjustmentPositionState
+                    = E_DamperSlotState.Adjusting
+                )
+            THEN
+                stStatus.eStep :=
+                    E_DamperTurntableStep.WaitAdjustmentDone;
+            ELSE
+                stStatus.eStep :=
+                    E_DamperTurntableStep.WaitTransferPart;
+            END_IF;
+
+
+        E_DamperTurntableStep.WaitAdjustmentDone:
+            IF
+                (
+                    eAdjustmentPositionState
+                    = E_DamperSlotState.Qualified
+                )
+                OR
+                (
+                    eAdjustmentPositionState
+                    = E_DamperSlotState.Unqualified
+                )
+            THEN
+                stStatus.eStep :=
+                    E_DamperTurntableStep.EvaluatePositionStates;
+            END_IF;
+
+
+        // 调整已完成，但下一件还没到备料位时保持夹紧，不提前旋转。
+        E_DamperTurntableStep.WaitTransferPart:
+            IF
+                (
+                    eTransferPositionState
+                    = E_DamperSlotState.PendingAdjustment
+                )
+                OR stInput.bNoMorePartsToLoad
+            THEN
+                stStatus.eStep :=
+                    E_DamperTurntableStep.EvaluatePositionStates;
+            END_IF;
+
+
+        //======================================================
+		// 请求夹紧轴运动到松开位置
+		//======================================================
+		E_DamperTurntableStep.ReleaseClamp:
+			IF stStatus.bClampOpen THEN
+				// 已经确认松开，不重复发送运动命令。
+				stStatus.eStep :=
+					E_DamperTurntableStep.RotateExchange;
+		
+			ELSIF stClampingAxis.State.bReady THEN
+				stStatus.eClampStep :=
+					E_DamperClampStep.MoveToOpen;
+		
+				bClampDelayEnable := FALSE;
+		
+				stClampingAxis.Set.Position.fAbsolutePosition :=
+					stConfig.fClampOpenPosition;
+		
+				stClampingAxis.Set.Position.fVelocity :=
+					stConfig.fClampPositionVelocity;
+		
+				stClampingAxis.Set.Position.fAcceleration :=
+					stConfig.fClampPositionAcceleration;
+		
+				stClampingAxis.Set.Position.fDeceleration :=
+					stConfig.fClampPositionDeceleration;
+		
+				stClampingAxis.Cmd.bMoveAbs := TRUE;
+				bClampCommandIssued := TRUE;
+		
+				stStatus.eStep :=
+					E_DamperTurntableStep.WaitClampOpen;
+			END_IF;
+		
+		
+		E_DamperTurntableStep.WaitClampOpen:
+			stStatus.eClampStep :=
+				E_DamperClampStep.WaitOpen;
+		
+			IF
+				stClampingAxis.State.bCmdRejected
+				OR stClampingAxis.State.bCommandAborted
+			THEN
+				bClampCommandIssued := FALSE;
+				bClampDelayEnable := FALSE;
+		
+				// 等夹紧轴重新Ready后再次发送松开命令。
+				stStatus.eStep :=
+					E_DamperTurntableStep.ReleaseClamp;
+		
+			ELSIF
+				bClampCommandIssued
+				AND
+				(
+					stClampingAxis.State.bDone
+					OR
+					(
+						ABS(
+							stClampingAxis.Data.fActPosition
+							- stConfig.fClampOpenPosition
+						)
+						<= stConfig.fClampPositionTolerance
+					)
+				)
+			THEN
+				bClampCommandIssued := FALSE;
+		
+				// 位置到达后，再延时模拟松开动作稳定。
+				bClampDelayEnable := TRUE;
+			END_IF;
+		
+			IF
+				(stStatus.eStep = E_DamperTurntableStep.WaitClampOpen)
+				AND fbSimulatedClampAction.Q
+			THEN
+				bClampDelayEnable := FALSE;
+		
+				stStatus.bClampOpen := TRUE;
+				stStatus.bClampHolding := FALSE;
+				stStatus.eClampStep :=
+					E_DamperClampStep.Complete;
+		
+				stStatus.eStep :=
+					E_DamperTurntableStep.RotateExchange;
+			END_IF;
+
+
+        //======================================================
+        // 转台0°/180°正反交替绝对运动
+        //======================================================
+        E_DamperTurntableStep.RotateExchange:
+            stStatus.bTurntableInPosition := FALSE;
+
+            CASE stStatus.eTurntablePosition OF
+                E_DamperTurntablePosition.Position0:
+                    fTurntableTargetPosition :=
+                        stConfig.fTurntablePosition180;
+                    eTurntableTargetPosition :=
+                        E_DamperTurntablePosition.Position180;
+
+                E_DamperTurntablePosition.Position180:
+                    fTurntableTargetPosition :=
+                        stConfig.fTurntablePosition0;
+                    eTurntableTargetPosition :=
+                        E_DamperTurntablePosition.Position0;
+
+            ELSE
+                stStatus.bError := TRUE;
+                stStatus.nErrorID := 16#7101;
+                stStatus.eStep := E_DamperTurntableStep.Error;
+            END_CASE;
+
+			// 转台无流程错误，并且轴已经准备好后才发送绝对运动命令。
+			IF
+				(NOT stStatus.bError)
+				AND stTurntableAxis.State.bReady
+			THEN
+				stTurntableAxis.Set.Position.fAbsolutePosition :=
+					fTurntableTargetPosition;
+			
+				stTurntableAxis.Set.Position.fVelocity :=
+					stConfig.fTurntableVelocity;
+			
+				stTurntableAxis.Set.Position.fAcceleration :=
+					stConfig.fTurntableAcceleration;
+			
+				stTurntableAxis.Set.Position.fDeceleration :=
+					stConfig.fTurntableDeceleration;
+			
+				stTurntableAxis.Cmd.bMoveAbs := TRUE;
+				bTurntableCommandIssued := TRUE;
+			
+				stStatus.eStep :=
+					E_DamperTurntableStep.WaitTurntableInPosition;
+			END_IF;
+
+
+        E_DamperTurntableStep.WaitTurntableInPosition:
+			IF
+				stTurntableAxis.State.bCmdRejected
+				OR stTurntableAxis.State.bCommandAborted
+			THEN
+				bTurntableCommandIssued := FALSE;
+		
+				// 返回后仍按照当前位置决定下一目标：
+				// 0°→180°，180°→0°。
+				stStatus.eStep :=
+					E_DamperTurntableStep.RotateExchange;
+		
+			ELSIF
+				bTurntableCommandIssued
+				AND
+				(
+					stTurntableAxis.State.bDone
+					OR
+					(
+						ABS(
+							stTurntableAxis.Data.fActPosition
+							- fTurntableTargetPosition
+						)
+						<= stConfig.fTurntablePositionTolerance
+					)
+				)
+			THEN
+				bTurntableCommandIssued := FALSE;
+		
+				stStatus.eTurntablePosition :=
+					eTurntableTargetPosition;
+		
+				stStatus.bTurntableInPosition := TRUE;
+		
+				stStatus.eStep :=
+					E_DamperTurntableStep.ExchangePositionStates;
+			END_IF;
+
+
+        //======================================================
+        // 只有转台确认到位后，才交换两个物理位置的软件状态
+        //======================================================
+        E_DamperTurntableStep.ExchangePositionStates:
+			// 转台已经物理到位，此时才交换两个位置的软件内容状态。
+			ePositionStateTemp := eTransferPositionState;
+			eTransferPositionState := eAdjustmentPositionState;
+			eAdjustmentPositionState := ePositionStateTemp;
+		
+			// 从本扫描周期开始：
+			// 1. DamperZ可以下降取走取回位的已调整阻尼器；
+			// 2. 夹紧轴可以同时夹紧调整位的新阻尼器。
+			stStatus.bRotationDone := TRUE;
+		
+			IF bFinalExchange THEN
+				stStatus.bExchangeDone := TRUE;
+		
+				stStatus.eStep :=
+					E_DamperTurntableStep.RequestFinalUnload;
+			ELSE
+				stStatus.eStep :=
+					E_DamperTurntableStep.ClampAdjustmentPart;
+			END_IF;
+
+
+        //======================================================
+		// 位置模式运动到夹紧接近位置
+		//======================================================
+		E_DamperTurntableStep.ClampAdjustmentPart:
+			stStatus.bClampOpen := FALSE;
+			stStatus.bClampHolding := FALSE;
+			stStatus.eClampStep :=
+				E_DamperClampStep.MoveToApproach;
+		
+			bClampDelayEnable := FALSE;
+		
+			IF stClampingAxis.State.bReady THEN
+				stClampingAxis.Set.Position.fAbsolutePosition :=
+					stConfig.fClampApproachPosition;
+		
+				stClampingAxis.Set.Position.fVelocity :=
+					stConfig.fClampPositionVelocity;
+		
+				stClampingAxis.Set.Position.fAcceleration :=
+					stConfig.fClampPositionAcceleration;
+		
+				stClampingAxis.Set.Position.fDeceleration :=
+					stConfig.fClampPositionDeceleration;
+		
+				stClampingAxis.Cmd.bMoveAbs := TRUE;
+				bClampCommandIssued := TRUE;
+		
+				stStatus.eStep :=
+					E_DamperTurntableStep.WaitClampHolding;
+			END_IF;
+		
+		
+		E_DamperTurntableStep.WaitClampHolding:
+			stStatus.eClampStep :=
+				E_DamperClampStep.WaitApproach;
+		
+			IF
+				stClampingAxis.State.bCmdRejected
+				OR stClampingAxis.State.bCommandAborted
+			THEN
+				bClampCommandIssued := FALSE;
+				bClampDelayEnable := FALSE;
+		
+				// 等轴重新Ready后再次发送接近位置命令。
+				stStatus.eStep :=
+					E_DamperTurntableStep.ClampAdjustmentPart;
+		
+			ELSIF
+				bClampCommandIssued
+				AND
+				(
+					stClampingAxis.State.bDone
+					OR
+					(
+						ABS(
+							stClampingAxis.Data.fActPosition
+							- stConfig.fClampApproachPosition
+						)
+						<= stConfig.fClampPositionTolerance
+					)
+				)
+			THEN
+				bClampCommandIssued := FALSE;
+		
+				// 接近位置到位后，延时500ms模拟夹紧力建立。
+				bClampDelayEnable := TRUE;
+			END_IF;
+		
+			IF
+				(stStatus.eStep = E_DamperTurntableStep.WaitClampHolding)
+				AND fbSimulatedClampAction.Q
+			THEN
+				bClampDelayEnable := FALSE;
+		
+				stStatus.bClampOpen := FALSE;
+				stStatus.bClampHolding := TRUE;
+		
+				// 当前虽然使用位置模式模拟，但保持该枚举，
+				// 以后接入CST时主状态机不需要变化。
+				stStatus.eClampStep :=
+					E_DamperClampStep.HoldTorque;
+		
+				bAdjustmentRequestIssued := FALSE;
+		
+				stStatus.eStep :=
+					E_DamperTurntableStep.RequestAdjustment;
+			END_IF;
+
+
+        //======================================================
+        // 调整启动保持型握手
+        //======================================================
+        E_DamperTurntableStep.RequestAdjustment:
+            stStatus.bAdjustmentRequest := TRUE;
+
+            IF NOT bAdjustmentRequestIssued THEN
+                // 先让请求至少保持一个完整扫描周期。
+                bAdjustmentRequestIssued := TRUE;
+
+            ELSIF
+                stConfig.bSimulationMode
+                OR stInput.bAdjustmentAccepted
+            THEN
+                stStatus.bAdjustmentRequest := FALSE;
+                bAdjustmentRequestIssued := FALSE;
+
+                IF
+                    eAdjustmentPositionState
+                    = E_DamperSlotState.PendingAdjustment
+                THEN
+                    eAdjustmentPositionState :=
+                        E_DamperSlotState.Adjusting;
+                END_IF;
+
+                // 转台已到位且夹紧完成，此时才确认本轮交换完成。
+                stStatus.bExchangeDone := TRUE;
+                stStatus.eStep :=
+                    E_DamperTurntableStep.ExchangeComplete;
+            END_IF;
+
+
+        //======================================================
+        // 最终取回请求
+        //======================================================
+        E_DamperTurntableStep.RequestFinalUnload:
+            stStatus.bFinalUnloadRequest := TRUE;
+            stStatus.eStep :=
+                E_DamperTurntableStep.WaitFinalUnloadDone;
+
+
+        E_DamperTurntableStep.WaitFinalUnloadDone:
+            // bExchangeDone在请求方撤销bExchangeRequest后撤销。
+			IF NOT stInput.bExchangeRequest THEN
+				stStatus.bRotationDone := FALSE;
+				stStatus.bExchangeDone := FALSE;
+			END_IF;
+            IF stInput.bFinalUnloadDone THEN
+                stStatus.bFinalUnloadRequest := FALSE;
+                stStatus.bComplete := TRUE;
+                stStatus.eStep :=
+                    E_DamperTurntableStep.ProcessComplete;
+            END_IF;
+
+
+        //======================================================
+        // 普通交换四相握手结束
+        //======================================================
+        E_DamperTurntableStep.ExchangeComplete:
+			IF NOT stInput.bExchangeRequest THEN
+				stStatus.bRotationDone := FALSE;
+				stStatus.bExchangeDone := FALSE;
+		
+				stStatus.eStep :=
+					E_DamperTurntableStep.Idle;
+			END_IF;
+
+
+        E_DamperTurntableStep.ProcessComplete:
+            stStatus.bBusy := FALSE;
+            stStatus.bComplete := TRUE;
+
+            // 最终搬运完成方看到bFinalUnloadRequest撤销后，
+            // 会撤销bFinalUnloadDone；随后自动回到Idle，允许下一批重新启动。
+            IF NOT stInput.bFinalUnloadDone THEN
+                stStatus.bComplete := FALSE;
+                bFinalExchange := FALSE;
+                stStatus.eStep := E_DamperTurntableStep.Idle;
+            END_IF;
+
+
+        E_DamperTurntableStep.Error:
+            stStatus.bBusy := FALSE;
+            stStatus.bReady := FALSE;
+            stStatus.bExchangeDone := FALSE;
+            stStatus.bAdjustmentRequest := FALSE;
+            stStatus.bFinalUnloadRequest := FALSE;
+			// 故障时撤销“转台已经旋转完成”状态，
+			// 防止Damper流程读取到残留的并行启动条件。
+			stStatus.bRotationDone := FALSE;
+
+    ELSE
+        stStatus.bError := TRUE;
+        stStatus.nErrorID := 16#71FF;
+        stStatus.eStep := E_DamperTurntableStep.Error;
+    END_CASE;
+
+
+    //==========================================================
+    // 6. 汇总对外状态
+    //==========================================================
+    stStatus.bReady := bInitialized AND NOT stStatus.bError;
+
+    stStatus.bBusy :=
+        (stStatus.eStep <> E_DamperTurntableStep.Idle)
+        AND
+        (stStatus.eStep <> E_DamperTurntableStep.ProcessComplete)
+        AND
+        (stStatus.eStep <> E_DamperTurntableStep.Error);
+
+    // 调整时允许机械手把下一件放到空的备料位。
+    // 转台运动、最终取回以及流程故障时不允许放料。
+    stStatus.bReadyForTransferLoad :=
+        stStatus.bReady
+        AND
+        (
+            eTransferPositionState
+            = E_DamperSlotState.Empty
+        )
+        AND stStatus.bTurntableInPosition
+        AND NOT stStatus.bFinalUnloadRequest
+        AND NOT stStatus.bComplete
+        AND
+        (
+            stStatus.eStep
+            <> E_DamperTurntableStep.RotateExchange
+        )
+        AND
+        (
+            stStatus.eStep
+            <> E_DamperTurntableStep.WaitTurntableInPosition
+        );
+END_IF;]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

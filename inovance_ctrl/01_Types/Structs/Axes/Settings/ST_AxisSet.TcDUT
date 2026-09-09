@@ -13,6 +13,10 @@ STRUCT
     //========================	
 	Position : ST_PositionSet;
 	
+    //========================
+    // 转矩控制参数
+    //========================
+    Torque : ST_AxisTorqueSet;	
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

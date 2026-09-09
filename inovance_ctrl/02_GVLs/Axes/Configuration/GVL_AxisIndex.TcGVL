@@ -9,7 +9,7 @@ VAR_GLOBAL CONSTANT
 	
     // 阻尼器上下料机构
     DamperX      : UINT := 3;  // X轴
-    DamperY 	 : UINT := 4;  	// Y轴
+    DamperY 	 : UINT := 4;  // Y轴
     DamperZ  	 : UINT := 5;  // Z轴
 
     DamperRotation      : UINT := 6;  // 阻尼器A轴

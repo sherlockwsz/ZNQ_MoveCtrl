@@ -34,7 +34,25 @@ STRUCT
     bSoftLimitPositive : BOOL; // 轴已进入正向限位缓冲区域
     bSoftLimitNegative : BOOL;// 轴已进入负向限位缓冲区域
 	
-    
+	//==========================================================
+    // 控制模式及转矩状态
+    //==========================================================
+
+    // 当前确认生效的轴控制模式。
+    eControlMode : E_AxisControlMode;
+
+    // TRUE表示已经确认轴处于位置模式，可以执行位置运动。
+    bPositionModeReady : BOOL;
+
+    // TRUE表示驱动器已经确认进入转矩模式。
+    bTorqueModeReady : BOOL;
+
+    // TRUE表示MC_TorqueControl当前正在运行并保持转矩。
+    bTorqueControlActive : BOOL;
+
+    // 实际转矩连续达到设定阈值和稳定时间。
+    // 转台流程使用该信号判断夹紧完成。
+    bTorqueReached : BOOL;
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

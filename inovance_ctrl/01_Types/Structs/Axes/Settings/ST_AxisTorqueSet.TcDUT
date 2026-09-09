@@ -1,0 +1,45 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="ST_AxisTorqueSet" Id="{9c4eec0c-755e-4630-9144-768436e5ae3c}">
+    <Declaration><![CDATA[(*
+    轴转矩控制参数。
+
+    单位约定：
+    1. 转矩统一使用电机额定转矩百分比；
+    2. 10.0表示额定转矩的10%；
+    3. 正负号决定转矩方向，夹紧方向尚未确认时可临时使用正值；
+    4. 速度限制单位为该轴的工程单位/秒。
+*)
+TYPE ST_AxisTorqueSet :
+STRUCT
+    // MC_TorqueControl的目标转矩。
+    // 有符号百分比，例如10.0表示+10%，-10.0表示-10%。
+    fTargetTorquePercent : LREAL;
+
+    // 允许下发的最大绝对转矩。
+    // FB_AxisControl应拒绝超过该值的目标转矩。
+    fMaxAbsTorquePercent : LREAL;
+
+    // 转矩建立斜率，单位：额定转矩百分比/秒。
+    fTorqueRampPercentPerSecond : LREAL;
+
+    // CST模式下的正、负方向速度限制。
+    // 必须同时限制，防止没有接触工件时夹紧轴持续高速运动。
+    fVelocityLimitHigh : LREAL;
+    fVelocityLimitLow  : LREAL;
+
+    // 判断已经接触并夹紧工件所需的最小实际转矩绝对值。
+    fReachedMinAbsTorquePercent : LREAL;
+
+    // 实际转矩连续超过阈值达到该时间后，才置位bTorqueReached。
+    tReachedStableTime : TIME;
+
+    // 从进入转矩模式到达到夹紧转矩的最长允许时间。
+    tTorqueBuildTimeout : TIME;
+
+    // CSP/CST模式切换最长允许时间。
+    tModeSwitchTimeout : TIME;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

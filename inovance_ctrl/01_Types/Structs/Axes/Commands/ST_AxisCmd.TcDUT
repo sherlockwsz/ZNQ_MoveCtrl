@@ -2,10 +2,13 @@
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
   <DUT Name="ST_AxisCmd" Id="{bf7479eb-b665-403f-aa40-61f162a9ede9}">
     <Declaration><![CDATA[(*
-    单轴动作命令
+    单轴动作命令。
 
-    bEnable、bStop、bJogPos、bJogNeg为持续型信号。
-    bReset、bMoveAbs、bMoveRel使用上升沿触发。
+    持续型信号：
+    bEnable、bStop、bJogPos、bJogNeg、bTorqueControl。
+
+    上升沿触发信号：
+    bReset、bMoveAbs、bMoveRel。
 *)
 TYPE ST_AxisCmd :
 STRUCT
@@ -24,7 +27,22 @@ STRUCT
     bJogPos : BOOL;    // 正向点动，按住为TRUE，松开为FALSE
 
     bJogNeg : BOOL;    // 反向点动，按住为TRUE，松开为FALSE
+	
+    //==========================================================
+    // 转矩控制命令
+    //==========================================================
 
+    // 持续型转矩控制请求。
+    //
+    // TRUE：
+    // 1. 请求轴切换到CST模式；
+    // 2. 按Set.Torque中的参数建立并保持转矩。
+    //
+    // FALSE：
+    // 1. 退出转矩控制；
+    // 2. FB_AxisControl负责恢复位置模式；
+    // 3. 确认恢复位置模式后，才能再次执行MoveAbs等位置命令。
+    bTorqueControl : BOOL;
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

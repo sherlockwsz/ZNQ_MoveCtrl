@@ -1,0 +1,62 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="ST_DamperTurntableStatus" Id="{456f3f3b-4de1-45bf-972a-e19fa5a46e5e}">
+    <Declaration><![CDATA[(*
+    转台协调流程对外状态。
+
+    bExchangeDone、bAdjustmentRequest、bAdjustmentDoneAck、
+    bFinalUnloadRequest均采用保持型握手。
+*)
+TYPE ST_DamperTurntableStatus :
+STRUCT
+    bReady : BOOL;
+    bBusy  : BOOL;
+	// 转台已经完成0°/180°旋转，并且两个物理位置的软件状态已经交换。
+	//
+	// 本信号比bExchangeDone更早：
+	// 1. bRotationDone：只表示转台已到位，可以开始两侧并行动作；
+	// 2. bExchangeDone：表示调整位夹紧完成，本轮交换完整完成。
+	//
+	// 保持到bExchangeRequest撤销。
+	bRotationDone : BOOL;
+	// 本次转台交换流程完成。
+	//
+	// 普通交换：
+	// 转台到位，并且进入调整位的新阻尼器已经夹紧完成。
+	//
+	// 最终排料交换：
+	// 转台到位，并且最后一件已经到达机械手取回位置。
+	//
+	// 本信号保持到输入bExchangeRequest撤销。
+	bExchangeDone : BOOL;
+	
+    // 请求后续同轴度调整流程启动。
+    // 保持到bAdjustmentAccepted置位。
+    bAdjustmentRequest : BOOL;
+
+    // 表示已经接收并处理bAdjustmentDone。
+    // 保持到输入bAdjustmentDone撤销。
+    bAdjustmentDoneAck : BOOL;
+
+    // 请求机械手将最后一件搬到缓冲位1。
+    // 保持到输入bFinalUnloadDone置位。
+    bFinalUnloadRequest : BOOL;
+
+    // TRUE：备料位允许机械手放入下一件。
+    bReadyForTransferLoad : BOOL;
+
+    bTurntableInPosition : BOOL;
+    bClampOpen           : BOOL;
+    bClampHolding        : BOOL;
+
+    eStep              : E_DamperTurntableStep;
+    eTurntablePosition : E_DamperTurntablePosition;
+    eClampStep         : E_DamperClampStep;
+
+    bComplete : BOOL;
+    bError    : BOOL;
+    nErrorID  : UDINT;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

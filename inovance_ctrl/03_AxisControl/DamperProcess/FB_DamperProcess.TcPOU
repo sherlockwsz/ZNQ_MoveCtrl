@@ -10,10 +10,11 @@
 // 1. DamperX、DamperY在同一扫描周期启动；
 // 2. 分别锁存X、Y完成信号，全部到位后继续；
 // 3. 夹爪步骤直接通过；
-// 4. 转台旋转步骤直接通过；
-// 5. 调整过程直接判定为Qualified；
-// 6. 换盘过程使用3秒TON模拟；
-// 7. 不实现安全互锁、报警、超时和中途停止。
+// 4. 转台使用轴8在0°/180°之间绝对位置交替运动；
+// 5. 夹紧轴使用位置模式模拟夹紧；
+// 6. 调整过程由FB_TurntableProcess使用3秒TON模拟；
+// 7. 换盘过程使用3秒TON模拟；
+// 8. 不实现安全互锁、报警、超时和中途停止。
 //==============================================================
 
 FUNCTION_BLOCK FB_DamperProcess
@@ -25,29 +26,55 @@ VAR_INPUT
     // 调试时产生上升沿，重新计算料位、备料位和缓冲位坐标。
     // 正常自动运行期间不要触发。
     bReinitializeCoordinates : BOOL;
+	
+	// 来自转台协调FB；由于MAIN先调用本FB，这里读取上一扫描周期状态。
+    stTurntableStatus : ST_DamperTurntableStatus;
+	// 当前料盘已经到达阻尼器取料位置。
+	bTrayAtDamperPosition : BOOL;
+	
+	// 一次换盘已经完成，新料盘到达工作位置。
+	// 保持到本FB撤销bTrayChangeRequest。
+	bTrayChangeDone : BOOL;
+	
+	// 当前位于阻尼器工作位置的实际料盘层号。
+	nTrayAtDamperLayer : INT;
 END_VAR
 
 VAR_IN_OUT
     stAxisX : ST_AxisInterface; // DamperX：行方向
     stAxisY : ST_AxisInterface; // DamperY：列方向
     stAxisZ : ST_AxisInterface; // DamperZ：升降方向
+	
+	// 阻尼器夹爪旋转轴，对应统一轴数组第6轴。
+    stAxisRotation : ST_AxisInterface;
 END_VAR
 
 VAR_OUTPUT
-    bBusy : BOOL; // TRUE：五盘阻尼器流程正在执行
-    bDone : BOOL; // TRUE：第五盘第24件已放入缓冲位
-
-    // 当前盘第24件模拟调整完成时输出一个PLC周期。
+    bBusy : BOOL;
+    bDone : BOOL;
     bCurrentTrayDone : BOOL;
-
-    // 等待模拟或实际换盘期间保持TRUE。
     bTrayChangeRequest : BOOL;
-
     bInitialized : BOOL;
 	
-    nCurrentTray   : INT; // 当前盘号：1～5
-    nCurrentRow    : INT; // 当前行号：1～4
-    nCurrentColumn : INT; // 当前列号：1～6
+    //==========================================================
+    // Damper三轴自动流程启动预定位完成
+    //
+    // TRUE表示：
+    // 1. DamperZ已经位于110mm安全高度；
+    // 2. DamperX/Y已经位于(1,1)料位上方；
+    // 3. Tray机构可以开始取第一盘。
+    //==========================================================
+    bPrePositionDone : BOOL;
+
+    // 发送给FB_TurntableProcess的保持型请求。
+    stTurntableInput : ST_DamperTurntableInput;
+    // 最近一次完成调整的料盘编号。
+    nLastCompletedTray : INT;
+
+    nCurrentTray   : INT;
+    nCurrentRow    : INT;
+    nCurrentColumn : INT;
+
 //==============================================================
 // 上一件阻尼器的原始取料位置
 //
@@ -89,54 +116,44 @@ VAR
     trigStart : R_TRIG;
     trigReinitializeCoordinates : R_TRIG;
 	
-	// 模拟更换料盘
-    fbSimulatedTrayChange : TON;
-	// 模拟转台旋转180°所用定时器。
-	fbSimulatedTurntableRotate : TON;
-	
-	// 模拟阻尼器同轴度调整所用定时器。
-	fbSimulatedAdjustment : TON;
     //==========================================================
     // 料盘坐标参数
     //==========================================================
-    fFirstSlotX : LREAL := -475.5;
-    fFirstSlotY : LREAL :=  223.5;
+    fFirstSlotX : LREAL := -195;
+    fFirstSlotY : LREAL :=  95;
 
     fRowPitchX    : LREAL := 80.0;
-    fColumnPitchY : LREAL := 80.0;
+    fColumnPitchY : LREAL := -80.0;
 
     //==========================================================
     // Z轴参数
     //==========================================================
-    fSlotPickZ       : LREAL := -71.0;
-    fDamperHeight    : LREAL := 81.0;
-    fSafetyClearance : LREAL := 5.0;
-
-    // 备料位安全高度暂定为15mm。
-    fTransferSafeZSetting : LREAL := 15.0;
-
-    // 缓冲位释放后同样先回15mm。
-    fBufferSafeZSetting : LREAL := 15.0;
-
-    //==========================================================
-    // 备料位相对于(1,1)的偏移
-    //==========================================================
-    fTransferOffsetX : LREAL := -245.0;
-    fTransferOffsetY : LREAL := -638.0;
-    fTransferOffsetZ : LREAL :=   79.0;
-
-    //==========================================================
-    // 最终缓冲位相对于(1,1)的临时偏移
-    //
-    // 计算结果：
-    // X = -475.5 - 385 = -860.5
-    // Y =  223.5 - 566 = -342.5
-    // Z =  -71.0 -   6 =  -77.0
-    //==========================================================
-    fBufferOffsetX : LREAL := -385.0;
-    fBufferOffsetY : LREAL := -566.0;
-    fBufferOffsetZ : LREAL :=   -6.0;
-
+    fSlotPickZ       : LREAL := -15.0;
+	//==========================================================
+	// Z轴统一抬升绝对位置
+	//
+	// 所有XY运动前，以及取放料完成后，Z轴均抬升到110mm。
+	// 该位置是实际测量确认的安全位置，不再进行高度计算。
+	//==========================================================
+	fZLiftPosition : LREAL := 110.0;
+	
+	//==========================================================
+	// 转台备料位实测绝对坐标，单位mm
+	//==========================================================
+	fTransferXSetting     : LREAL :=   57.0;
+	fTransferYSetting     : LREAL := -543.0;
+	fTransferPickZSetting : LREAL :=   60.0;	
+	
+	//==========================================================
+	// 最终缓冲位1绝对坐标
+	//
+	// 当前为临时模拟值。
+	// 实测完成后只修改以下三个参数。
+	//==========================================================
+	fBufferXSetting     : LREAL := 194.0;
+	fBufferYSetting     : LREAL := -472.0;
+	fBufferPickZSetting : LREAL := -23.0;
+	
     //==========================================================
     // 测试运动参数
     //==========================================================
@@ -147,16 +164,7 @@ VAR
     // 判断某根XY轴是否已经在目标位置。
     fPositionTolerance : LREAL := 0.01;
 
-    // 当前使用3秒模拟料盘更换。
-    tSimulatedTrayChange : TIME := T#3S;
-	// 模拟转台旋转180°时间。
-	// 后续接入真实转台后，可替换为转台到位信号。
-	tSimulatedTurntableRotate : TIME := T#3S;
-	
-	// 模拟单个阻尼器调整时间。
-	// 后续接入调整机构后，可替换为实际调整完成信号。
-	tSimulatedAdjustment : TIME := T#3S;
-	
+		
     //==========================================================
     // 主流程内部变量
     //==========================================================
@@ -165,9 +173,6 @@ VAR
 
     fCurrentSlotX : LREAL;
     fCurrentSlotY : LREAL;
-
-    // 旋转转台时交换两个位置状态所用的临时变量。
-    eTurntableSwapTemp : E_DamperSlotState;
 
     //==========================================================
     // XY并行运动内部状态
@@ -181,6 +186,111 @@ VAR
     //==========================================================
     bZCommandIssued : BOOL;
     bZDoneLatched   : BOOL;
+	
+	bWaitingTrayResult : BOOL;//等待料盘更换完成
+    nTrayAwaitingResult : INT;//
+    bStartPending : BOOL;//开始信号
+	
+	// 转台后的并行流程锁存。
+	bPreviousPlaceDone       : BOOL;
+	bExchangeCompleteLatched : BOOL;
+	
+	
+	//==============================================================
+	// 取料前相机检测位置参数
+	//
+	// 相机位于夹爪Y正方向90mm，因此相机对准阻尼器时：
+	// 轴Y目标位置 = 阻尼器Y位置 - 90mm。
+	//==============================================================
+	fCameraOffsetX : LREAL := 0.0;
+	fCameraOffsetY : LREAL := 90.0;
+	
+	// 当前检测高度与统一安全高度相同。
+	fCameraVisionZ : LREAL := 110.0;
+	
+	
+	//==============================================================
+	// PLC相机检测模拟参数
+	//==============================================================
+	
+	// 每个阻尼器到达相机位置后等待2秒。
+	tSimulatedVisionDetection : TIME := T#2S;
+	
+	// 模拟相机返回带方向的相对修正角。
+	fSimulatedAngleCorrection : LREAL := 60.0;
+	
+	
+	//==============================================================
+	// DamperRotation临时运动参数
+	//
+	// 单位应与DamperRotation NC轴缩放一致，当前按照“度”使用。
+	//==============================================================
+	fDamperRotationVelocity     : LREAL := 30.0;
+	fDamperRotationAcceleration : LREAL := 100.0;
+	fDamperRotationDeceleration : LREAL := 100.0;
+	
+	// 修正角绝对值小于该值时，不发送旋转命令。
+	fRotationAngleDeadband : LREAL := 0.01;
+	
+	//==============================================================
+	// 二维码扫描旋转参数
+	//
+	// XY到达转台备料位后，DamperZ保持在110mm，
+	// DamperRotation执行一次+360°相对运动。
+	// 当前使用旋转完成作为二维码扫描成功条件。
+	//==============================================================
+	
+	// 二维码扫描相对旋转角度。
+	// 正值表示正方向旋转；当前固定旋转一整圈。
+	fQrScanRelativeAngle : LREAL := 360.0;
+	
+	// 二维码扫描时使用独立速度，
+	// 后续可以根据相机曝光时间和识别效果单独调整。
+	fQrScanVelocity : LREAL := 60.0;
+	
+	// 二维码扫描旋转加速度。
+	fQrScanAcceleration : LREAL := 100.0;
+	
+	// 二维码扫描旋转减速度。
+	fQrScanDeceleration : LREAL := 100.0;
+	
+	
+	//==============================================================
+	// 二维码扫描运行变量
+	//==============================================================
+	
+	// TRUE表示二维码扫描相对旋转命令已经发送，
+	// 防止每个PLC扫描周期重复发送bMoveRel。
+	bQrScanCommandIssued : BOOL;	
+	//==============================================================
+	// 相机检测与旋转运行变量
+	//==============================================================
+	
+	// 模拟相机检测定时器。
+	fbSimulatedVisionDetection : TON;
+	
+	// 相机对准当前阻尼器时，DamperXY的目标位置。
+	fCurrentVisionX : LREAL;
+	fCurrentVisionY : LREAL;
+	
+	// 锁存本次检测得到的相对修正角。
+	fAngleCorrectionLatched : LREAL;
+	
+	// 防止每扫描周期重复发送DamperRotation相对运动命令。
+	bRotationCommandIssued : BOOL;
+	
+	//==============================================================
+	// 取料后Z轴抬升与DamperRotation并行运动完成锁存
+	//
+	// 两根轴的完成信号可能出现在不同PLC扫描周期，
+	// 因此必须分别锁存，不能直接将两个bDone进行AND判断。
+	//==============================================================
+	
+	// TRUE：本次取料后的Z轴抬升已经完成。
+	bTakeLiftZDoneLatched : BOOL;
+	
+	// TRUE：本次阻尼器角度修正已经完成。
+	bTakeRotationDoneLatched : BOOL;	
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[//==============================================================
@@ -192,7 +302,26 @@ trigReinitializeCoordinates(
     CLK := bReinitializeCoordinates
 );
 
+IF trigStart.Q THEN
+    // 锁存一次完整五盘流程启动请求。
+    bStartPending := TRUE;
 
+    // 新一轮流程必须重新执行Damper三轴预定位。
+    // 防止上一轮残留的TRUE让Tray机构提前启动。
+    bPrePositionDone := FALSE;
+END_IF;
+
+	// 当前测试阶段让转台协调FB一直保持使能，先完成0°和松开位置初始化。
+	// 实机后可改为系统自动模式许可。
+	stTurntableInput.bEnable := bStart
+								OR bStartPending
+								OR bBusy;
+	stTurntableInput.bAdjustmentAccepted := FALSE;
+	stTurntableInput.bAdjustmentDone := FALSE;
+	stTurntableInput.bAdjustmentQualified := TRUE;
+	stTurntableInput.bTransferCaptureOK := TRUE;
+	stTurntableInput.bAdjustmentCaptureOK := TRUE;
+	stTurntableInput.bReset := FALSE;
 //==============================================================
 // 2. 首次调用或调试命令触发时初始化坐标
 //
@@ -217,48 +346,33 @@ END_IF;
 // 只有进入WaitTrayChange时定时器才开始计时。
 // 离开该步骤后自动复位。
 //==============================================================
-fbSimulatedTrayChange(
-    IN :=
-        eCurrentStep
-        = E_DamperProcessStep.WaitTrayChange,
-
-    PT := tSimulatedTrayChange
-);
-//==============================================================
-// 模拟转台旋转定时器
-//
-// 普通转台旋转和第五盘最后一次旋转共用一个定时器。
-// 离开这两个步骤后IN自动变为FALSE，TON自动复位。
-//==============================================================
-fbSimulatedTurntableRotate(
-    IN :=
-        (eCurrentStep = E_DamperProcessStep.RotateTurntable)
-        OR
-        (eCurrentStep = E_DamperProcessStep.FinalRotateTurntable),
-
-    PT := tSimulatedTurntableRotate
-);
-
-
-//==============================================================
-// 模拟阻尼器调整定时器
-//
-// 只要调整位置中的阻尼器状态为Adjusting，就开始计时。
-// 计时期间可以同时执行下一件阻尼器的取料动作。
-//==============================================================
-fbSimulatedAdjustment(
-    IN :=
-        eAdjustmentPositionState
-        = E_DamperSlotState.Adjusting,
-
-    PT := tSimulatedAdjustment
-);
 
 //==============================================================
 // 4. 清除单周期输出
 //==============================================================
 bCurrentTrayDone := FALSE;
 
+// 第24件可能在更换料盘、甚至下一盘第1件取料期间完成调整，
+// 所以该检测必须独立于主CASE每周期执行。
+IF
+    bWaitingTrayResult
+    AND
+    (
+        (
+            eAdjustmentPositionState
+            = E_DamperSlotState.Qualified
+        )
+        OR
+        (
+            eAdjustmentPositionState
+            = E_DamperSlotState.Unqualified
+        )
+    )
+THEN
+    bCurrentTrayDone := TRUE;
+    nLastCompletedTray := nTrayAwaitingResult;
+    bWaitingTrayResult := FALSE;
+END_IF;
 
 //==============================================================
 // 5. 自动运行期间清除上一周期运动命令
@@ -270,8 +384,11 @@ IF bBusy THEN
     stAxisX.Cmd.bMoveAbs := FALSE;
     stAxisY.Cmd.bMoveAbs := FALSE;
     stAxisZ.Cmd.bMoveAbs := FALSE;
-END_IF;
 
+    // DamperRotation使用相对运动，
+    // bMoveRel只保持一个PLC扫描周期。
+    stAxisRotation.Cmd.bMoveRel := FALSE;
+END_IF;
 
 //==============================================================
 // 6. 换盘请求
@@ -282,62 +399,194 @@ bTrayChangeRequest :=
     eCurrentStep
     = E_DamperProcessStep.WaitTrayChange;
 
+//==============================================================
+// 模拟取料前相机检测
+//
+// 只有M_TakeDamper进入SimulateVisionDetection步骤时计时。
+// 离开该步骤后TON自动复位，为下一件阻尼器做准备。
+//==============================================================
+fbSimulatedVisionDetection(
+    IN :=
+        bBusy
+        AND
+        (
+            eCurrentStep
+            = E_DamperProcessStep.TakeCurrentDamper
+        )
+        AND
+        (
+            eTakeStep
+            = E_DamperTakeStep.SimulateVisionDetection
+        ),
 
+    PT := tSimulatedVisionDetection
+);
 //==============================================================
 // 7. 五盘阻尼器上下料主流程
 //==============================================================
 CASE eCurrentStep OF
 
     //==========================================================
-    // 空闲
-    //==========================================================
-    E_DamperProcessStep.Idle:
-        bBusy := FALSE;
-        bDone := FALSE;
-        bTrayChangeRequest := FALSE;
-
-        nCurrentTray := 0;
-        nCurrentRow := 0;
-        nCurrentColumn := 0;
-
-        bPreviousPartAvailable := FALSE;
-		
-		// 清除上一件阻尼器的原始位置记录。
+	// 空闲：等待自动启动上升沿
+	//==========================================================
+	E_DamperProcessStep.Idle:
+		bBusy := FALSE;
+		bDone := FALSE;
+		bTrayChangeRequest := FALSE;
+		bPrePositionDone := FALSE;
+	
+		bPreviousPlaceDone := FALSE;
+		bExchangeCompleteLatched := FALSE;
+	
+		stTurntableInput.bExchangeRequest := FALSE;
+		stTurntableInput.bNoMorePartsToLoad := FALSE;
+		stTurntableInput.bFinalUnloadDone := FALSE;
+	
+		bWaitingTrayResult := FALSE;
+		nTrayAwaitingResult := 0;
+	
+		nLastCompletedTray := 0;
+		nCurrentTray := 0;
+		nCurrentRow := 0;
+		nCurrentColumn := 0;
+	
+		bPreviousPartAvailable := FALSE;
+	
+		// 清除上一件阻尼器来源位置。
 		nPreviousSourceTray := 0;
 		nPreviousSourceRow := 0;
 		nPreviousSourceColumn := 0;
-		
-        eTransferPositionState :=
-            E_DamperSlotState.Empty;
-
-        eAdjustmentPositionState :=
-            E_DamperSlotState.Empty;
-
-        eBufferPositionState :=
-            E_DamperSlotState.Empty;
-
-        eTakeStep := E_DamperTakeStep.Idle;
-        ePlaceStep := E_DamperPlaceStep.Idle;
-
-        IF trigStart.Q AND bCoordinatesInitialized THEN
+	
+		// 新一轮流程开始时，转台两个位置和缓冲位均按空处理。
+		eTransferPositionState :=
+			E_DamperSlotState.Empty;
+	
+		eAdjustmentPositionState :=
+			E_DamperSlotState.Empty;
+	
+		eBufferPositionState :=
+			E_DamperSlotState.Empty;
+	
+		eTakeStep := E_DamperTakeStep.Idle;
+		ePlaceStep := E_DamperPlaceStep.Idle;
+	
+		//======================================================
+		// 先启动Damper三轴预定位。
+		//
+		// 此处不再等待第一盘到位，也不等待转台初始化完成。
+		// Damper预定位与转台初始化可以同时执行。
+		//======================================================
+		IF
+			bStartPending
+			AND bCoordinatesInitialized
+	
+			// 三根轴必须可以接受绝对位置运动命令。
+			AND stAxisX.State.bReady
+			AND stAxisY.State.bReady
+			AND stAxisZ.State.bReady
+			AND stAxisRotation.State.bReady
+		THEN
+			bStartPending := FALSE;
+	
+			// 清除运动Method内部的命令和完成锁存。
 			M_ResetMotionHelpers(
 				ioAxisX := stAxisX,
 				ioAxisY := stAxisY,
-				ioAxisZ := stAxisZ
-			);
+				ioAxisZ := stAxisZ,
+				ioAxisRotation := stAxisRotation
+			);	
+			// 第一盘进入工作位置后，默认24个位置都有未调整阻尼器。
+			M_ResetDamperSlotStates();
+	
+			nCurrentTray := 1;
+			nCurrentRow := 1;
+			nCurrentColumn := 1;
+	
+			bBusy := TRUE;
+	
+			// 第一步必须先让DamperZ运动到110mm安全高度。
+			eCurrentStep :=
+				E_DamperProcessStep.InitializeSafeZ;
+		END_IF;
 
-            // 当前工作位置放入第1盘原材料料盘。
-            M_ResetDamperSlotStates();
-
-            nCurrentTray := 1;
-            nCurrentRow := 1;
-            nCurrentColumn := 1;
-
-            bBusy := TRUE;
-            eCurrentStep :=
-                E_DamperProcessStep.TakeCurrentDamper;
-        END_IF;
-
+	//==========================================================
+	// 自动启动预定位第1步：DamperZ先到110mm安全位置
+	//==========================================================
+	E_DamperProcessStep.InitializeSafeZ:
+		bBusy := TRUE;
+		bPrePositionDone := FALSE;
+	
+		IF M_MoveZAbsolute(
+			fTargetZ := fTraySafeZ,
+			ioAxisZ := stAxisZ
+		) THEN
+			// Z轴确认到达110mm后，才允许X/Y移动。
+			eCurrentStep :=
+				E_DamperProcessStep.InitializeXYFirstSlot;
+		END_IF;
+	
+	
+	//==========================================================
+	// 自动启动预定位第2步：DamperX/Y到(1,1)上方
+	//==========================================================
+	E_DamperProcessStep.InitializeXYFirstSlot:
+		bBusy := TRUE;
+		bPrePositionDone := FALSE;
+	
+		// 直接读取初始化后的(1,1)实际坐标，
+		// 后续修改料位基准坐标时不需要修改本流程。
+		fCurrentSlotX :=
+			aSlots[1, 1].fXPosition;
+	
+		fCurrentSlotY :=
+			aSlots[1, 1].fYPosition;
+	
+		// 两根独立轴在同一扫描周期发送绝对运动命令，
+		// 分别确认到位后才继续。
+		IF M_MoveXYParallel(
+			fTargetX := fCurrentSlotX,
+			fTargetY := fCurrentSlotY,
+			ioAxisX := stAxisX,
+			ioAxisY := stAxisY
+		) THEN
+			// 三轴预定位完成，允许Tray机构开始运动。
+			bPrePositionDone := TRUE;
+	
+			eCurrentStep :=
+				E_DamperProcessStep.WaitFirstTray;
+		END_IF;
+	
+	
+	//==========================================================
+	// 自动启动预定位第3步：等待第一盘和转台准备完成
+	//==========================================================
+	E_DamperProcessStep.WaitFirstTray:
+		bBusy := TRUE;
+	
+		// 保持TRUE，让Tray流程能够可靠收到允许启动信号。
+		bPrePositionDone := TRUE;
+	
+		IF
+			// 第一盘已经由Tray机构送到阻尼器取料位置。
+			bTrayAtDamperPosition
+			AND (nTrayAtDamperLayer = 1)
+	
+			// 转台初始化已经完成：
+			// 夹紧轴处于松开位置，转台位于初始位置。
+			AND stTurntableStatus.bReady
+	
+			// 三根Damper轴当前仍然可以继续执行运动。
+			AND stAxisX.State.bReady
+			AND stAxisY.State.bReady
+			AND stAxisZ.State.bReady
+			AND stAxisRotation.State.bReady
+		THEN
+			// 第一盘到位后进入原有第一件取料流程。
+			// M_TakeDamper中的安全Z和XY检查会因为已经到位而直接通过，
+			// 随后DamperZ下降到第一料位取料高度。
+			eCurrentStep :=
+				E_DamperProcessStep.TakeCurrentDamper;
+		END_IF;
 
     //==========================================================
     // 从当前料盘料位取出未调整阻尼器并放到转台备料位
@@ -348,63 +597,50 @@ CASE eCurrentStep OF
 
         fCurrentSlotY :=
             aSlots[nCurrentRow, nCurrentColumn].fYPosition;
-
-		IF M_TakeDamper(
-			fSourceX := fCurrentSlotX,
-			fSourceY := fCurrentSlotY,
-			ioAxisX := stAxisX,
-			ioAxisY := stAxisY,
-			ioAxisZ := stAxisZ
-		) THEN
-			// 当前阻尼器已经从料盘取走，并完成送入转台备料位。
-			//
-			// 该料位实际上已经为空，但在阻尼器尚未重新落位前，
-			// WPF临时显示“调整中”，表示该位置对应的取料操作正在处理。
-			aSlots[nCurrentRow, nCurrentColumn].eState :=
-				E_DamperSlotState.Empty;
-		
-			// 阻尼器当前位于转台备料位置。
-			eTransferPositionState :=
-				E_DamperSlotState.PendingAdjustment;
-		
-			eCurrentStep :=
-				E_DamperProcessStep.WaitPreviousAdjustment;
+		// 尚未开始取料时，必须确认转台备料位允许放入。
+		// 一旦M_TakeDamper内部流程已经启动，则继续执行，不能中途暂停。
+		IF
+			(eTakeStep <> E_DamperTakeStep.Idle)
+			OR stTurntableStatus.bReadyForTransferLoad
+		THEN
+			IF M_TakeDamper(
+				fSourceX := fCurrentSlotX,
+				fSourceY := fCurrentSlotY,
+			
+				ioAxisX := stAxisX,
+				ioAxisY := stAxisY,
+				ioAxisZ := stAxisZ,
+			
+				// 新增DamperRotation轴。
+				ioAxisRotation := stAxisRotation
+			) THEN				
+				// 当前Method返回时，阻尼器已放入转台备料位且Z轴回到安全高度。
+				aSlots[nCurrentRow, nCurrentColumn].eState :=
+					E_DamperSlotState.Empty;
+			
+				eTransferPositionState :=
+					E_DamperSlotState.PendingAdjustment;
+			
+				// 机械手已经离开转台运动区域，请求转台执行一次交换。
+				stTurntableInput.bExchangeRequest := TRUE;
+				stTurntableInput.bNoMorePartsToLoad := FALSE;
+			
+				eCurrentStep := E_DamperProcessStep.RotateTurntable;
+			END_IF;
 		END_IF;
 
 
-    //==========================================================
-    // 等待转台另一侧的上一件调整完成
-    //
-    // 当前测试版本没有调整机构，直接判定为Qualified。
-    //
-    // 后续接入调整流程时，应在这里等待实际完成信号，
-    // 并根据检测结果设置Qualified或Unqualified。
-    //==========================================================
-    E_DamperProcessStep.WaitPreviousAdjustment:
-        IF bPreviousPartAvailable THEN
-            IF
-                eAdjustmentPositionState
-                = E_DamperSlotState.Adjusting
-            THEN
-                eAdjustmentPositionState :=
-                    E_DamperSlotState.Qualified;
-            END_IF;
-
-            IF
-                (eAdjustmentPositionState
-                    = E_DamperSlotState.Qualified)
-                OR
-                (eAdjustmentPositionState
-                    = E_DamperSlotState.Unqualified)
-            THEN
-                eCurrentStep :=
-                    E_DamperProcessStep.RotateTurntable;
-            END_IF;
-        ELSE
-            // 五盘循环的第一盘第一件没有上一件。
-            eCurrentStep :=
-                E_DamperProcessStep.RotateTurntable;
-        END_IF;
+	//==========================================================
+	// 兼容保留步骤
+	//
+	// 调整结果现在完全由FB_TurntableProcess管理，
+	// 本步骤不得再直接修改eAdjustmentPositionState。
+	//==========================================================
+	E_DamperProcessStep.WaitPreviousAdjustment:
+		stTurntableInput.bExchangeRequest := TRUE;
+	
+		eCurrentStep :=
+			E_DamperProcessStep.RotateTurntable;
 
 
 	//==========================================================
@@ -414,38 +650,30 @@ CASE eCurrentStep OF
 	// 定时完成才认为转台到位，然后交换两个物理位置状态。
 	//==========================================================
 	E_DamperProcessStep.RotateTurntable:
-		IF fbSimulatedTurntableRotate.Q THEN
-			// 转台旋转180°后，两个物理位置身份互换。
-			eTurntableSwapTemp :=
-				eTransferPositionState;
+		// bExchangeDone可能在机械手放料完成之前出现，因此需要锁存。
+		IF stTurntableStatus.bExchangeDone THEN
+			bExchangeCompleteLatched := TRUE;
+		END_IF;
 	
-			eTransferPositionState :=
-				eAdjustmentPositionState;
-	
-			eAdjustmentPositionState :=
-				eTurntableSwapTemp;
-	
-			// 备料位的新阻尼器已经转到调整位。
-			IF
-				eAdjustmentPositionState
-				= E_DamperSlotState.PendingAdjustment
-			THEN
-				// 从下一扫描周期开始，调整定时器开始计时。
-				eAdjustmentPositionState :=
-					E_DamperSlotState.Adjusting;
-			END_IF;
-	
-			IF bPreviousPartAvailable THEN
-				// 上一件合格品已经转回机械手取回位置。
+		IF bPreviousPartAvailable THEN
+			// 转台物理到位后立即开始取回上一件。
+			// 此时FB_TurntableProcess会同时启动夹紧轴。
+			IF stTurntableStatus.bRotationDone THEN
 				eCurrentStep :=
 					E_DamperProcessStep.PlacePreviousDamper;
-			ELSE
-				// 第一盘第一件没有上一件需要取回。
+			END_IF;
+	
+		ELSE
+			// 第一盘第一件旋转后，取回位置为空。
+			// 不需要DamperZ取料，只等待夹紧完成。
+			IF bExchangeCompleteLatched THEN
+				stTurntableInput.bExchangeRequest := FALSE;
+				bExchangeCompleteLatched := FALSE;
+	
 				eCurrentStep :=
 					E_DamperProcessStep.FinishCurrentSlot;
 			END_IF;
 		END_IF;
-
 
     //==========================================================
     // 将上一件已调整阻尼器放入当前刚取空的料位
@@ -455,60 +683,74 @@ CASE eCurrentStep OF
     // 上一件原始料位的X、Y，不需要修改Method内部代码。
     //==========================================================
     E_DamperProcessStep.PlacePreviousDamper:
-		IF M_PlaceDamper(
-			fTargetX := fCurrentSlotX,
-			fTargetY := fCurrentSlotY,
-			fTargetZ := fTrayPickZ,
-			fTargetSafeZ := fTraySafeZ,
-			ioAxisX := stAxisX,
-			ioAxisY := stAxisY,
-			ioAxisZ := stAxisZ
-		) THEN
-			//==========================================================
-			// 1. 清理上一件的原始位置
-			//==========================================================
-			// 只有满足以下条件时才清空：
-			// 1. 上一件来源于当前正在显示的这盘料；
-			// 2. 上一件没有放回自己的原始位置；
-			// 3. 原始位置仍然是临时Adjusting状态。
-			//
-			// 如果原始位置已经被其他合格品占用，其状态是Qualified，
-			// 此处不能将其错误清空。
-			IF
-				(nPreviousSourceTray = nCurrentTray)
-				AND
-				(
-					(nPreviousSourceRow <> nCurrentRow)
-					OR
-					(nPreviousSourceColumn <> nCurrentColumn)
-				)
-				AND
-				(
+		// 夹紧轴可能先完成，因此持续锁存转台完整交换完成状态。
+		IF stTurntableStatus.bExchangeDone THEN
+			bExchangeCompleteLatched := TRUE;
+		END_IF;
+	
+		// Damper机械手支路尚未完成时，持续执行取回和放料Method。
+		IF NOT bPreviousPlaceDone THEN
+			IF M_PlaceDamper(
+				fTargetX := fCurrentSlotX,
+				fTargetY := fCurrentSlotY,
+				fTargetZ := fTrayPickZ,
+				fTargetSafeZ := fTraySafeZ,
+				ioAxisX := stAxisX,
+				ioAxisY := stAxisY,
+				ioAxisZ := stAxisZ
+			) THEN
+				// 如果上一件的原始位置仍为Adjusting，则清空。
+				IF
+					(nPreviousSourceTray = nCurrentTray)
+					AND
+					(
+						(nPreviousSourceRow <> nCurrentRow)
+						OR
+						(nPreviousSourceColumn <> nCurrentColumn)
+					)
+					AND
+					(
+						aSlots[
+							nPreviousSourceRow,
+							nPreviousSourceColumn
+						].eState
+						= E_DamperSlotState.Adjusting
+					)
+				THEN
 					aSlots[
 						nPreviousSourceRow,
 						nPreviousSourceColumn
-					].eState
-					= E_DamperSlotState.Adjusting
-				)
-			THEN
-				aSlots[
-					nPreviousSourceRow,
-					nPreviousSourceColumn
-				].eState := E_DamperSlotState.Empty;
+					].eState :=
+						E_DamperSlotState.Empty;
+				END_IF;
+	
+				// 实际放入位置显示调整结果。
+				aSlots[nCurrentRow, nCurrentColumn].eState :=
+					eTransferPositionState;
+	
+				// 取回位已经被机械手取空。
+				eTransferPositionState :=
+					E_DamperSlotState.Empty;
+	
+				bPreviousPlaceDone := TRUE;
 			END_IF;
-		
-			//==========================================================
-			// 2. 更新实际放入位置
-			//==========================================================
-			// 当前流程实际放入当前刚取空的料位。
-			// eTransferPositionState当前为Qualified或Unqualified。
-			aSlots[nCurrentRow, nCurrentColumn].eState :=
-				eTransferPositionState;
-		
-			// 上一件已经从转台取回位置搬走。
-			eTransferPositionState :=
-				E_DamperSlotState.Empty;
-		
+		END_IF;
+	
+		//==========================================================
+		// 两个并行支路都完成后，本轮交换才结束：
+		//
+		// 1. Damper机械手已经把上一件放入实际料位；
+		// 2. 夹紧轴已经完成夹紧，转台FB发出bExchangeDone。
+		//==========================================================
+		IF
+			bPreviousPlaceDone
+			AND bExchangeCompleteLatched
+		THEN
+			stTurntableInput.bExchangeRequest := FALSE;
+	
+			bPreviousPlaceDone := FALSE;
+			bExchangeCompleteLatched := FALSE;
+	
 			eCurrentStep :=
 				E_DamperProcessStep.FinishCurrentSlot;
 		END_IF;
@@ -549,6 +791,11 @@ CASE eCurrentStep OF
 
         ELSE
             // 当前盘第24件已经进入调整位，
+			IF (nCurrentRow = 4) AND (nCurrentColumn = 6) THEN
+				// 记录是哪一盘的第24件正在等待调整结果。
+				bWaitingTrayResult := TRUE;
+				nTrayAwaitingResult := nCurrentTray;
+			END_IF;
             // 第23件已经放入当前盘第24个空料位。
             IF nCurrentTray < 5 THEN
                 // 方案B：
@@ -580,50 +827,35 @@ CASE eCurrentStep OF
     // 3. 改为等待实际bTrayChangeDone信号。
     //==========================================================
 	//==========================================================
-	// 模拟换盘，并等待当前盘第24件调整完成
+	// 模拟换盘
+	//
+	// 只等待料盘更换完成，不再等待上一盘第24件调整完成。
+	// 允许新盘第1件先进入空的备料位。
 	//==========================================================
 	E_DamperProcessStep.WaitTrayChange:
-		// 第24件调整满3秒后，模拟为合格。
+		//==========================================================
+		// 等待下一盘真正到达阻尼器取料位置
+		//
+		// 同时判断层号，防止旧料盘尚未离开时
+		// bTrayAtDamperPosition仍为TRUE而造成误判。
+		//==========================================================
 		IF
-			(
-				eAdjustmentPositionState
-				= E_DamperSlotState.Adjusting
-			)
-			AND fbSimulatedAdjustment.Q
-		THEN
-			eAdjustmentPositionState :=
-				E_DamperSlotState.Qualified;
-	
-			// 当前盘24件调整完成，输出一个PLC周期。
-			bCurrentTrayDone := TRUE;
-		END_IF;
-	
-		// 换盘完成且第24件调整完成后，才开始处理下一盘。
-		IF
-			fbSimulatedTrayChange.Q
+			bTrayChangeDone
+			AND bTrayAtDamperPosition
 			AND
 			(
-				(
-					eAdjustmentPositionState
-					= E_DamperSlotState.Qualified
-				)
-				OR
-				(
-					eAdjustmentPositionState
-					= E_DamperSlotState.Unqualified
-				)
+				nTrayAtDamperLayer
+				= nCurrentTray + 1
 			)
 		THEN
-			nCurrentTray := nCurrentTray + 1;
+			nCurrentTray := nTrayAtDamperLayer;
 			nCurrentRow := 1;
 			nCurrentColumn := 1;
 	
-			// 当前数组改为表示新送到工作位置的料盘。
+			// 从现在开始，aSlots表示新到达的料盘。
 			M_ResetDamperSlotStates();
 	
-			// 上一盘第24件仍在转台调整位置。
-			// 新盘第1件放入备料位并旋转后，
-			// 上一盘第24件将回到机械手取回位置。
+			// 上一盘第24件可能仍位于调整位。
 			bPreviousPartAvailable := TRUE;
 	
 			eCurrentStep :=
@@ -638,20 +870,6 @@ CASE eCurrentStep OF
 		IF
 			(
 				eAdjustmentPositionState
-				= E_DamperSlotState.Adjusting
-			)
-			AND fbSimulatedAdjustment.Q
-		THEN
-			// 当前测试版本模拟调整结果为合格。
-			eAdjustmentPositionState :=
-				E_DamperSlotState.Qualified;
-	
-			bCurrentTrayDone := TRUE;
-		END_IF;
-	
-		IF
-			(
-				eAdjustmentPositionState
 				= E_DamperSlotState.Qualified
 			)
 			OR
@@ -660,8 +878,10 @@ CASE eCurrentStep OF
 				= E_DamperSlotState.Unqualified
 			)
 		THEN
-			eCurrentStep :=
-				E_DamperProcessStep.FinalRotateTurntable;
+			// 第五盘第24件之后不再有下一件。
+			stTurntableInput.bNoMorePartsToLoad := TRUE;
+			stTurntableInput.bExchangeRequest := TRUE;
+			eCurrentStep := E_DamperProcessStep.FinalRotateTurntable;
 		END_IF;
 
 
@@ -669,89 +889,75 @@ CASE eCurrentStep OF
 	// 第五盘第24件调整完成后，模拟转台旋转180°
 	//==========================================================
 	E_DamperProcessStep.FinalRotateTurntable:
-		IF fbSimulatedTurntableRotate.Q THEN
-			// 调整位和取回位交换。
-			eTurntableSwapTemp :=
-				eTransferPositionState;
-	
-			eTransferPositionState :=
-				eAdjustmentPositionState;
-	
-			eAdjustmentPositionState :=
-				eTurntableSwapTemp;
-	
-			// 第24件已经回到机械手取回位置。
+		IF
+			stTurntableStatus.bExchangeDone
+			AND stTurntableStatus.bFinalUnloadRequest
+		THEN
+			stTurntableInput.bExchangeRequest := FALSE;
 			eCurrentStep :=
 				E_DamperProcessStep.PlaceFinalDamperToBuffer;
 		END_IF;
 
 
     //==========================================================
-    // 将第五盘第24件从取回位搬到最终缓冲位
-    //==========================================================
-    E_DamperProcessStep.PlaceFinalDamperToBuffer:
-        IF M_PlaceDamper(
-            fTargetX := fBufferX,
-            fTargetY := fBufferY,
-            fTargetZ := fBufferPickZ,
-            fTargetSafeZ := fBufferSafeZ,
-            ioAxisX := stAxisX,
-            ioAxisY := stAxisY,
-            ioAxisZ := stAxisZ
-        ) THEN
-		
-		// 最后一件没有重新放入料盘，而是放入最终缓冲位。
-		//
-		// 如果它的原始料位仍显示Adjusting，说明该位置没有被其他
-		// 合格阻尼器占用，应将它恢复为Empty。
-		//
-		// 如果该位置已经显示Qualified，说明那里实际放有上一件合格品，
-		// 必须保留Qualified。
-		IF
-			(nPreviousSourceTray = nCurrentTray)
-			AND
-			(
-				aSlots[
-					nPreviousSourceRow,
-					nPreviousSourceColumn
-				].eState
-				= E_DamperSlotState.Adjusting
-			)
-		THEN
-			aSlots[
-				nPreviousSourceRow,
-				nPreviousSourceColumn
-			].eState := E_DamperSlotState.Empty;
+	// 将第五盘第24件从转台取回位搬到缓冲位1
+	//==========================================================
+	E_DamperProcessStep.PlaceFinalDamperToBuffer:
+		IF M_PlaceDamper(
+			fTargetX := fBufferX,
+			fTargetY := fBufferY,
+			fTargetZ := fBufferPickZ,
+			fTargetSafeZ := fBufferSafeZ,
+			ioAxisX := stAxisX,
+			ioAxisY := stAxisY,
+			ioAxisZ := stAxisZ
+		) THEN
+			// M_PlaceDamper返回TRUE时，阻尼器已经实际放到缓冲位，
+			// 并且Z轴已经回到缓冲位安全高度。
+	
+			// 缓冲位记录实际放入物料的检测结果。
+			eBufferPositionState :=
+				eTransferPositionState;
+	
+			// 阻尼器已经离开转台取回位。
+			eTransferPositionState :=
+				E_DamperSlotState.Empty;
+	
+			// 最终搬运完成保持型应答。
+			stTurntableInput.bFinalUnloadDone := TRUE;
+	
+			bPreviousPartAvailable := FALSE;
+	
+			eCurrentStep :=
+				E_DamperProcessStep.Completed;
 		END_IF;
+		//==========================================================
+		// 五盘流程完成
+		//
+		// bDone采用锁存方式保持，直到产生下一次启动上升沿。
+		// 因此bStart可以是短脉冲，不需要一直保持TRUE。
+		//==========================================================
+		E_DamperProcessStep.Completed:
+			// 等转台撤销最终取回请求后，完整流程才算结束。
+			IF NOT stTurntableStatus.bFinalUnloadRequest THEN
+				// 四相握手最后一步：
+				// 请求方确认对方已撤销Request后，再撤销Done。
+				stTurntableInput.bFinalUnloadDone := FALSE;
+				stTurntableInput.bNoMorePartsToLoad := FALSE;
 		
-            eBufferPositionState :=
-                eTransferPositionState;
-
+				bBusy := FALSE;
+				bDone := TRUE;
+				bTrayChangeRequest := FALSE;
+			END_IF;
 		
-            eTransferPositionState :=
-                E_DamperSlotState.Empty;
-
-            bPreviousPartAvailable := FALSE;
-
-            eCurrentStep :=
-                E_DamperProcessStep.Completed;
-        END_IF;
-
-
-    //==========================================================
-    // 五盘流程完成
-    //==========================================================
-    E_DamperProcessStep.Completed:
-        bBusy := FALSE;
-        bDone := TRUE;
-        bTrayChangeRequest := FALSE;
-
-        // bStart恢复FALSE后允许下一次上升沿重新启动。
-        IF NOT bStart THEN
-            bDone := FALSE;
-            eCurrentStep :=
-                E_DamperProcessStep.Idle;
-        END_IF;
+			// 下一次bStart上升沿已经在程序顶部锁存为bStartPending。
+			// 清除上一次完成状态并回到Idle，下一扫描周期重新启动。
+			IF bDone AND bStartPending THEN
+				bDone := FALSE;
+		
+				eCurrentStep :=
+					E_DamperProcessStep.Idle;
+			END_IF;
 
 
 ELSE
@@ -795,52 +1001,45 @@ FOR nRow := 1 TO 4 DO
 END_FOR;
 
 
-//==============================================================
-// 2. 料盘Z轴位置
-//==============================================================
-fTrayPickZ := fSlotPickZ;
+	//==============================================================
+	// 2. 料盘Z轴位置
+	//==============================================================
+	// 料盘取放绝对高度。
+	fTrayPickZ := fSlotPickZ;
+	
+	// 料盘区域XY移动前统一抬升到110mm。
+	fTraySafeZ := fZLiftPosition;
 
-fTraySafeZ :=
-    fSlotPickZ
-    + fDamperHeight
-    + fSafetyClearance;
-
-
-//==============================================================
-// 3. 备料/取回位
-//==============================================================
-fTransferX :=
-    fFirstSlotX + fTransferOffsetX;
-
-fTransferY :=
-    fFirstSlotY + fTransferOffsetY;
-
-fTransferPickZ :=
-    fSlotPickZ + fTransferOffsetZ;
-
-fTransferSafeZ :=
-    fTransferSafeZSetting;
+	//==============================================================
+	// 3. 备料/取回位
+	//==============================================================
+	//==============================================================
+	// 备料位使用实测绝对坐标
+	//==============================================================
+	fTransferX := fTransferXSetting;
+	fTransferY := fTransferYSetting;
+	fTransferPickZ := fTransferPickZSetting;
+	
+	// 备料位取放完成后，同样抬升到固定110mm。
+	fTransferSafeZ := fZLiftPosition;
 
 
-//==============================================================
-// 4. 最终缓冲位
-//
-// 当前临时坐标：
-// X = -860.5 mm
-// Y = -342.5 mm
-// Z =  -77.0 mm
-//==============================================================
-fBufferX :=
-    fFirstSlotX + fBufferOffsetX;
 
-fBufferY :=
-    fFirstSlotY + fBufferOffsetY;
-
-fBufferPickZ :=
-    fSlotPickZ + fBufferOffsetZ;
-
-fBufferSafeZ :=
-    fBufferSafeZSetting;]]></ST>
+	//==============================================================
+	// 4. 最终缓冲位
+	//
+	// 当前临时坐标：
+	// X = -860.5 mm
+	// Y = -342.5 mm
+	// Z =  -77.0 mm
+	//==============================================================
+	// 最终缓冲位1直接使用绝对坐标。
+	fBufferX := fBufferXSetting;
+	fBufferY := fBufferYSetting;
+	fBufferPickZ := fBufferPickZSetting;
+	
+	// 所有取放完成后统一抬升到110mm。
+	fBufferSafeZ := fZLiftPosition;]]></ST>
       </Implementation>
     </Method>
     <Method Name="M_MoveXYParallel" Id="{76cd42f8-d1ed-4032-942b-c970dbafe1eb}">
@@ -1143,6 +1342,7 @@ VAR_IN_OUT
     ioAxisX : ST_AxisInterface;
     ioAxisY : ST_AxisInterface;
     ioAxisZ : ST_AxisInterface;
+	ioAxisRotation : ST_AxisInterface;
 END_VAR]]></Declaration>
       <Implementation>
         <ST><![CDATA[// 复位XY并行运动内部状态
@@ -1157,7 +1357,18 @@ bZDoneLatched := FALSE;
 // 清除可能残留的绝对运动命令
 ioAxisX.Cmd.bMoveAbs := FALSE;
 ioAxisY.Cmd.bMoveAbs := FALSE;
-ioAxisZ.Cmd.bMoveAbs := FALSE;]]></ST>
+ioAxisZ.Cmd.bMoveAbs := FALSE;
+
+// 复位相机检测和旋转运行状态。
+fAngleCorrectionLatched := 0.0;
+bRotationCommandIssued := FALSE;
+// 复位取料后Z轴与旋转轴的并行完成锁存。
+bTakeLiftZDoneLatched := FALSE;
+bTakeRotationDoneLatched := FALSE;
+// 清除二维码扫描旋转发令状态。
+bQrScanCommandIssued := FALSE;
+// 清除可能残留的DamperRotation相对运动命令。
+ioAxisRotation.Cmd.bMoveRel := FALSE;]]></ST>
       </Implementation>
     </Method>
     <Method Name="M_TakeDamper" Id="{d36fa61d-b49a-449e-ad76-302f3cdb0cc6}">
@@ -1175,28 +1386,99 @@ VAR_IN_OUT
     ioAxisX : ST_AxisInterface;
     ioAxisY : ST_AxisInterface;
     ioAxisZ : ST_AxisInterface;
+	// 阻尼器夹爪旋转轴。
+    ioAxisRotation : ST_AxisInterface;
 END_VAR]]></Declaration>
       <Implementation>
         <ST><![CDATA[M_TakeDamper := FALSE;
 
 CASE eTakeStep OF
 
-    E_DamperTakeStep.Idle:
-        eTakeStep := E_DamperTakeStep.EnsureSafeZ;
+    //==========================================================
+    // 本次取料子流程开始
+    //==========================================================
+	E_DamperTakeStep.Idle:
+		// 清除上一件阻尼器锁存的检测角度。
+		fAngleCorrectionLatched := 0.0;
+	
+		// 清除DamperRotation发令状态。
+		bRotationCommandIssued := FALSE;
+		// 清除Z轴抬升与旋转轴完成锁存。
+		bTakeLiftZDoneLatched := FALSE;
+		bTakeRotationDoneLatched := FALSE;
+		// 清除上一件阻尼器的二维码扫描发令状态。
+		bQrScanCommandIssued := FALSE;	
+	
+		eTakeStep :=
+			E_DamperTakeStep.EnsureSafeZ;
 
-
-    // XY移动前先保证Z轴位于15mm。
+    //==========================================================
+    // 1. 相机和XY移动前，先确保DamperZ位于110mm
+    //==========================================================
     E_DamperTakeStep.EnsureSafeZ:
         IF M_MoveZAbsolute(
-            fTargetZ := fTraySafeZ,
+            fTargetZ := fCameraVisionZ,
             ioAxisZ := ioAxisZ
         ) THEN
             eTakeStep :=
-                E_DamperTakeStep.MoveXYToSlot;
+                E_DamperTakeStep.MoveXYToVisionPosition;
         END_IF;
 
 
-    // X、Y独立轴同周期启动。
+    //==========================================================
+    // 2. DamperXY移动，使相机中心对准当前阻尼器
+    //
+    // 相机位于夹爪Y正方向90mm：
+    // 相机位置 = 夹爪位置 + 90mm
+    //
+    // 所以相机对准料位时：
+    // 夹爪Y位置 = 料位Y位置 - 90mm
+    //==========================================================
+    E_DamperTakeStep.MoveXYToVisionPosition:
+        fCurrentVisionX :=
+            fSourceX - fCameraOffsetX;
+
+        fCurrentVisionY :=
+            fSourceY - fCameraOffsetY;
+
+        IF M_MoveXYParallel(
+            fTargetX := fCurrentVisionX,
+            fTargetY := fCurrentVisionY,
+            ioAxisX := ioAxisX,
+            ioAxisY := ioAxisY
+        ) THEN
+            eTakeStep :=
+                E_DamperTakeStep.SimulateVisionDetection;
+        END_IF;
+
+
+    //==========================================================
+	// 3. 延时2秒模拟相机检测
+	//
+	// 当前固定返回+60°相对修正角。
+	// 此处只锁存角度，不立即旋转。
+	//==========================================================
+	E_DamperTakeStep.SimulateVisionDetection:
+		IF fbSimulatedVisionDetection.Q THEN
+			// 锁存本次检测得到的相对修正角。
+			fAngleCorrectionLatched :=
+				fSimulatedAngleCorrection;
+	
+			// 旋转将在夹爪夹紧阻尼器后执行。
+			bRotationCommandIssued := FALSE;
+			bTakeRotationDoneLatched := FALSE;
+	
+			// 检测完成后，XY先回到理论料位。
+			eTakeStep :=
+				E_DamperTakeStep.MoveXYToSlot;
+		END_IF;
+
+
+	//==========================================================
+	// 4. 相机检测完成后，DamperXY回到阻尼器理论料位
+	//
+	// 此时只完成位置对准，DamperRotation暂不旋转。
+	//==========================================================
     E_DamperTakeStep.MoveXYToSlot:
         IF M_MoveXYParallel(
             fTargetX := fSourceX,
@@ -1209,7 +1491,7 @@ CASE eTakeStep OF
         END_IF;
 
 
-    // Z轴下降到料盘取料高度-71mm。
+    // Z轴下降到当前设置的料盘取料绝对高度fTrayPickZ。
     E_DamperTakeStep.LowerZToSlot:
         IF M_MoveZAbsolute(
             fTargetZ := fTrayPickZ,
@@ -1220,38 +1502,181 @@ CASE eTakeStep OF
         END_IF;
 
 
-    // 夹爪夹紧占位。
-    // 后续在这里发送夹紧命令并等待夹紧完成。
-    E_DamperTakeStep.ClampPlaceholder:
-        eTakeStep :=
-            E_DamperTakeStep.LiftZFromSlot;
+	//==========================================================
+	// 6. 夹爪夹紧占位
+	//
+	// 当前没有接入阻尼器夹爪，直接认为夹紧完成。
+	// 后续接入夹爪后，应在这里发送夹紧命令并等待夹紧反馈。
+	//==========================================================
+	E_DamperTakeStep.ClampPlaceholder:
+		// 准备启动Z轴抬升与DamperRotation并行运动。
+		bTakeLiftZDoneLatched := FALSE;
+		bTakeRotationDoneLatched := FALSE;
+		bRotationCommandIssued := FALSE;
+	
+		eTakeStep :=
+			E_DamperTakeStep.LiftZFromSlot;
+
+	//==========================================================
+	// 7. Z轴抬升与DamperRotation相对旋转并行执行
+	//
+	// 同一个PLC扫描周期内：
+	// 1. DamperZ开始向110mm安全位置运动；
+	// 2. DamperRotation按照检测角度开始相对运动。
+	//
+	// 两根轴分别锁存完成状态。
+	// 只有两根轴全部完成后，XY才能移动到转台备料位。
+	//==========================================================
+	E_DamperTakeStep.LiftZFromSlot:
+	
+		//======================================================
+		// 7.1 启动并等待DamperZ抬升
+		//======================================================
+		IF NOT bTakeLiftZDoneLatched THEN
+			IF M_MoveZAbsolute(
+				fTargetZ := fTraySafeZ,
+				ioAxisZ := ioAxisZ
+			) THEN
+				// Z轴完成信号可能只保持一个PLC周期，
+				// 因此在这里锁存。
+				bTakeLiftZDoneLatched := TRUE;
+			END_IF;
+		END_IF;
+	
+	
+		//======================================================
+		// 7.2 启动并等待DamperRotation相对旋转
+		//======================================================
+		IF NOT bTakeRotationDoneLatched THEN
+	
+			// 检测角度在死区内时，不需要发送旋转命令。
+			IF
+				ABS(fAngleCorrectionLatched)
+				<= fRotationAngleDeadband
+			THEN
+				bTakeRotationDoneLatched := TRUE;
+				bRotationCommandIssued := FALSE;
+	
+			ELSE
+				// 每件阻尼器只允许发送一次相对旋转命令。
+				IF NOT bRotationCommandIssued THEN
+					ioAxisRotation.Set.Position.fRelativeDistance :=
+						fAngleCorrectionLatched;
+	
+					ioAxisRotation.Set.Position.fVelocity :=
+						fDamperRotationVelocity;
+	
+					ioAxisRotation.Set.Position.fAcceleration :=
+						fDamperRotationAcceleration;
+	
+					ioAxisRotation.Set.Position.fDeceleration :=
+						fDamperRotationDeceleration;
+	
+					// 产生一个PLC扫描周期的相对运动命令。
+					ioAxisRotation.Cmd.bMoveRel := TRUE;
+					bRotationCommandIssued := TRUE;
+	
+				ELSIF ioAxisRotation.State.bDone THEN
+					// 相对旋转完成，锁存完成状态。
+					bTakeRotationDoneLatched := TRUE;
+					bRotationCommandIssued := FALSE;
+				END_IF;
+			END_IF;
+		END_IF;
+	
+	
+		//======================================================
+		// 7.3 等待两个并行动作全部完成
+		//======================================================
+		IF
+			bTakeLiftZDoneLatched
+			AND bTakeRotationDoneLatched
+		THEN
+			// 为下一件阻尼器清除并行运行状态。
+			bTakeLiftZDoneLatched := FALSE;
+			bTakeRotationDoneLatched := FALSE;
+			bRotationCommandIssued := FALSE;
+	
+			// Z轴已经到达安全位置且角度修正完成，
+			// 现在允许XY移动到转台备料位。
+			eTakeStep :=
+				E_DamperTakeStep.MoveXYToTransfer;
+		END_IF;
 
 
-    // 夹住阻尼器后升到15mm。
-    E_DamperTakeStep.LiftZFromSlot:
-        IF M_MoveZAbsolute(
-            fTargetZ := fTraySafeZ,
-            ioAxisZ := ioAxisZ
-        ) THEN
-            eTakeStep :=
-                E_DamperTakeStep.MoveXYToTransfer;
-        END_IF;
-
-
-    // 移动到转台备料位。
-    E_DamperTakeStep.MoveXYToTransfer:
-        IF M_MoveXYParallel(
-            fTargetX := fTransferX,
-            fTargetY := fTransferY,
-            ioAxisX := ioAxisX,
-            ioAxisY := ioAxisY
-        ) THEN
-            eTakeStep :=
-                E_DamperTakeStep.LowerZToTransfer;
-        END_IF;
-
-
-    // Z轴下降到备料位取放高度8mm。
+	//==========================================================
+	// 8. XY移动到转台备料位
+	//
+	// 此时DamperZ已经处于110mm安全高度。
+	// XY到位后先执行二维码扫描，不立即下降Z轴。
+	//==========================================================
+	E_DamperTakeStep.MoveXYToTransfer:
+		IF M_MoveXYParallel(
+			fTargetX := fTransferX,
+			fTargetY := fTransferY,
+			ioAxisX := ioAxisX,
+			ioAxisY := ioAxisY
+		) THEN
+			// 准备发送一次二维码扫描旋转命令。
+			bQrScanCommandIssued := FALSE;
+	
+			eTakeStep :=
+				E_DamperTakeStep.RotateForQrScan;
+		END_IF;
+	//==========================================================
+	// 9. DamperRotation旋转360°模拟二维码扫描
+	//
+	// 当前机械状态：
+	// 1. DamperX/Y已经到达转台备料位；
+	// 2. DamperZ保持在110mm安全高度；
+	// 3. 夹爪仍然夹持阻尼器。
+	//
+	// 当前二维码相机尚未接入，
+	// DamperRotation完成一圈相对运动即认为扫描成功。
+	//==========================================================
+	E_DamperTakeStep.RotateForQrScan:
+	
+		// 如果扫描角度被设置为接近0°，直接跳过扫码旋转。
+		IF
+			ABS(fQrScanRelativeAngle)
+			<= fRotationAngleDeadband
+		THEN
+			bQrScanCommandIssued := FALSE;
+	
+			eTakeStep :=
+				E_DamperTakeStep.LowerZToTransfer;
+	
+		ELSE
+			// 每件阻尼器只发送一次二维码扫描旋转命令。
+			IF NOT bQrScanCommandIssued THEN
+				ioAxisRotation.Set.Position.fRelativeDistance :=
+					fQrScanRelativeAngle;
+	
+				ioAxisRotation.Set.Position.fVelocity :=
+					fQrScanVelocity;
+	
+				ioAxisRotation.Set.Position.fAcceleration :=
+					fQrScanAcceleration;
+	
+				ioAxisRotation.Set.Position.fDeceleration :=
+					fQrScanDeceleration;
+	
+				// 产生一个PLC扫描周期的相对运动命令。
+				ioAxisRotation.Cmd.bMoveRel := TRUE;
+				bQrScanCommandIssued := TRUE;
+	
+			ELSIF ioAxisRotation.State.bDone THEN
+				// 完成+360°相对旋转，
+				// 当前模拟阶段直接认为二维码扫描成功。
+				bQrScanCommandIssued := FALSE;
+	
+				// 扫码结束后允许DamperZ下降到备料取放高度。
+				eTakeStep :=
+					E_DamperTakeStep.LowerZToTransfer;
+			END_IF;
+		END_IF;
+	// Z轴下降到实测备料位取放高度。
+	// 当前fTransferPickZ为60mm。
     E_DamperTakeStep.LowerZToTransfer:
         IF M_MoveZAbsolute(
             fTargetZ := fTransferPickZ,
@@ -1268,7 +1693,9 @@ CASE eTakeStep OF
             E_DamperTakeStep.LiftZFromTransfer;
 
 
-    // Z轴回到临时安全高度15mm。
+    // 阻尼器放入备料位后，
+	// DamperZ回到统一安全高度fTransferSafeZ。
+	// 当前安全高度为110mm。
     E_DamperTakeStep.LiftZFromTransfer:
         IF M_MoveZAbsolute(
             fTargetZ := fTransferSafeZ,

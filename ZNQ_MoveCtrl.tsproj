@@ -1423,6 +1423,15 @@ External Setpoint Generation:
 				</Relation>
 			</Relations>
 		</DataType>
+		<DataType>
+			<Name GUID="{71B58F72-0E49-50EB-B8E4-1CCD027538EC}" IecBaseType="true" AutoDeleteType="true">ARRAY [1..8] OF BOOL</Name>
+			<BitSize>64</BitSize>
+			<BaseType GUID="{18071995-0000-0000-0000-000000000030}">BOOL</BaseType>
+			<ArrayInfo>
+				<LBound>1</LBound>
+				<Elements>8</Elements>
+			</ArrayInfo>
+		</DataType>
 	</DataTypes>
 	<ImageDatas>
 		<ImageData Id="1000">424dd6020000000000003600000028000000100000000e0000000100180000000000a0020000c40e0000c40e00000000000000000000ff00ffc0c0c0c0c0c0c0c0c0c0c0c0808080808080808080808080808080808080ff00ffff00ffff00ffff00ffff00ffff00ffc0c0c0c0c0c0c0c0c0c0c0c0808080c0c0c0000000c0c0c0000000808080ff00ffff00ffff00ffff00ffff00ffff00ffc0c0c000bfff00bfffc0c0c0808080c0c0c000ffffc0c0c000ffff808080ff00ffff00ffff00ffff00ffff00ffff00ffc0c0c000bfff00bfffc0c0c0808080c0c0c0c0c0c0c0c0c0c0c0c0808080ff00ffff00ffff00ffff00ffff00ffff00ffc0c0c000bfff00bfffc0c0c0808080c0c0c0000000c0c0c0000000808080ff00ffff00ffff00ffff00ffff00ffff00ffc0c0c0c0c0c0c0c0c0c0c0c0808080c0c0c0ff0000c0c0c0ff0000808080ff00ffff00ffff00ffff00ffff00ffff00ffc0c0c0c0c0c0c0c0c0c0c0c0808080c0c0c0c0c0c0c0c0c0c0c0c0808080ff00ffff00ffff00ffff00ffff00ffff00ffc0c0c0c0c0c0c0c0c0c0c0c0808080c0c0c0000000c0c0c0000000808080ff00ffff00ffff00ffff00ffff00ffff00ffc0c0c000bfff00bfffc0c0c0808080c0c0c00000ffc0c0c00000ff808080ff00ffff00ffff00ffff00ffff00ffff00ffc0c0c000bfff00bfffc0c0c0808080c0c0c0c0c0c0c0c0c0c0c0c0808080ff00ffff00ffff00ffff00ffff00ffff00ffc0c0c000bfff00bfffc0c0c0808080c0c0c0000000c0c0c0000000808080ff00ffff00ffff00ffff00ffff00ffff00ffc0c0c0c0c0c0c0c0c0c0c0c0808080c0c0c0c0c0c0c0c0c0c0c0c0808080ff00ffff00ffff00ffff00ffff00ffff00ffc0c0c0c0c0c0c0c0c0c0c0c0808080c0c0c0008000c0c0c0008000808080ff00ffff00ffff00ffff00ffff00ffff00ffc0c0c0c0c0c0c0c0c0c0c0c0808080c0c0c0c0c0c0c0c0c0c0c0c0808080ff00ffff00ffff00ffff00ffff00ff</ImageData>
@@ -1456,14 +1465,14 @@ External Setpoint Generation:
 				<SvbTask Priority="8" CycleTime="100000" AmsPort="511">
 					<Name>Servo SVB</Name>
 				</SvbTask>
-				<Axis Id="1" CreateSymbols="true" AxisType="1" SimulationMode="true">
+				<Axis Id="1" CreateSymbols="true" AxisType="1">
 					<Name>TrayX</Name>
 					<Comment><![CDATA[料盘前后运动]]></Comment>
 					<AxisPara>
 						<OtherSettings AllowMotionCmdToSlave="true"/>
 					</AxisPara>
 					<Encoder Name="Enc" EncType="19">
-						<EncPara MaxCount="#xffffffff"/>
+						<EncPara ScaleFactorNumerator="5.96046447753906e-07" MaxCount="#xffffffff"/>
 						<Vars VarGrpType="1">
 							<Name>输入</Name>
 							<Var>
@@ -1596,14 +1605,14 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="2" CreateSymbols="true" AxisType="1" SimulationMode="true">
+				<Axis Id="2" CreateSymbols="true" AxisType="1">
 					<Name>TrayZ</Name>
 					<Comment><![CDATA[料盘上下运动]]></Comment>
 					<AxisPara>
 						<OtherSettings AllowMotionCmdToSlave="true"/>
 					</AxisPara>
 					<Encoder Name="Enc" EncType="19">
-						<EncPara MaxCount="#xffffffff"/>
+						<EncPara ScaleFactorNumerator="5.96046447753906e-07" MaxCount="#xffffffff"/>
 						<Vars VarGrpType="1">
 							<Name>输入</Name>
 							<Var>
@@ -1736,14 +1745,14 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="3" CreateSymbols="true" AxisType="1" SimulationMode="true">
+				<Axis Id="3" CreateSymbols="true" AxisType="1">
 					<Name>DamperX</Name>
 					<Comment><![CDATA[阻尼器前后运动]]></Comment>
 					<AxisPara>
 						<OtherSettings AllowMotionCmdToSlave="true"/>
 					</AxisPara>
 					<Encoder Name="Enc" EncType="19">
-						<EncPara MaxCount="#xffffffff"/>
+						<EncPara ScaleFactorNumerator="1.19209289550781e-06" MaxCount="#xffffffff"/>
 						<Vars VarGrpType="1">
 							<Name>输入</Name>
 							<Var>
@@ -1876,14 +1885,14 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="4" CreateSymbols="true" AxisType="1" SimulationMode="true">
+				<Axis Id="4" CreateSymbols="true" AxisType="1">
 					<Name>DamperY</Name>
 					<Comment><![CDATA[阻尼器左右运动]]></Comment>
 					<AxisPara>
 						<OtherSettings AllowMotionCmdToSlave="true"/>
 					</AxisPara>
 					<Encoder Name="Enc" EncType="19">
-						<EncPara MaxCount="#xffffffff"/>
+						<EncPara ScaleFactorNumerator="1.19209289550781e-06" MaxCount="#xffffffff"/>
 						<Vars VarGrpType="1">
 							<Name>输入</Name>
 							<Var>
@@ -2016,14 +2025,14 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="5" CreateSymbols="true" AxisType="1" SimulationMode="true">
+				<Axis Id="5" CreateSymbols="true" AxisType="1">
 					<Name>DamperZ</Name>
 					<Comment><![CDATA[阻尼器上下运动]]></Comment>
 					<AxisPara>
 						<OtherSettings AllowMotionCmdToSlave="true"/>
 					</AxisPara>
 					<Encoder Name="Enc" EncType="19">
-						<EncPara MaxCount="#xffffffff"/>
+						<EncPara ScaleFactorNumerator="5.96046447753906e-07" MaxCount="#xffffffff"/>
 						<Vars VarGrpType="1">
 							<Name>输入</Name>
 							<Var>
@@ -2156,14 +2165,15 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="6" CreateSymbols="true" AxisType="1" SimulationMode="true">
+				<Axis Id="6" CreateSymbols="true" AxisType="1">
 					<Name>DamperRotation</Name>
 					<Comment><![CDATA[阻尼器旋转]]></Comment>
 					<AxisPara>
+						<General UnitName="°"/>
 						<OtherSettings AllowMotionCmdToSlave="true"/>
 					</AxisPara>
 					<Encoder Name="Enc" EncType="19">
-						<EncPara MaxCount="#xffffffff"/>
+						<EncPara ScaleFactorNumerator="8.58306884765625e-06" MaxCount="#xffffffff"/>
 						<Vars VarGrpType="1">
 							<Name>输入</Name>
 							<Var>
@@ -2450,14 +2460,15 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="8" CreateSymbols="true" AxisType="1" SimulationMode="true" GroupId="7">
+				<Axis Id="8" CreateSymbols="true" AxisType="1" GroupId="7">
 					<Name>Turntable</Name>
 					<Comment><![CDATA[双料位旋转]]></Comment>
 					<AxisPara>
+						<General UnitName="°"/>
 						<OtherSettings AllowMotionCmdToSlave="true"/>
 					</AxisPara>
 					<Encoder Name="Enc" EncType="19">
-						<EncPara MaxCount="#xffffffff"/>
+						<EncPara ScaleFactorNumerator="7.51018524169922e-07" MaxCount="#xffffffff"/>
 						<Vars VarGrpType="1">
 							<Name>输入</Name>
 							<Var>
@@ -2590,14 +2601,14 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="9" CreateSymbols="true" AxisType="1" SimulationMode="true" GroupId="8">
+				<Axis Id="9" CreateSymbols="true" AxisType="1" GroupId="8">
 					<Name>Clamping</Name>
 					<Comment><![CDATA[调整位夹紧]]></Comment>
 					<AxisPara>
 						<OtherSettings AllowMotionCmdToSlave="true"/>
 					</AxisPara>
 					<Encoder Name="Enc" EncType="19">
-						<EncPara MaxCount="#xffffffff"/>
+						<EncPara ScaleFactorNumerator="7.45058059692383e-08" MaxCount="#xffffffff"/>
 						<Vars VarGrpType="1">
 							<Name>输入</Name>
 							<Var>
@@ -2730,7 +2741,7 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="10" CreateSymbols="true" AxisType="1" SimulationMode="true" GroupId="15">
+				<Axis Id="10" CreateSymbols="true" AxisType="1" GroupId="15">
 					<Name>AdjustmentX</Name>
 					<Comment><![CDATA[同轴度调整前后运动]]></Comment>
 					<AxisPara>
@@ -2870,7 +2881,7 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="11" CreateSymbols="true" AxisType="1" SimulationMode="true" GroupId="10">
+				<Axis Id="11" CreateSymbols="true" AxisType="1" GroupId="10">
 					<Name>AdjustmentY</Name>
 					<Comment><![CDATA[同轴度调整左右运动]]></Comment>
 					<AxisPara>
@@ -3010,7 +3021,7 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="12" CreateSymbols="true" AxisType="1" SimulationMode="true">
+				<Axis Id="12" CreateSymbols="true" AxisType="1">
 					<Name>AdjustmentZ</Name>
 					<Comment><![CDATA[同轴度调整上下运动]]></Comment>
 					<AxisPara>
@@ -3150,7 +3161,7 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="13" CreateSymbols="true" AxisType="1" SimulationMode="true">
+				<Axis Id="13" CreateSymbols="true" AxisType="1">
 					<Name>ScrewdriverY</Name>
 					<Comment><![CDATA[螺丝刀左右运动]]></Comment>
 					<AxisPara>
@@ -3290,7 +3301,7 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="14" CreateSymbols="true" AxisType="1" SimulationMode="true">
+				<Axis Id="14" CreateSymbols="true" AxisType="1">
 					<Name>ScrewdriverZ</Name>
 					<Comment><![CDATA[螺丝刀上下运动]]></Comment>
 					<AxisPara>
@@ -3434,11 +3445,23 @@ External Setpoint Generation:
 		</Motion>
 		<Plc>
 			<Project GUID="{EA67B656-2FC5-4A9C-A62D-78AA627F7844}" Name="inovance_ctrl" PrjFilePath="inovance_ctrl\inovance_ctrl.plcproj" TmcFilePath="inovance_ctrl\inovance_ctrl.tmc" ReloadTmc="true" AmsPort="851" FileArchiveSettings="#x000e" SymbolicMapping="true">
-				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcHash="{5990FC26-174A-8E47-0679-F6019BFF9DA0}" TmcPath="inovance_ctrl\inovance_ctrl.tmc">
+				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcHash="{A709B3BC-A2BA-1015-8769-8FAA9C95BCD5}" TmcPath="inovance_ctrl\inovance_ctrl.tmc">
 					<Name>inovance_ctrl Instance</Name>
 					<CLSID ClassFactory="TcPlc30">{08500001-0000-0000-F000-000000000064}</CLSID>
 					<Vars VarGrpType="2" AreaNo="1">
 						<Name>PlcTask Outputs</Name>
+						<Var>
+							<Name>GVL_IO_Raw.aEL2008_01</Name>
+							<Comment><![CDATA[ =========================================================
+ EL2008数字量输出模块
+ PLC程序写入，由TwinCAT发送到物理输出端口
+ =========================================================]]></Comment>
+							<Type GUID="{71B58F72-0E49-50EB-B8E4-1CCD027538EC}">ARRAY [1..8] OF BOOL</Type>
+						</Var>
+						<Var>
+							<Name>GVL_IO_Raw.aEL2008_02</Name>
+							<Type GUID="{71B58F72-0E49-50EB-B8E4-1CCD027538EC}">ARRAY [1..8] OF BOOL</Type>
+						</Var>
 						<Var>
 							<Name>GVL_AxisRef.AxisRefs[1].PlcToNc</Name>
 							<Type GUID="{96B75FEB-2D84-43BE-A3EC-D9A681F27D52}" Namespace="MC">PLCTONC_AXIS_REF</Type>
@@ -3498,6 +3521,22 @@ External Setpoint Generation:
 					</Vars>
 					<Vars VarGrpType="1">
 						<Name>PlcTask Inputs</Name>
+						<Var>
+							<Name>GVL_IO_Raw.aEL1008_01</Name>
+							<Comment><![CDATA[ =========================================================
+ EL1008数字量输入模块
+ 由TwinCAT I/O Mapping写入，PLC程序禁止赋值
+ =========================================================]]></Comment>
+							<Type GUID="{71B58F72-0E49-50EB-B8E4-1CCD027538EC}">ARRAY [1..8] OF BOOL</Type>
+						</Var>
+						<Var>
+							<Name>GVL_IO_Raw.aEL1008_02</Name>
+							<Type GUID="{71B58F72-0E49-50EB-B8E4-1CCD027538EC}">ARRAY [1..8] OF BOOL</Type>
+						</Var>
+						<Var>
+							<Name>GVL_IO_Raw.aEL1008_03</Name>
+							<Type GUID="{71B58F72-0E49-50EB-B8E4-1CCD027538EC}">ARRAY [1..8] OF BOOL</Type>
+						</Var>
 						<Var>
 							<Name>GVL_AxisRef.AxisRefs[1].NcToPlc</Name>
 							<Type GUID="{25521FAA-EA5F-4C7F-8864-BBCCDACD2E98}" Namespace="MC">NCTOPLC_AXIS_REF</Type>
@@ -3585,6 +3624,9 @@ External Setpoint Generation:
 				</AddressInfo>
 				<Image Id="2" AddrType="9" ImageType="3">
 					<Name>过程映像</Name>
+				</Image>
+				<Image Id="4" AddrType="10" ImageType="3">
+					<Name>过程映像-2</Name>
 				</Image>
 				<Box Id="1" BoxType="9099">
 					<Name>模块 1 (EK1100)</Name>
@@ -8388,6 +8430,9 @@ External Setpoint Generation:
 		</Io>
 	</Project>
 	<Mappings>
+		<MappingInfo Identifier="{00000000-2001-0850-0020-500841000403}" Id="#x02030020"/>
+		<MappingInfo Identifier="{00000000-0020-0304-1000-040320000403}" Id="#x02030010"/>
+		<MappingInfo Identifier="{00000000-0030-0304-1000-040332000403}" Id="#x02030040"/>
 		<MappingInfo Identifier="{05000010-2001-0850-1000-040300205008}" Id="#x02030030" Watchdog="14000000040000000400000004000000"/>
 		<OwnerA Name="TINC^Servo SAF^Axes^AdjustmentX">
 			<OwnerB Name="TIID^设备 1 (EtherCAT)^驱动器 17 (InoSV670N)">
@@ -8702,6 +8747,56 @@ External Setpoint Generation:
 			</OwnerB>
 		</OwnerA>
 		<OwnerA Name="TIPC^inovance_ctrl^inovance_ctrl Instance">
+			<OwnerB Name="TIID^设备 1 (EtherCAT)^模块 1 (EK1100)^模块 2 (EL1008)">
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_01[1]" VarB="Channel 1^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_01[2]" VarB="Channel 2^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_01[3]" VarB="Channel 3^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_01[4]" VarB="Channel 4^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_01[5]" VarB="Channel 5^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_01[6]" VarB="Channel 6^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_01[7]" VarB="Channel 7^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_01[8]" VarB="Channel 8^Input"/>
+			</OwnerB>
+			<OwnerB Name="TIID^设备 1 (EtherCAT)^模块 1 (EK1100)^模块 3 (EL1008)">
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[1]" VarB="Channel 1^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[2]" VarB="Channel 2^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[3]" VarB="Channel 3^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[4]" VarB="Channel 4^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[5]" VarB="Channel 5^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[6]" VarB="Channel 6^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[7]" VarB="Channel 7^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[8]" VarB="Channel 8^Input"/>
+			</OwnerB>
+			<OwnerB Name="TIID^设备 1 (EtherCAT)^模块 1 (EK1100)^模块 4 (EL1008)">
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_03[1]" VarB="Channel 1^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_03[2]" VarB="Channel 2^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_03[3]" VarB="Channel 3^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_03[4]" VarB="Channel 4^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_03[5]" VarB="Channel 5^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_03[6]" VarB="Channel 6^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_03[7]" VarB="Channel 7^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_03[8]" VarB="Channel 8^Input"/>
+			</OwnerB>
+			<OwnerB Name="TIID^设备 1 (EtherCAT)^模块 1 (EK1100)^模块 5 (EL2008)">
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[1]" VarB="Channel 1^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[2]" VarB="Channel 2^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[3]" VarB="Channel 3^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[4]" VarB="Channel 4^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[5]" VarB="Channel 5^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[6]" VarB="Channel 6^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[7]" VarB="Channel 7^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[8]" VarB="Channel 8^Output"/>
+			</OwnerB>
+			<OwnerB Name="TIID^设备 1 (EtherCAT)^模块 1 (EK1100)^模块 6 (EL2008)">
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[1]" VarB="Channel 1^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[2]" VarB="Channel 2^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[3]" VarB="Channel 3^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[4]" VarB="Channel 4^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[5]" VarB="Channel 5^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[6]" VarB="Channel 6^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[7]" VarB="Channel 7^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[8]" VarB="Channel 8^Output"/>
+			</OwnerB>
 			<OwnerB Name="TINC^Servo SAF^Axes^AdjustmentX">
 				<Link VarA="PlcTask Inputs^GVL_AxisRef.AxisRefs[10].NcToPlc" VarB="输出^ToPlc" AutoLink="true"/>
 				<Link VarA="PlcTask Outputs^GVL_AxisRef.AxisRefs[10].PlcToNc" VarB="输入^FromPlc" AutoLink="true"/>

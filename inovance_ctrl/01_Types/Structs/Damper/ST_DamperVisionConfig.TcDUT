@@ -1,0 +1,44 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="ST_DamperVisionConfig" Id="{5d9bcf61-924f-476b-9c82-c355f56a5512}">
+    <Declaration><![CDATA[//==============================================================
+// 阻尼器取料前视觉检测及旋转配置
+//
+// 几何偏移表示相机相对于夹爪中心的物理安装偏移。
+// 相机位于夹爪Y正方向90mm，因此相机对准阻尼器时：
+//
+// 轴目标Y = 阻尼器理论Y - fCameraOffsetY
+//==============================================================
+TYPE ST_DamperVisionConfig :
+STRUCT
+    // TRUE：由PLC定时器模拟检测；
+    // FALSE：等待WPF通过ADS返回实际检测结果。
+    bSimulationMode : BOOL;
+
+    // 相机相对于夹爪中心的X方向物理偏移。
+    fCameraOffsetX : LREAL;
+
+    // 相机相对于夹爪中心的Y方向物理偏移。
+    // 当前相机位于夹爪Y正方向90mm。
+    fCameraOffsetY : LREAL;
+
+    // 相机检测时DamperZ的绝对位置。
+    fVisionPositionZ : LREAL;
+
+    // PLC模拟视觉检测所使用的延时时间。
+    tSimulatedDetection : TIME;
+
+    // PLC模拟视觉检测返回的相对修正角。
+    fSimulatedAngleCorrection : LREAL;
+
+    // DamperRotation相对运动参数。
+    fRotationVelocity     : LREAL;
+    fRotationAcceleration : LREAL;
+    fRotationDeceleration : LREAL;
+
+    // 角度绝对值不大于该值时，可以直接认为无需旋转。
+    fRotationAngleDeadband : LREAL;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

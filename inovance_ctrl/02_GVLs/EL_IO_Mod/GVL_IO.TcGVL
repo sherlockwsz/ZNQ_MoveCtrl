@@ -1,12 +1,8 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
-  <GVL Name="GVL_HMI" Id="{65f78e28-9d20-414e-8a89-341c4c061362}">
+  <GVL Name="GVL_IO" Id="{0ac7a41d-8b6c-4990-bdba-82b5af4db2e1}">
     <Declaration><![CDATA[{attribute 'qualified_only'}
 VAR_GLOBAL
-    // WPF与PLC的通信握手、心跳及看门狗反馈。
-    Comm : ST_HmiCommunication;
-
-
 END_VAR]]></Declaration>
   </GVL>
 </TcPlcObject>

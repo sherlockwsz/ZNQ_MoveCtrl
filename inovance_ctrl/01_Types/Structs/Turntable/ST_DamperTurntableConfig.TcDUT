@@ -1,0 +1,82 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <DUT Name="ST_DamperTurntableConfig" Id="{9b78c013-b08b-4d04-82f6-7a4befda2708}">
+    <Declaration><![CDATA[(*
+    转台和夹紧轴集中配置。
+
+    当前所有运动数据均为TwinCAT模拟临时值。
+    上真实设备前必须重新测量并确认：
+    1. 转台零位和180°位置；
+    2. 夹紧轴松开位置和接近位置；
+    3. 夹紧转矩方向、大小和速度限制；
+    4. 各轴速度、加速度和超时时间。
+*)
+TYPE ST_DamperTurntableConfig :
+STRUCT
+    //==========================================================
+    // 功能开关
+    //==========================================================
+
+	// TRUE：夹紧建立和同轴度调整使用定时器模拟。
+	// 转台轴无论TRUE/FALSE都使用绝对位置运动及NC到位反馈。
+    bSimulationMode : BOOL;
+
+    // 当前模拟阶段为FALSE。
+    // 实机完成可靠回零或绝对位置确认后改为TRUE。
+    bRequireHomed : BOOL;
+
+    // TRUE时，将相机捕获结果作为状态转换条件。
+    // 当前只预留接口，不参与判断。
+    bUseVisionValidation : BOOL;
+
+    //==========================================================
+    // 转台轴参数，单位：degree
+    //==========================================================
+
+    fTurntablePosition0   : LREAL;
+    fTurntablePosition180 : LREAL;
+
+    fTurntableVelocity     : LREAL;
+    fTurntableAcceleration : LREAL;
+    fTurntableDeceleration : LREAL;
+    fTurntableJerk         : LREAL;
+
+    fTurntablePositionTolerance : LREAL;
+    tTurntableMoveTimeout       : TIME;
+
+    //==========================================================
+    // 夹紧轴位置模式参数
+    //==========================================================
+
+    // 完全松开位置，临时值，后续实测。
+    fClampOpenPosition : LREAL;
+
+    // 接近阻尼器但尚未产生明显夹紧力的位置。
+    fClampApproachPosition : LREAL;
+
+    fClampPositionVelocity     : LREAL;
+    fClampPositionAcceleration : LREAL;
+    fClampPositionDeceleration : LREAL;
+    fClampPositionJerk         : LREAL;
+
+    fClampPositionTolerance : LREAL;
+    tClampPositionTimeout   : TIME;
+
+    //==========================================================
+    // 夹紧轴转矩参数
+    //==========================================================
+    ClampTorque : ST_AxisTorqueSet;
+
+    //==========================================================
+    // 模拟时间
+    //==========================================================
+
+    // 模拟夹紧轴夹紧或松开。
+    tSimulatedClampAction : TIME;
+
+    // 模拟同轴度调整。
+    tSimulatedAdjustment : TIME;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

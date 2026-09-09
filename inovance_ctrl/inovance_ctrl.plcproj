@@ -57,10 +57,22 @@
     <Compile Include="01_Types\Enums\Tray\E_TrayProcessStep.TcDUT">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="01_Types\Enums\Turntable\E_DamperClampStep.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Enums\Turntable\E_DamperTurntablePosition.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Enums\Turntable\E_DamperTurntableStep.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="01_Types\Structs\Axes\Commands\ST_AxisCmd.TcDUT">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="01_Types\Structs\Axes\Settings\ST_AxisJogSet.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\Axes\Settings\ST_AxisTorqueSet.TcDUT">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="01_Types\Structs\Axes\Settings\ST_PositionSet.TcDUT">
@@ -102,6 +114,15 @@
     <Compile Include="01_Types\Structs\Tray\ST_Tray.TcDUT">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="01_Types\Structs\Turntable\ST_DamperTurntableConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\Turntable\ST_DamperTurntableInput.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\Turntable\ST_DamperTurntableStatus.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="02_GVLs\Axes\Configuration\GVL_AxisConfig.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
@@ -126,6 +147,14 @@
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
+    <Compile Include="02_GVLs\EL_IO_Mod\GVL_IO.TcGVL">
+      <SubType>Code</SubType>
+      <LinkAlways>true</LinkAlways>
+    </Compile>
+    <Compile Include="02_GVLs\EL_IO_Mod\GVL_IO_Raw.TcGVL">
+      <SubType>Code</SubType>
+      <LinkAlways>true</LinkAlways>
+    </Compile>
     <Compile Include="02_GVLs\System\GVL_System.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
@@ -143,6 +172,9 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="03_AxisControl\TrayProcess\FB_TrayProcess.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="03_AxisControl\TurntableProcess\FB_TurntableProcess.TcPOU">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="04_SystemControl\Communication\FB_HmiWatchdog.TcPOU">
@@ -165,6 +197,7 @@
     <Folder Include="01_Types\Enums\Axes\Modes" />
     <Folder Include="01_Types\Enums\Axes\Alarms" />
     <Folder Include="01_Types\Enums\Damper" />
+    <Folder Include="01_Types\Enums\Turntable" />
     <Folder Include="01_Types\Enums\Tray" />
     <Folder Include="01_Types\Arrays" />
     <Folder Include="01_Types\Structs" />
@@ -179,6 +212,7 @@
     <Folder Include="01_Types\Structs\Axes\Internal" />
     <Folder Include="01_Types\Structs\Communication" />
     <Folder Include="01_Types\Structs\Damper" />
+    <Folder Include="01_Types\Structs\Turntable" />
     <Folder Include="01_Types\Structs\Tray" />
     <Folder Include="02_GVLs" />
     <Folder Include="02_GVLs\Axes" />
@@ -187,11 +221,13 @@
     <Folder Include="02_GVLs\Axes\References" />
     <Folder Include="02_GVLs\Axes\Interface" />
     <Folder Include="02_GVLs\Communication" />
+    <Folder Include="02_GVLs\EL_IO_Mod" />
     <Folder Include="02_GVLs\System" />
     <Folder Include="03_AxisControl" />
     <Folder Include="03_AxisControl\Core" />
     <Folder Include="03_AxisControl\Management" />
     <Folder Include="03_AxisControl\DamperProcess" />
+    <Folder Include="03_AxisControl\TurntableProcess" />
     <Folder Include="03_AxisControl\TrayProcess" />
     <Folder Include="03_AxisControl\Supervision" />
     <Folder Include="04_SystemControl" />

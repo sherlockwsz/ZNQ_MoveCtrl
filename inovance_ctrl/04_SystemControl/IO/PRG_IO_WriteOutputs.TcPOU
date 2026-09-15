@@ -1,0 +1,66 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <POU Name="PRG_IO_WriteOutputs" Id="{df56515c-bc84-4a9a-a222-1355fc700afe}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM PRG_IO_WriteOutputs
+VAR
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// =============================================================
+// 第1个EL2008：料架1～5层指示灯
+// =============================================================
+
+// EL2008_01 Channel 1：1层灯
+GVL_IO_Raw.aEL2008_01[1] :=
+    GVL_IO.aTrayLevelLampCmd[1];
+
+// EL2008_01 Channel 2：2层灯
+GVL_IO_Raw.aEL2008_01[2] :=
+    GVL_IO.aTrayLevelLampCmd[2];
+
+// EL2008_01 Channel 3：3层灯
+GVL_IO_Raw.aEL2008_01[3] :=
+    GVL_IO.aTrayLevelLampCmd[3];
+
+// EL2008_01 Channel 5：4层灯
+GVL_IO_Raw.aEL2008_01[5] :=
+    GVL_IO.aTrayLevelLampCmd[4];
+
+// EL2008_01 Channel 7：5层灯
+GVL_IO_Raw.aEL2008_01[7] :=
+    GVL_IO.aTrayLevelLampCmd[5];
+
+// 未使用的输出端口固定关闭
+GVL_IO_Raw.aEL2008_01[4] := FALSE;
+GVL_IO_Raw.aEL2008_01[6] := FALSE;
+GVL_IO_Raw.aEL2008_01[8] := FALSE;
+
+
+// =============================================================
+// 第2个EL2008：三色灯及蜂鸣器
+// =============================================================
+
+// EL2008_02 Channel 1：红灯
+GVL_IO_Raw.aEL2008_02[1] :=
+    GVL_IO.bStackLightRedCmd;
+
+// EL2008_02 Channel 3：黄灯
+GVL_IO_Raw.aEL2008_02[3] :=
+    GVL_IO.bStackLightYellowCmd;
+
+// EL2008_02 Channel 5：绿灯
+GVL_IO_Raw.aEL2008_02[5] :=
+    GVL_IO.bStackLightGreenCmd;
+
+// EL2008_02 Channel 7：蜂鸣器
+GVL_IO_Raw.aEL2008_02[7] :=
+    GVL_IO.bBuzzerCmd;
+
+// 未使用的输出端口固定关闭
+GVL_IO_Raw.aEL2008_02[2] := FALSE;
+GVL_IO_Raw.aEL2008_02[4] := FALSE;
+GVL_IO_Raw.aEL2008_02[6] := FALSE;
+GVL_IO_Raw.aEL2008_02[8] := FALSE;]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

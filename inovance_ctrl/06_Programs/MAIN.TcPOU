@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
   <POU Name="MAIN" Id="{de82ff6c-f728-4f8e-8227-437e5e880436}" SpecialFunc="None">
     <Declaration><![CDATA[//==============================================================
 // PLC顶层主程序
@@ -11,22 +11,26 @@
 PROGRAM MAIN
 VAR
     fbHmiWatchdog : FB_HmiWatchdog;
-    aAxisManagers : ARRAY[1..GVL_Constants.cMaxAxisCount] OF FB_AxisManager;
+    aAxisManagers : ARRAY[1..GVL_Constants.cMaxAxisCount] OF FB_AxisManager;//14轴声明
+	fbDamperGripperManager : FB_GripperManager;//上下料夹爪
+    fbAdjustGripperManager : FB_GripperManager;//调整轴夹爪
 
     uiAxisIndex : UINT;
+    uiAutoAxisItem : UINT;
+    bAxisInAutoProcess : BOOL;
     bAnyAxisConfigured : BOOL;
     bAllAxesControlAllowed : BOOL;
     bAnyAxisRequireEnableReset : BOOL;
 	
 	fbTrayProcess : FB_TrayProcess;//料盘自动运送流程
-	bControlAuto : BOOL;//料盘自动运送开始标志
 	
 	// 阻尼器料位数据和初始化管理。
 	// 当前只管理数据，不产生任何轴运动命令。
 	fbDamperProcess : FB_DamperProcess;
 	// 转台与夹紧轴协调流程。
 	fbTurntableProcess : FB_TurntableProcess;
-	
+	fbDamperGripperAction : FB_GripperAction; // COM3唯一的自动动作实例
+	fbAutoProcessCoordinator : FB_AutoProcessCoordinator;
 	// 在线调试时置TRUE产生一次上升沿，重新计算全部坐标。
 	// 使用后应恢复FALSE，再次使用时重新产生上升沿。
 	bReinitializeDamperCoordinates : BOOL;
@@ -34,9 +38,82 @@ VAR
 	// 整套五盘联动流程状态。
 	bAutoProcessBusy : BOOL;
 	bAutoProcessDone : BOOL;
+	//==============================================================
+	// 自动启停控制
+	//==============================================================
+	
+	// WPF启动时写TRUE。
+	// 正常完成、人工停止或看门狗超时时由PLC清FALSE。
+	bControlAuto : BOOL;
+	
+	// WPF停止按钮写TRUE。
+	// PLC接受后WPF可以恢复FALSE。
+	bControlStop : BOOL;
+	// 回零模式入口预留；回零状态机接入前保持FALSE。
+	bControlHoming : BOOL;
+	bHomingBusy : BOOL;
+	
+	
+	//==============================================================
+	// 自动停止内部状态
+	//==============================================================
+	fbAutoStopManager : FB_AutoStopManager;
+	fbAutoStart : FB_AutoStartCoordinator; // 自动启动、使能及就绪协调
+	fbMachineSupervisor : FB_MachineSupervisor; // 整机第一故障监控与汇总
+	fbMachineModeManager : FB_MachineModeManager; // 整机唯一运行模式
+	trigStopRequest : R_TRIG;
+	trigResetMachineFault : R_TRIG; // 故障复位只接受一次上升沿
+	
+	// 人工停止或看门狗超时的组合请求。
+	bStopRequestRaw : BOOL;
+	
+	// 停止请求锁存。
+	// 从接受停止开始保持到FB_AutoStopManager完成。
+	bAbortProcesses : BOOL;
+	
+	// 对WPF发布的状态。
+	bAutoStopping : BOOL;
+	bAutoStopDone : BOOL;
+	bAutoStopError : BOOL;
+	bAutoStopTimeout : BOOL;
+	uiAutoStopErrorAxis : UINT;
+	nAutoStopErrorID : UDINT;
+
+	//==============================================================
+	// 整机统一故障状态
+	//==============================================================
+	// WPF/在线调试产生一个脉冲；仅当源故障已消失且Stop不在执行时复位。
+	bResetMachineFault : BOOL;
+	bMachineFault : BOOL;
+	bMachineFaultResetBlocked : BOOL;
+	eMachineFaultSource : E_MachineFaultSource;
+	uiMachineFaultAxis : UINT;
+	udiMachineFaultCode : UDINT;
+
+	// 整机模式与命令所有权状态（供ADS/WPF读取）。
+	eMachineMode : E_MachineMode;
+	bMachineModeChanged : BOOL;
+	bManualModeActive : BOOL;
+	bAutoModeActive : BOOL;
+	bHomingModeActive : BOOL;
+	bStopOwnerActive : BOOL;
+	bRecoveryModeActive : BOOL;
+	
+	
+	
+	bDamperGripperActionFault : BOOL; // 锁存供在线诊断；人工确认后再复位
+	udDamperGripperActionError : UDINT;	
+	bDamperGripperAutoReady     : BOOL;
+	bDamperGripperStartRejected : BOOL; // 供在线诊断；人工确认后清除
 END_VAR]]></Declaration>
     <Implementation>
-      <ST><![CDATA[//==============================================================
+      <ST><![CDATA[// =============================================================
+// 更新现场数字量输入
+// 必须位于所有设备控制和自动流程之前
+// =============================================================
+PRG_IO_ReadInputs();
+
+//==============================================================
 // 1. 更新HMI心跳状态
 //==============================================================
 fbHmiWatchdog(
@@ -44,102 +121,354 @@ fbHmiWatchdog(
     udiHeartbeat := GVL_HMI.Comm.udiHeartbeat,
     tTimeout := GVL_System.tHmiWatchdogTimeout
 );
+
 //==============================================================
-// 1. 料盘流程
+// 2. 组合并锁存停止请求
 //
-// 读取FB_DamperProcess上一扫描周期的请求和完成状态。
+// 触发来源：
+// 1. WPF停止设备按钮；
+// 2. HMI心跳超时。
+//
+// 不使用NOT fbHmiWatchdog.bOnline作为条件，
+// 避免PLC刚启动且尚未收到第一个心跳时误触发停止。
 //==============================================================
-fbTrayProcess(
-    bStart := bControlAuto,
+bStopRequestRaw :=
+    bControlStop
+    OR
+    (
+        GVL_System.bUseHmiWatchdog
+        AND fbHmiWatchdog.bTimeout
+    );
+
+trigStopRequest(
+    CLK := bStopRequestRaw
+);
+
+IF trigStopRequest.Q THEN
+    // 清除上一次停止完成反馈。
+    bAutoStopDone := FALSE;
+
+    // 清除自动运行请求。
+    bControlAuto := FALSE;
+    bControlHoming := FALSE;
+
+    // 锁存流程中止和全轴停止。
+    bAbortProcesses := TRUE;
+END_IF;
+
+//==============================================================
+// 停止请求存在或停止过程未完成时，禁止启动自动流程
+//
+// 防止停止过程中出现无效的bStart上升沿，
+// 也防止bControlStop尚未释放时重新启动。
+//==============================================================
+IF
+    bStopRequestRaw
+    OR bAbortProcesses
+    OR fbMachineSupervisor.stFault.bActive
+    OR (fbMachineModeManager.eMode = E_MachineMode.Homing)
+THEN
+    bControlAuto := FALSE;
+END_IF;
+
+// 只检查新一轮自动启动，不在运动中持续用三项Valid作启动检查：
+// 位置写入后，底层会暂时将这些Valid置FALSE，等待新轮询反馈。
+bDamperGripperAutoReady :=
+    GVL_DamperGripper.stDamperGripper.Set.bParametersVerified
+    AND (GVL_DamperGripper.stDamperGripper.Set.uiCloseCurrentMin > 0)
+    AND (GVL_DamperGripper.stDamperGripper.Set.diPositionTolerance >= 0)
+    AND (GVL_DamperGripper.stDamperGripper.Set.tMoveTimeout > T#0MS)
+    AND GVL_DamperGripper.stDamperGripper.Feedback.bOnline
+    AND NOT GVL_DamperGripper.stDamperGripper.Feedback.bCommFault
+    AND GVL_DamperGripper.stDamperGripper.Feedback.bPositionValid
+    AND GVL_DamperGripper.stDamperGripper.Feedback.bCurrentValid
+    AND GVL_DamperGripper.stDamperGripper.Feedback.bFaultCodeValid
+    AND NOT GVL_DamperGripper.stDamperGripper.Feedback.bFault;
 	
-    // Damper三轴完成启动预定位后，
-    // 才允许Tray机构开始取第一盘。
-    bDamperPrePositionDone :=
-        fbDamperProcess.bPrePositionDone,
-		
-    bTrayChangeRequest :=
-        fbDamperProcess.bTrayChangeRequest,
-
-    bDamperProcessDone :=
-        fbDamperProcess.bDone,
-
-    stAxisX :=
-        GVL_AxisRuntime.Axes[GVL_AxisIndex.TrayX],
-
-    stAxisZ :=
-        GVL_AxisRuntime.Axes[GVL_AxisIndex.TrayZ]
-);
-
-
-//==============================================================
-// 2. 阻尼器上下料流程
-//
-// 读取FB_TrayProcess本扫描周期发布的料盘状态。
-//==============================================================
-fbDamperProcess(
-    bStart := bControlAuto,
-
-    bReinitializeCoordinates :=
-        bReinitializeDamperCoordinates,
-
-    bTrayAtDamperPosition :=
-        fbTrayProcess.bTrayAtDamperPosition,
-
-    bTrayChangeDone :=
-        fbTrayProcess.bTrayChangeDone,
-
-    nTrayAtDamperLayer :=
-        fbTrayProcess.nCurrentLayer,
-
-    stTurntableStatus :=
-        fbTurntableProcess.stStatus,
-
-    stAxisX :=
-        GVL_AxisRuntime.Axes[GVL_AxisIndex.DamperX],
-
-    stAxisY :=
-        GVL_AxisRuntime.Axes[GVL_AxisIndex.DamperY],
-
-    stAxisZ :=
-        GVL_AxisRuntime.Axes[GVL_AxisIndex.DamperZ],
-
-    // 新增：阻尼器夹爪旋转轴。
-    stAxisRotation :=
-        GVL_AxisRuntime.Axes[
-            GVL_AxisIndex.DamperRotation
-        ]
-);
-//==============================================================
-// 转台夹紧流程测试
-//
-//==============================================================
-
-fbTurntableProcess(
-    // 读取上下料FB本周期生成的保持型请求。
-    stInput := fbDamperProcess.stTurntableInput,
-
-    stTurntableAxis :=
-        GVL_AxisRuntime.Axes[GVL_AxisIndex.Turntable],
-
-    stClampingAxis :=
-        GVL_AxisRuntime.Axes[GVL_AxisIndex.Clamping],
-
-    // 两个状态继续保存在fbDamperProcess下，保持现有ADS/WPF符号路径。
-    eTransferPositionState :=
-        fbDamperProcess.eTransferPositionState,
-
-    eAdjustmentPositionState :=
-        fbDamperProcess.eAdjustmentPositionState
-);
-
-	bAutoProcessBusy :=
-		fbTrayProcess.bBusy
-		OR fbDamperProcess.bBusy
-		OR fbTurntableProcess.stStatus.bBusy;
+	// 必须放在 Stop 请求处理、COM3 就绪计算之后，
+	// 且必须放在 Tray/Damper/Turntable 流程调用之前。
+	fbAutoStart(
+		bRequest := bControlAuto,
+		bCancel := bStopRequestRaw
+				   OR bAbortProcesses
+				   OR fbAutoStopManager.bError
+				   OR fbMachineSupervisor.stFault.bActive
+				   OR (fbMachineModeManager.eMode = E_MachineMode.Homing),
+		bHmiOnline := fbHmiWatchdog.bOnline,
+		bControlAllowed := GVL_HMI.Comm.bControlAllowed,
+		bGripperReady := bDamperGripperAutoReady,
+		bGripperActionFault := bDamperGripperActionFault,
+		bProcessDone := bAutoProcessDone,
+		tEnableTimeout := T#15S,
+		aAxes := GVL_AxisRuntime.Axes
+	);
 	
-	// 最终Done只能以料盘机构完成最终复位为准。
-	bAutoProcessDone :=
-		fbTrayProcess.bDone;
+	IF fbAutoStart.bStartRejected THEN
+		// 沿用 WPF 当前直接读写的请求位：拒绝后由 PLC 清除。
+		bControlAuto := FALSE;
+	
+		IF fbAutoStart.uiErrorCode = 3 THEN
+			bDamperGripperStartRejected := TRUE;
+		END_IF;
+	END_IF;
+	
+//==============================================================
+// 自动流程使用轴的自动使能
+//
+// 只有以下条件全部满足才自动使能：
+// 1. WPF请求自动运行；
+// 2. 没有执行停止过程；
+// 3. HMI心跳在线；
+// 4. CommandGuard已经重新开放控制。
+//
+// 自动流程FB会等待各轴State.bReady，
+// 因此不需要在同一扫描周期立即开始运动。
+//==============================================================
+IF fbAutoStart.bEnableAxes
+    AND NOT bStopRequestRaw
+    AND NOT bAbortProcesses
+    AND fbHmiWatchdog.bOnline
+    AND GVL_HMI.Comm.bControlAllowed
+THEN
+    // 与启动检查、运行监控共用同一份自动轴清单。
+    FOR uiAutoAxisItem := 1 TO GVL_AxisIndex.AutoProcessAxisCount DO
+        uiAxisIndex := GVL_AxisIndex.AutoProcessAxes[uiAutoAxisItem];
+        // 自动启动只写Auto通道，不覆盖WPF手动Cmd。
+        GVL_AxisRuntime.Axes[uiAxisIndex].AutoCmd.bEnable := TRUE;
+    END_FOR;
+END_IF;
+
+
+// ============================================================
+// 1.整机五盘流程协调
+// 必须在八轴使能请求之后、FB_AutoStopManager 之前调用。
+// ============================================================
+fbAutoProcessCoordinator(
+    bStart := fbAutoStart.bProcessStart,
+    bAbort := bAbortProcesses OR bStopRequestRaw,
+    bStopRequest := bStopRequestRaw,
+    bReinitializeCoordinates := bReinitializeDamperCoordinates,
+
+    ioTrayProcess := fbTrayProcess,
+    ioDamperProcess := fbDamperProcess,
+    ioTurntableProcess := fbTurntableProcess,
+    ioGripperAction := fbDamperGripperAction,
+
+    ioGripper := GVL_DamperGripper.stDamperGripper,
+    aAxes := GVL_AxisRuntime.Axes
+);
+
+// 启动准备阶段由启动协调器负责；运行阶段由流程协调器负责。
+bAutoProcessBusy :=
+    fbAutoStart.bEnabling
+    OR fbAutoProcessCoordinator.bBusy;
+
+bAutoProcessDone :=
+    fbAutoProcessCoordinator.bDone
+    AND NOT fbAutoStart.bEnabling;
+
+// ============================================================
+// 整机自动运行故障监控与第一故障汇总
+// 必须位于流程协调器之后、Stop管理器之前：
+// 本周期产生的COM3/转台故障可在本周期进入Stop首扫覆盖。
+// ============================================================
+// 防止WPF或在线调试长时间保持复位位：
+// 只有FALSE->TRUE的边沿才允许执行一次故障复位。
+trigResetMachineFault(CLK := bResetMachineFault);
+
+fbMachineSupervisor(
+    bReset := trigResetMachineFault.Q
+              AND NOT bAbortProcesses
+              AND NOT fbAutoStopManager.bBusy,
+
+    bAutoActive := bControlAuto
+                   OR fbAutoStart.bEnabling
+                   OR fbAutoStart.bProcessStart
+                   OR fbAutoProcessCoordinator.bBusy,
+
+    bHmiWatchdogTimeout :=
+        GVL_System.bUseHmiWatchdog AND fbHmiWatchdog.bTimeout,
+
+    bAutoStartErrorPulse := fbAutoStart.bErrorPulse,
+    bAutoStartTimeout := fbAutoStart.bTimeout,
+    uiAutoStartErrorAxis := fbAutoStart.uiErrorAxisIndex,
+    uiAutoStartErrorCode := fbAutoStart.uiErrorCode,
+
+    bDamperGripperHealthOK :=
+        GVL_DamperGripper.stDamperGripper.Feedback.bOnline
+        AND NOT GVL_DamperGripper.stDamperGripper.Feedback.bCommFault
+        AND NOT GVL_DamperGripper.stDamperGripper.Feedback.bFault,
+
+    bDamperGripperFault :=
+        fbAutoProcessCoordinator.bGripperActionFault,
+    udiDamperGripperError :=
+        fbAutoProcessCoordinator.udGripperActionError,
+
+    bTurntableFault := fbAutoProcessCoordinator.bTurntableFault,
+    udiTurntableError := fbTurntableProcess.stStatus.nErrorID,
+
+    // Stop管理器在本调用之后执行，因此这里读取其上一扫描周期状态。
+    bAutoStopFault := fbAutoStopManager.bError,
+    bAutoStopTimeout := fbAutoStopManager.bTimeout,
+    uiAutoStopErrorAxis := fbAutoStopManager.uiErrorAxisIndex,
+    udiAutoStopError := fbAutoStopManager.nErrorID,
+
+    aAxes := GVL_AxisRuntime.Axes
+);
+
+// 发布稳定的ADS诊断符号。
+bMachineFault := fbMachineSupervisor.stFault.bActive;
+bMachineFaultResetBlocked := fbMachineSupervisor.bResetBlocked;
+eMachineFaultSource := fbMachineSupervisor.stFault.eSource;
+uiMachineFaultAxis := fbMachineSupervisor.stFault.uiAxisIndex;
+udiMachineFaultCode := fbMachineSupervisor.stFault.udiErrorCode;
+
+// 保留原有COM3诊断符号路径，数值改由统一第一故障状态派生。
+bDamperGripperActionFault :=
+    bMachineFault
+    AND (eMachineFaultSource = E_MachineFaultSource.DamperGripper);
+
+IF bDamperGripperActionFault THEN
+    udDamperGripperActionError := udiMachineFaultCode;
+ELSIF trigResetMachineFault.Q AND NOT bMachineFault THEN
+    udDamperGripperActionError := 0;
+END_IF;
+
+IF trigResetMachineFault.Q AND NOT bMachineFault THEN
+    bDamperGripperStartRejected := FALSE;
+END_IF;
+
+// 新运行故障统一进入现有受控Stop链路。
+IF fbMachineSupervisor.bStopRequestPulse
+    AND NOT bAbortProcesses THEN
+
+    bControlAuto := FALSE;
+    bAbortProcesses := TRUE;
+END_IF;
+
+// 锁存故障期间禁止WPF重新拉起自动流程。
+IF bMachineFault THEN
+    bControlAuto := FALSE;
+    bControlHoming := FALSE;
+END_IF;
+
+// ============================================================
+// 自动流程正常完成
+// 只有不存在任何流程故障时才允许发布正常完成。
+// ============================================================
+IF bAutoProcessDone
+    AND fbAutoStart.bProcessStart
+    AND NOT bAbortProcesses
+    AND NOT bMachineFault
+THEN
+    bControlAuto := FALSE;
+END_IF;
+//==============================================================
+// 全轴停止覆盖
+//
+// 必须放在Tray、Damper、Turntable之后，
+// 确保可以覆盖本扫描周期内流程FB产生的命令。
+//
+// 必须放在FB_AxisManager之前，
+// 让轴管理器在同一扫描周期收到bStop。
+//==============================================================
+fbAutoStopManager(
+	bExecute := bAbortProcesses,
+	tStopTimeout := T#10S,
+	aAxes := GVL_AxisRuntime.Axes
+);
+
+
+//==============================================================
+// 发布停止状态
+//==============================================================
+bAutoStopping :=
+	fbAutoStopManager.bBusy;
+
+bAutoStopError :=
+	fbAutoStopManager.bError;
+
+bAutoStopTimeout :=
+	fbAutoStopManager.bTimeout;
+
+uiAutoStopErrorAxis :=
+	fbAutoStopManager.uiErrorAxisIndex;
+
+nAutoStopErrorID :=
+	fbAutoStopManager.nErrorID;
+
+//==============================================================
+// 锁存停止完成反馈
+//
+// MAIN继续锁存停止完成，直到下一次自动启动。
+// Stop管理器自身的Done保持到停止请求撤销。
+//==============================================================
+IF fbAutoStopManager.bDone THEN
+	bAutoStopDone := TRUE;
+END_IF;
+
+// 下一次自动启动时清除上一次停止完成反馈。
+IF bControlAuto THEN
+	bAutoStopDone := FALSE;
+END_IF;
+
+//==============================================================
+//管理两个RS485夹爪
+//==============================================================
+// 此处bAbortProcesses尚未被清除，本扫描周期不会漏掉停止请求。
+fbDamperGripperManager(
+    bEnableComm    := TRUE,
+    bStopRequested := bStopRequestRaw OR bAbortProcesses,
+    ioGripper      := GVL_DamperGripper.stDamperGripper
+);
+
+// 第二台目前未启用；启用通信时再接入相同的停止请求。
+fbAdjustGripperManager(
+    bEnableComm    := FALSE,
+    bStopRequested := FALSE,
+    ioGripper      := GVL_DamperGripper.stAdjustGripper
+);
+
+//==============================================================
+// 整机唯一运行模式
+// 使用本周期最新的自动、故障和Stop反馈；模式只负责授权，
+// 实际命令由后面的逐轴Arbiter选择。
+//==============================================================
+fbMachineModeManager(
+    bControlAllowed := GVL_HMI.Comm.bControlAllowed,
+    bAutoRequest := bControlAuto,
+    bAutoEnabling := fbAutoStart.bEnabling,
+    bAutoRunning :=
+        fbAutoStart.bProcessStart
+        OR fbAutoProcessCoordinator.bBusy,
+    bHomingRequest := bControlHoming,
+    bHomingBusy := bHomingBusy,
+    bStopActive :=
+        bStopRequestRaw
+        OR bAbortProcesses
+        OR fbAutoStopManager.bBusy
+        OR fbAutoStopManager.bError,
+    bMachineFault := bMachineFault
+);
+
+eMachineMode := fbMachineModeManager.eMode;
+bMachineModeChanged := fbMachineModeManager.bModeChanged;
+bManualModeActive := fbMachineModeManager.bManualAllowed;
+bAutoModeActive := fbMachineModeManager.bAutoAllowed;
+bHomingModeActive := fbMachineModeManager.bHomingAllowed;
+bStopOwnerActive := fbMachineModeManager.bStopOwnerActive;
+bRecoveryModeActive := fbMachineModeManager.bRecoveryModeActive;
+
+//==============================================================
+// 停止管理器完成后解除流程Abort
+//
+// 本周期流程FB已经先读取过bAbortProcesses=TRUE，
+// 只有Stop解除锁定、所有已配置轴确认掉使能后才解除。
+// 停止失败/超时保持Abort和故障锁存，禁止自动重启。
+//==============================================================
+IF fbAutoStopManager.bDone AND NOT bStopRequestRaw THEN
+	bAbortProcesses := FALSE;
+END_IF;
 //==============================================================
 // 4. 统一管理14轴
 //
@@ -152,10 +481,24 @@ bAllAxesControlAllowed := TRUE;
 bAnyAxisRequireEnableReset := FALSE;
 
 FOR uiAxisIndex := 1 TO GVL_Constants.cMaxAxisCount DO
+    // 自动模式下只有清单中的八根轴能够取得Auto所有权。
+    bAxisInAutoProcess := FALSE;
+    FOR uiAutoAxisItem := 1 TO GVL_AxisIndex.AutoProcessAxisCount DO
+        IF uiAxisIndex = GVL_AxisIndex.AutoProcessAxes[uiAutoAxisItem] THEN
+            bAxisInAutoProcess := TRUE;
+            EXIT;
+        END_IF;
+    END_FOR;
+
     aAxisManagers[uiAxisIndex](
         bAxisConfigured := GVL_AxisConfig.AxisLimits[uiAxisIndex].bConfigured,
+        bAxisUsedByAuto := bAxisInAutoProcess,
+        eMachineMode := eMachineMode,
         bProtectionEnabled := GVL_System.bUseHmiWatchdog,
         bHmiOnline := fbHmiWatchdog.bOnline,
+        // 看门狗失联期间，Stop管理器拥有使能控制权；
+        // Guard仍清除普通运动命令，不能提前撤使能。
+        bStopSequenceActive := bAbortProcesses OR fbAutoStopManager.bError,
         stLimit := GVL_AxisConfig.AxisLimits[uiAxisIndex],
         AxisRef := GVL_AxisRef.AxisRefs[uiAxisIndex],
         stAxis := GVL_AxisRuntime.Axes[uiAxisIndex]
@@ -181,7 +524,14 @@ GVL_HMI.Comm.bTimeout := fbHmiWatchdog.bTimeout;
 GVL_HMI.Comm.bControlAllowed :=
     bAnyAxisConfigured AND bAllAxesControlAllowed;
 GVL_HMI.Comm.bRequireEnableReset :=
-    bAnyAxisRequireEnableReset;]]></ST>
+    bAnyAxisRequireEnableReset;
+	
+// =============================================================
+// 3.最后写入物理输出
+// 必须放在本周期所有控制逻辑之后
+// =============================================================
+PRG_IO_WriteOutputs();
+]]></ST>
     </Implementation>
   </POU>
 </TcPlcObject>

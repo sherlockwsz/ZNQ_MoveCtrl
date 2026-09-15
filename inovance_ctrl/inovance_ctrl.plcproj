@@ -9,7 +9,7 @@
     <WriteProductVersion>true</WriteProductVersion>
     <GenerateTpy>false</GenerateTpy>
     <Name>inovance_ctrl</Name>
-    <ProgramVersion>3.1.4026.24</ProgramVersion>
+    <ProgramVersion>3.1.4026.26</ProgramVersion>
     <Application>{ccbc8e01-8ac6-4c60-babb-5d437bdfe18c}</Application>
     <TypeSystem>{3b47468d-317e-4903-ab37-46765059627e}</TypeSystem>
     <Implicit_Task_Info>{fcc4e43b-1917-4307-afcf-f14927fa475f}</Implicit_Task_Info>
@@ -33,6 +33,9 @@
     <Compile Include="01_Types\Enums\Axes\Modes\E_AxisControlMode.TcDUT">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="01_Types\Enums\Axes\Modes\E_AxisControlOwner.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="01_Types\Enums\Axes\Alarms\E_AxisErrorSource.TcDUT">
       <SubType>Code</SubType>
     </Compile>
@@ -49,6 +52,27 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="01_Types\Enums\Damper\E_DamperTakeStep.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Enums\Gripper\E_GripperActionStep.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Enums\Gripper\E_GripperCommand.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Enums\Gripper\E_GripperCommStep.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Enums\Startup\E_AutoStartStep.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Enums\Stop\E_AutoStopStep.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Enums\System\E_MachineFaultSource.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Enums\System\E_MachineMode.TcDUT">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="01_Types\Enums\Tray\E_Tray.TcDUT">
@@ -111,6 +135,18 @@
     <Compile Include="01_Types\Structs\Damper\ST_DamperSlot.TcDUT">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="01_Types\Structs\Gripper\ST_GripperConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\Gripper\ST_GripperFeedback.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\Gripper\ST_GripperInterface.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\Gripper\ST_GripperRequest.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="01_Types\Structs\Tray\ST_Tray.TcDUT">
       <SubType>Code</SubType>
     </Compile>
@@ -121,6 +157,9 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="01_Types\Structs\Turntable\ST_DamperTurntableStatus.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\Structs\System\ST_MachineFaultStatus.TcDUT">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="02_GVLs\Axes\Configuration\GVL_AxisConfig.TcGVL">
@@ -147,6 +186,10 @@
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
+    <Compile Include="02_GVLs\DamperGripper\GVL_DamperGripper.TcGVL">
+      <SubType>Code</SubType>
+      <LinkAlways>true</LinkAlways>
+    </Compile>
     <Compile Include="02_GVLs\EL_IO_Mod\GVL_IO.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
@@ -162,7 +205,16 @@
     <Compile Include="03_AxisControl\Core\FB_AxisControl.TcPOU">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="03_AxisControl\Arbitration\FB_AxisCommandArbiter.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="03_AxisControl\DamperProcess\FB_DamperProcess.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="03_AxisControl\GripperProcess\FB_GripperAction.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="03_AxisControl\StopControl\FB_AutoStopManager.TcPOU">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="03_AxisControl\Supervision\FB_AxisCommandGuard.TcPOU">
@@ -180,7 +232,34 @@
     <Compile Include="04_SystemControl\Communication\FB_HmiWatchdog.TcPOU">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="04_SystemControl\Communication\F_GripperModbusCrc16.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="04_SystemControl\IO\PRG_IO_ReadInputs.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="04_SystemControl\IO\PRG_IO_WriteOutputs.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="04_SystemControl\Mode\FB_MachineModeManager.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="04_SystemControl\Startup\FB_AutoProcessCoordinator.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="04_SystemControl\Startup\FB_AutoStartCoordinator.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="04_SystemControl\Supervision\FB_MachineSupervisor.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="06_Programs\MAIN.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="07_GripperControl\Core\FB_GripperControl.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="07_GripperControl\Management\FB_GripperManager.TcPOU">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="PlcTask.TcTTO">
@@ -197,6 +276,10 @@
     <Folder Include="01_Types\Enums\Axes\Modes" />
     <Folder Include="01_Types\Enums\Axes\Alarms" />
     <Folder Include="01_Types\Enums\Damper" />
+    <Folder Include="01_Types\Enums\Gripper" />
+    <Folder Include="01_Types\Enums\Stop" />
+    <Folder Include="01_Types\Enums\Startup" />
+    <Folder Include="01_Types\Enums\System" />
     <Folder Include="01_Types\Enums\Turntable" />
     <Folder Include="01_Types\Enums\Tray" />
     <Folder Include="01_Types\Arrays" />
@@ -212,6 +295,8 @@
     <Folder Include="01_Types\Structs\Axes\Internal" />
     <Folder Include="01_Types\Structs\Communication" />
     <Folder Include="01_Types\Structs\Damper" />
+    <Folder Include="01_Types\Structs\Gripper" />
+    <Folder Include="01_Types\Structs\System" />
     <Folder Include="01_Types\Structs\Turntable" />
     <Folder Include="01_Types\Structs\Tray" />
     <Folder Include="02_GVLs" />
@@ -221,23 +306,38 @@
     <Folder Include="02_GVLs\Axes\References" />
     <Folder Include="02_GVLs\Axes\Interface" />
     <Folder Include="02_GVLs\Communication" />
+    <Folder Include="02_GVLs\DamperGripper" />
     <Folder Include="02_GVLs\EL_IO_Mod" />
     <Folder Include="02_GVLs\System" />
     <Folder Include="03_AxisControl" />
+    <Folder Include="03_AxisControl\Arbitration" />
     <Folder Include="03_AxisControl\Core" />
     <Folder Include="03_AxisControl\Management" />
     <Folder Include="03_AxisControl\DamperProcess" />
+    <Folder Include="03_AxisControl\GripperProcess" />
+    <Folder Include="03_AxisControl\StopControl" />
     <Folder Include="03_AxisControl\TurntableProcess" />
     <Folder Include="03_AxisControl\TrayProcess" />
     <Folder Include="03_AxisControl\Supervision" />
     <Folder Include="04_SystemControl" />
     <Folder Include="04_SystemControl\Communication" />
+    <Folder Include="04_SystemControl\IO" />
+    <Folder Include="04_SystemControl\Mode" />
+    <Folder Include="04_SystemControl\Startup" />
+    <Folder Include="04_SystemControl\Supervision" />
     <Folder Include="06_Programs" />
+    <Folder Include="07_GripperControl" />
+    <Folder Include="07_GripperControl\Core" />
+    <Folder Include="07_GripperControl\Management" />
   </ItemGroup>
   <ItemGroup>
     <PlaceholderReference Include="Tc2_MC2">
       <DefaultResolution>Tc2_MC2, * (Beckhoff Automation GmbH)</DefaultResolution>
       <Namespace>Tc2_MC2</Namespace>
+    </PlaceholderReference>
+    <PlaceholderReference Include="Tc2_SerialCom">
+      <DefaultResolution>Tc2_SerialCom, * (Beckhoff Automation GmbH)</DefaultResolution>
+      <Namespace>Tc2_SerialCom</Namespace>
     </PlaceholderReference>
     <PlaceholderReference Include="Tc2_Standard">
       <DefaultResolution>Tc2_Standard, * (Beckhoff Automation GmbH)</DefaultResolution>

@@ -1,0 +1,199 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <POU Name="FB_GripperAction" Id="{c2ce23f6-bc7d-437a-91da-351ba974928b}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_GripperAction
+VAR_INPUT
+    bExecute       : BOOL; // 上层保持TRUE，直到收到Done或Error
+    eCommand       : E_GripperCommand; // 本阶段只允许Open、Close
+    bCancel        : BOOL; // 整机停止/流程中止
+    tAcceptTimeout : TIME := T#3S;
+    tResultTimeout : TIME := T#8S; // 应大于电机运动超时及通信余量
+END_VAR
+
+VAR_IN_OUT
+    ioGripper : ST_GripperInterface; // 绑定一台电机；本次绑定COM3
+END_VAR
+
+VAR_OUTPUT
+    bBusy            : BOOL;
+    bDone            : BOOL;  // 保持到bExecute撤销
+    bError           : BOOL;  // 保持到bExecute撤销
+    udErrorCode      : UDINT;
+    udiActionId      : UDINT; // 本次锁存的请求编号，便于在线观察
+    eStep            : E_GripperActionStep := E_GripperActionStep.Idle;
+END_VAR
+
+VAR
+    bInitialized     : BOOL;
+    bExecutePrevious : BOOL;
+    bResultValid     : BOOL;
+    eActiveCommand   : E_GripperCommand;
+
+    fbAcceptTimeout  : TON;
+    fbResultTimeout  : TON;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// 第一次调用先记住输入电平；PLC重启时不重放残留的TRUE。
+IF NOT bInitialized THEN
+    bExecutePrevious := bExecute;
+    bInitialized := TRUE;
+END_IF;
+
+fbAcceptTimeout(
+    IN := (eStep = E_GripperActionStep.WaitAccepted),
+    PT := tAcceptTimeout
+);
+
+fbResultTimeout(
+    IN := (eStep = E_GripperActionStep.WaitCompleted),
+    PT := tResultTimeout
+);
+
+// 本次命令的物理反馈是否仍可信。
+// Open只检查位置；Close同时检查位置和电流。
+// 还必须由下面的udiCompletedId确认它属于“本次命令”。
+bResultValid :=
+    ioGripper.Feedback.bOnline
+    AND NOT ioGripper.Feedback.bCommFault
+    AND ioGripper.Feedback.bFaultCodeValid
+    AND NOT ioGripper.Feedback.bFault
+    AND ioGripper.Feedback.bPositionValid;
+
+CASE eActiveCommand OF
+    E_GripperCommand.Close:
+        bResultValid :=
+            bResultValid
+            AND ioGripper.Feedback.bCurrentValid
+            AND ioGripper.Feedback.bClosed;
+
+    E_GripperCommand.Open:
+        bResultValid :=
+            bResultValid
+            AND ioGripper.Feedback.bOpen;
+
+ELSE
+    bResultValid := FALSE;
+END_CASE;
+
+// 等待期间撤销请求或收到整机停止：不能宣告动作完成。
+// 物理停止仍由现有FB_GripperControl的Stop路径处理。
+IF
+    ((eStep = E_GripperActionStep.WaitAccepted)
+     OR (eStep = E_GripperActionStep.WaitCompleted))
+    AND (bCancel OR NOT bExecute)
+THEN
+    bBusy := FALSE;
+    bDone := FALSE;
+    bError := TRUE;
+    udErrorCode := 16#3005; // 动作被中止
+    eStep := E_GripperActionStep.Error;
+    bExecutePrevious := bExecute;
+    RETURN;
+END_IF;
+
+CASE eStep OF
+    E_GripperActionStep.Idle:
+        bBusy := FALSE;
+        bDone := FALSE;
+        bError := FALSE;
+        udErrorCode := 0;
+
+        // 只在请求上升沿发一次命令。
+        IF bExecute AND NOT bExecutePrevious AND NOT bCancel THEN
+            IF (eCommand <> E_GripperCommand.Close)
+                AND (eCommand <> E_GripperCommand.Open) THEN
+                bError := TRUE;
+                udErrorCode := 16#3001; // 动作类型不支持
+                eStep := E_GripperActionStep.Error;
+            ELSE
+                eActiveCommand := eCommand;
+
+                // 先写命令类型，最后改变编号触发底层受理。
+                ioGripper.Cmd.eCommand := eActiveCommand;
+                IF ioGripper.Cmd.udiRequestId = 16#FFFFFFFF THEN
+                    ioGripper.Cmd.udiRequestId := 1;
+                ELSE
+                    ioGripper.Cmd.udiRequestId :=
+                        ioGripper.Cmd.udiRequestId + 1;
+                END_IF;
+
+                udiActionId := ioGripper.Cmd.udiRequestId;
+                bBusy := TRUE;
+                eStep := E_GripperActionStep.WaitAccepted;
+            END_IF;
+        END_IF;
+
+    E_GripperActionStep.WaitAccepted:
+        IF ioGripper.Feedback.udiRejectedId = udiActionId THEN
+            bBusy := FALSE;
+            bError := TRUE;
+            udErrorCode := ioGripper.Feedback.udCommandErrorCode;
+            IF udErrorCode = 0 THEN udErrorCode := 16#3006; END_IF;
+            eStep := E_GripperActionStep.Error;
+
+        ELSIF ioGripper.Feedback.udiAcceptedId = udiActionId THEN
+            eStep := E_GripperActionStep.WaitCompleted;
+
+        ELSIF fbAcceptTimeout.Q THEN
+            bBusy := FALSE;
+            bError := TRUE;
+            udErrorCode := 16#3002; // 等待受理超时
+            eStep := E_GripperActionStep.Error;
+        END_IF;
+
+    E_GripperActionStep.WaitCompleted:
+        IF (ioGripper.Feedback.udiAcceptedId = udiActionId)
+            AND (ioGripper.Feedback.udCommandErrorCode <> 0) THEN
+            bBusy := FALSE;
+            bError := TRUE;
+            udErrorCode := ioGripper.Feedback.udCommandErrorCode;
+            eStep := E_GripperActionStep.Error;
+
+        ELSIF ioGripper.Feedback.udiCompletedId = udiActionId THEN
+            IF bResultValid THEN
+                bBusy := FALSE;
+                bDone := TRUE;
+                eStep := E_GripperActionStep.Done;
+            ELSE
+                bBusy := FALSE;
+                bError := TRUE;
+                udErrorCode := 16#3006; // 完成编号存在，但反馈已不可信
+                eStep := E_GripperActionStep.Error;
+            END_IF;
+
+        ELSIF fbResultTimeout.Q THEN
+            bBusy := FALSE;
+            bError := TRUE;
+            udErrorCode := 16#3003; // 等待动作结果超时
+            eStep := E_GripperActionStep.Error;
+        END_IF;
+
+    E_GripperActionStep.Done:
+        bBusy := FALSE;
+
+        IF NOT bExecute THEN
+            bDone := FALSE;
+            eStep := E_GripperActionStep.Idle;
+        ELSIF NOT bResultValid
+            OR (ioGripper.Feedback.udiCompletedId <> udiActionId) THEN
+            // 流程尚未撤销请求时，反馈失效不能继续发布Done。
+            bDone := FALSE;
+            bError := TRUE;
+            udErrorCode := 16#3006;
+            eStep := E_GripperActionStep.Error;
+        END_IF;
+
+    E_GripperActionStep.Error:
+        bBusy := FALSE;
+        bError := TRUE;
+
+        IF NOT bExecute THEN
+            bError := FALSE;
+            eStep := E_GripperActionStep.Idle;
+        END_IF;
+END_CASE;
+
+bExecutePrevious := bExecute;]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

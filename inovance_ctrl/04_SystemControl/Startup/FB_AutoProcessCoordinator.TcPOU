@@ -1,0 +1,181 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <POU Name="FB_AutoProcessCoordinator" Id="{40395fc0-80f0-4ed1-95be-597e4ef209f6}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_AutoProcessCoordinator
+VAR_INPUT
+    // 来自 FB_AutoStartCoordinator；全部轴就绪后保持 TRUE。
+    bStart : BOOL;
+
+    // 整机停止／流程中止。
+    bAbort : BOOL;
+
+    // 用于取消正在执行的 COM3 夹爪动作。
+    bStopRequest : BOOL;
+
+    // 原 MAIN 中保留的在线坐标重初始化请求。
+    bReinitializeCoordinates : BOOL;
+END_VAR
+
+VAR_IN_OUT
+    // 实例继续声明在 MAIN，保留原 ADS 符号路径。
+    ioTrayProcess       : FB_TrayProcess;
+    ioDamperProcess     : FB_DamperProcess;
+    ioTurntableProcess  : FB_TurntableProcess;
+    ioGripperAction     : FB_GripperAction;
+
+    ioGripper : ST_GripperInterface;
+
+    // 复用统一轴数组，不在协调器中重新定义轴。
+    aAxes : ARRAY[1..GVL_Constants.cMaxAxisCount] OF ST_AxisInterface;
+END_VAR
+
+VAR_OUTPUT
+    bBusy : BOOL; // 三个运动流程或 COM3 动作正在执行
+    bDone : BOOL; // 第五盘放回、Tray 最终复位完成
+
+    // 本扫描检测到夹爪动作失败；交给 MAIN 锁存并启动 Stop 链路。
+    bGripperActionFault : BOOL;
+	bTurntableFault : BOOL;
+    udGripperActionError : UDINT;
+END_VAR
+
+VAR
+    // 本周期供 Damper 流程使用的 Abort。
+    // COM3 动作本周期报错时，Damper 可在同周期收到 TRUE。
+    bEffectiveAbort : BOOL;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// ============================================================
+// 调用顺序不可随意交换：
+// 1. Tray 读取 Damper 上一周期保持的请求；
+// 2. COM3 动作读取 Damper 上一周期保持的动作请求；
+// 3. Damper 读取本周期 Tray、COM3 的反馈；
+// 4. Turntable 读取本周期 Damper 生成的保持型请求。
+// ============================================================
+
+bGripperActionFault := FALSE;
+bEffectiveAbort := bAbort;
+
+// ------------------------------------------------------------
+// 1. 五层料盘流程
+// ------------------------------------------------------------
+ioTrayProcess(
+    bStart := bStart,
+    bAbort := bAbort,
+
+    bDamperPrePositionDone :=
+        ioDamperProcess.bPrePositionDone,
+
+    bTrayChangeRequest :=
+        ioDamperProcess.bTrayChangeRequest,
+
+    bDamperProcessDone :=
+        ioDamperProcess.bDone,
+
+    stAxisX := aAxes[GVL_AxisIndex.TrayX],
+    stAxisZ := aAxes[GVL_AxisIndex.TrayZ]
+);
+
+// ------------------------------------------------------------
+// 2. COM3 上下料夹爪动作
+// Damper 本周期提出的新请求，将在下一扫描由此处受理。
+// ------------------------------------------------------------
+ioGripperAction(
+    bExecute := ioDamperProcess.bGripperActionExecute,
+    eCommand := ioDamperProcess.eGripperActionCommand,
+    bCancel := bStopRequest OR bAbort,
+    tAcceptTimeout := T#3S,
+    tResultTimeout := T#8S,
+    ioGripper := ioGripper
+);
+
+// 与原 MAIN 判断保持一致：只在 Damper 流程运行中，
+// 将 COM3 动作失败升级为整机流程中止。
+IF ioGripperAction.bError
+    AND ioDamperProcess.bBusy
+    AND NOT bAbort THEN
+
+    bGripperActionFault := TRUE;
+    udGripperActionError := ioGripperAction.udErrorCode;
+    bEffectiveAbort := TRUE;
+END_IF;
+
+// ------------------------------------------------------------
+// 3. 阻尼器五盘上下料流程
+// COM3 本周期报错时，用 bEffectiveAbort 当周期中止 Damper。
+// 实际轴停止仍由 MAIN 后续的 FB_AutoStopManager 完成。
+// ------------------------------------------------------------
+ioDamperProcess(
+    bStart := bStart,
+    bAbort := bEffectiveAbort,
+
+    bGripperActionDone := ioGripperAction.bDone,
+    bGripperActionError := ioGripperAction.bError,
+
+    bReinitializeCoordinates :=
+        bReinitializeCoordinates,
+
+    bTrayAtDamperPosition :=
+        ioTrayProcess.bTrayAtDamperPosition,
+
+    bTrayChangeDone :=
+        ioTrayProcess.bTrayChangeDone,
+
+    nTrayAtDamperLayer :=
+        ioTrayProcess.nCurrentLayer,
+
+    stTurntableStatus :=
+        ioTurntableProcess.stStatus,
+
+    stAxisX :=
+        aAxes[GVL_AxisIndex.DamperX],
+
+    stAxisY :=
+        aAxes[GVL_AxisIndex.DamperY],
+
+    stAxisZ :=
+        aAxes[GVL_AxisIndex.DamperZ],
+
+    stAxisRotation :=
+        aAxes[GVL_AxisIndex.DamperRotation]
+);
+
+// ------------------------------------------------------------
+// 4. 转台与夹紧轴流程
+// 保持两个物理位置状态仍存于 MAIN.fbDamperProcess，
+// 避免改变现有 ADS/WPF 读取路径。
+// ------------------------------------------------------------
+ioTurntableProcess(
+    stInput := ioDamperProcess.stTurntableInput,
+
+    stTurntableAxis :=
+        aAxes[GVL_AxisIndex.Turntable],
+
+    stClampingAxis :=
+        aAxes[GVL_AxisIndex.Clamping],
+
+    eTransferPositionState :=
+        ioDamperProcess.eTransferPositionState,
+
+    eAdjustmentPositionState :=
+        ioDamperProcess.eAdjustmentPositionState
+);
+bTurntableFault :=
+    bStart
+    AND ioTurntableProcess.stStatus.bError
+    AND NOT bAbort;
+// ------------------------------------------------------------
+// 5. 整机流程状态
+// Done 仍以 Tray 最终复位为准，不以 Damper 单独完成为准。
+// 启动等待阶段由 MAIN 的 fbAutoStart.bEnabling 补入 Busy。
+// ------------------------------------------------------------
+bBusy :=
+    ioTrayProcess.bBusy
+    OR ioDamperProcess.bBusy
+    OR ioTurntableProcess.stStatus.bBusy
+    OR ioGripperAction.bBusy;
+
+bDone := ioTrayProcess.bDone;]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

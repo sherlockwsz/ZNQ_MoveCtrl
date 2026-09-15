@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<TcSmProject xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.beckhoff.com/schemas/2012/07/TcSmProject" TcSmVersion="1.0" TcVersion="3.1.4026.24">
+<TcSmProject xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.beckhoff.com/schemas/2012/07/TcSmProject" TcSmVersion="1.0" TcVersion="3.1.4026.26">
 	<DataTypes>
 		<DataType>
 			<Name GUID="{18071995-0000-0000-0000-000000000035}" TcBaseType="true" HideType="true">UINTARR2</Name>
@@ -1465,7 +1465,7 @@ External Setpoint Generation:
 				<SvbTask Priority="8" CycleTime="100000" AmsPort="511">
 					<Name>Servo SVB</Name>
 				</SvbTask>
-				<Axis Id="1" CreateSymbols="true" AxisType="1">
+				<Axis Id="1" CreateSymbols="true" AxisType="1" SimulationMode="true">
 					<Name>TrayX</Name>
 					<Comment><![CDATA[料盘前后运动]]></Comment>
 					<AxisPara>
@@ -1605,7 +1605,7 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="2" CreateSymbols="true" AxisType="1">
+				<Axis Id="2" CreateSymbols="true" AxisType="1" SimulationMode="true">
 					<Name>TrayZ</Name>
 					<Comment><![CDATA[料盘上下运动]]></Comment>
 					<AxisPara>
@@ -1745,7 +1745,7 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="3" CreateSymbols="true" AxisType="1">
+				<Axis Id="3" CreateSymbols="true" AxisType="1" SimulationMode="true">
 					<Name>DamperX</Name>
 					<Comment><![CDATA[阻尼器前后运动]]></Comment>
 					<AxisPara>
@@ -1885,7 +1885,7 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="4" CreateSymbols="true" AxisType="1">
+				<Axis Id="4" CreateSymbols="true" AxisType="1" SimulationMode="true">
 					<Name>DamperY</Name>
 					<Comment><![CDATA[阻尼器左右运动]]></Comment>
 					<AxisPara>
@@ -2025,7 +2025,7 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="5" CreateSymbols="true" AxisType="1">
+				<Axis Id="5" CreateSymbols="true" AxisType="1" SimulationMode="true">
 					<Name>DamperZ</Name>
 					<Comment><![CDATA[阻尼器上下运动]]></Comment>
 					<AxisPara>
@@ -2165,7 +2165,7 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="6" CreateSymbols="true" AxisType="1">
+				<Axis Id="6" CreateSymbols="true" AxisType="1" SimulationMode="true">
 					<Name>DamperRotation</Name>
 					<Comment><![CDATA[阻尼器旋转]]></Comment>
 					<AxisPara>
@@ -2306,161 +2306,7 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="7" CreateSymbols="true" AxisType="1" GroupId="11">
-					<Name>DamperGripper</Name>
-					<AxisPara>
-						<OtherSettings AllowMotionCmdToSlave="true"/>
-					</AxisPara>
-					<Encoder Name="Enc" EncType="1">
-						<Vars VarGrpType="1">
-							<Name>输入</Name>
-							<Var>
-								<Name>In</Name>
-								<Type GUID="{901C2423-655B-45CE-B7E3-21F174F0F99F}" Namespace="MC">NCENCODERSTRUCT_IN2B</Type>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataIn1</Name>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataIn2</Name>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataIn3</Name>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataIn4</Name>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataIn5</Name>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataIn6</Name>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataIn7</Name>
-									<Comment><![CDATA[Drive Velocity Actual Value
-]]></Comment>
-								</SubVar>
-							</Var>
-						</Vars>
-						<Vars VarGrpType="2">
-							<Name>输出</Name>
-							<Var>
-								<Name>Out</Name>
-								<Type GUID="{9CC50AB2-5D79-4869-A3C2-1FA7761BAFEA}" Namespace="MC">NCENCODERSTRUCT_OUT2</Type>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataOut1</Name>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataOut2</Name>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataOut3</Name>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataOut4</Name>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataOut5</Name>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataOut6</Name>
-								</SubVar>
-							</Var>
-						</Vars>
-					</Encoder>
-					<Drive Name="Drive" DrvType="5">
-						<DrvPara>
-							<Analog TorqueSetpointScale="10" ScaleFactorActTorque="0.1"/>
-							<TimeComp TaskDelayCycles="1"/>
-						</DrvPara>
-						<Vars VarGrpType="1">
-							<Name>输入</Name>
-							<Var>
-								<Name>In</Name>
-								<Type GUID="{F95C7C69-0C87-46C4-9559-1285CCA5B23A}" Namespace="MC">NCDRIVESTRUCT_IN2</Type>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataIn1</Name>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataIn2</Name>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataIn3</Name>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataIn4</Name>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataIn5</Name>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataIn6</Name>
-								</SubVar>
-							</Var>
-						</Vars>
-						<Vars VarGrpType="2">
-							<Name>输出</Name>
-							<Var>
-								<Name>Out</Name>
-								<Type GUID="{644DC4BD-3D15-4DCB-94C7-24F3A5D579AA}" Namespace="MC">NCDRIVESTRUCT_OUT2</Type>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataOut1</Name>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataOut2</Name>
-								</SubVar>
-								<SubVar>
-									<Name>nCtrl2</Name>
-									<Comment><![CDATA[Digital Outputs Setpoint Generator:
-0x41 (0100 0001) = Minus (0x42 for inverse motor polarity)
-0x42 (0100 0010) = Plus (0x41 for inverse motor polarity)
-0x80 (1000 0000) = Stop
-]]></Comment>
-								</SubVar>
-								<SubVar>
-									<Name>nCtrl3</Name>
-									<Comment><![CDATA[Digital Outputs (Setpoint Generator + Position Controller):
-0x41 (0100 0001) = Minus (0x42 for inverse motor polarity)
-0x42 (0100 0010) = Plus (0x41 for inverse motor polarity)
-0x80 (1000 0000) = Stop
-]]></Comment>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataOut3</Name>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataOut4</Name>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataOut5</Name>
-								</SubVar>
-								<SubVar TypeFormatIndex="2">
-									<Name>nDataOut6</Name>
-								</SubVar>
-							</Var>
-						</Vars>
-					</Drive>
-					<Controller Name="Ctrl" CtrType="1">
-						<CtrPara PriorControlFactor="1">
-							<Observer BandWidth="20"/>
-						</CtrPara>
-					</Controller>
-					<Vars VarGrpType="1" InsertType="1">
-						<Name>输入</Name>
-						<Var>
-							<Name>FromPlc</Name>
-							<Type GUID="{96B75FEB-2D84-43BE-A3EC-D9A681F27D52}" Namespace="MC">PLCTONC_AXIS_REF</Type>
-						</Var>
-					</Vars>
-					<Vars VarGrpType="2" InsertType="1">
-						<Name>输出</Name>
-						<Var>
-							<Name>ToPlc</Name>
-							<Type GUID="{25521FAA-EA5F-4C7F-8864-BBCCDACD2E98}" Namespace="MC">NCTOPLC_AXIS_REF</Type>
-						</Var>
-					</Vars>
-				</Axis>
-				<Axis Id="8" CreateSymbols="true" AxisType="1" GroupId="7">
+				<Axis Id="8" CreateSymbols="true" AxisType="1" SimulationMode="true" GroupId="7">
 					<Name>Turntable</Name>
 					<Comment><![CDATA[双料位旋转]]></Comment>
 					<AxisPara>
@@ -2601,7 +2447,7 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="9" CreateSymbols="true" AxisType="1" GroupId="8">
+				<Axis Id="9" CreateSymbols="true" AxisType="1" SimulationMode="true" GroupId="8">
 					<Name>Clamping</Name>
 					<Comment><![CDATA[调整位夹紧]]></Comment>
 					<AxisPara>
@@ -2741,14 +2587,14 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="10" CreateSymbols="true" AxisType="1" GroupId="15">
+				<Axis Id="10" CreateSymbols="true" AxisType="1" SimulationMode="true" GroupId="15">
 					<Name>AdjustmentX</Name>
 					<Comment><![CDATA[同轴度调整前后运动]]></Comment>
 					<AxisPara>
 						<OtherSettings AllowMotionCmdToSlave="true"/>
 					</AxisPara>
 					<Encoder Name="Enc" EncType="19">
-						<EncPara MaxCount="#xffffffff"/>
+						<EncPara ScaleFactorNumerator="5.96046447753906e-07" MaxCount="#xffffffff"/>
 						<Vars VarGrpType="1">
 							<Name>输入</Name>
 							<Var>
@@ -2881,14 +2727,14 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="11" CreateSymbols="true" AxisType="1" GroupId="10">
+				<Axis Id="11" CreateSymbols="true" AxisType="1" SimulationMode="true" GroupId="10">
 					<Name>AdjustmentY</Name>
 					<Comment><![CDATA[同轴度调整左右运动]]></Comment>
 					<AxisPara>
 						<OtherSettings AllowMotionCmdToSlave="true"/>
 					</AxisPara>
 					<Encoder Name="Enc" EncType="19">
-						<EncPara MaxCount="#xffffffff"/>
+						<EncPara ScaleFactorNumerator="5.96046447753906e-07" MaxCount="#xffffffff"/>
 						<Vars VarGrpType="1">
 							<Name>输入</Name>
 							<Var>
@@ -3021,14 +2867,14 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="12" CreateSymbols="true" AxisType="1">
+				<Axis Id="12" CreateSymbols="true" AxisType="1" SimulationMode="true">
 					<Name>AdjustmentZ</Name>
 					<Comment><![CDATA[同轴度调整上下运动]]></Comment>
 					<AxisPara>
 						<OtherSettings AllowMotionCmdToSlave="true"/>
 					</AxisPara>
 					<Encoder Name="Enc" EncType="19">
-						<EncPara MaxCount="#xffffffff"/>
+						<EncPara ScaleFactorNumerator="5.96046447753906e-07" MaxCount="#xffffffff"/>
 						<Vars VarGrpType="1">
 							<Name>输入</Name>
 							<Var>
@@ -3161,14 +3007,14 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="13" CreateSymbols="true" AxisType="1">
+				<Axis Id="13" CreateSymbols="true" AxisType="1" SimulationMode="true">
 					<Name>ScrewdriverY</Name>
 					<Comment><![CDATA[螺丝刀左右运动]]></Comment>
 					<AxisPara>
 						<OtherSettings AllowMotionCmdToSlave="true"/>
 					</AxisPara>
 					<Encoder Name="Enc" EncType="19">
-						<EncPara MaxCount="#xffffffff"/>
+						<EncPara ScaleFactorNumerator="5.96046447753906e-07" MaxCount="#xffffffff"/>
 						<Vars VarGrpType="1">
 							<Name>输入</Name>
 							<Var>
@@ -3301,14 +3147,14 @@ External Setpoint Generation:
 						</Var>
 					</Vars>
 				</Axis>
-				<Axis Id="14" CreateSymbols="true" AxisType="1">
+				<Axis Id="14" CreateSymbols="true" AxisType="1" SimulationMode="true">
 					<Name>ScrewdriverZ</Name>
 					<Comment><![CDATA[螺丝刀上下运动]]></Comment>
 					<AxisPara>
 						<OtherSettings AllowMotionCmdToSlave="true"/>
 					</AxisPara>
 					<Encoder Name="Enc" EncType="19">
-						<EncPara MaxCount="#xffffffff"/>
+						<EncPara ScaleFactorNumerator="5.96046447753906e-07" MaxCount="#xffffffff"/>
 						<Vars VarGrpType="1">
 							<Name>输入</Name>
 							<Var>
@@ -3445,7 +3291,7 @@ External Setpoint Generation:
 		</Motion>
 		<Plc>
 			<Project GUID="{EA67B656-2FC5-4A9C-A62D-78AA627F7844}" Name="inovance_ctrl" PrjFilePath="inovance_ctrl\inovance_ctrl.plcproj" TmcFilePath="inovance_ctrl\inovance_ctrl.tmc" ReloadTmc="true" AmsPort="851" FileArchiveSettings="#x000e" SymbolicMapping="true">
-				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcHash="{A709B3BC-A2BA-1015-8769-8FAA9C95BCD5}" TmcPath="inovance_ctrl\inovance_ctrl.tmc">
+				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcHash="{2E06FBC8-001E-FD0E-FC49-B31C5F7E36D9}" TmcPath="inovance_ctrl\inovance_ctrl.tmc">
 					<Name>inovance_ctrl Instance</Name>
 					<CLSID ClassFactory="TcPlc30">{08500001-0000-0000-F000-000000000064}</CLSID>
 					<Vars VarGrpType="2" AreaNo="1">
@@ -3639,7 +3485,7 @@ External Setpoint Generation:
 							<SyncMan>001001000000010004000000000000000100001000010000</SyncMan>
 							<Fmmu>0000000000000000001000010100000002000000000000000000000000000000</Fmmu>
 							<Pdo Name="Channel 1" Index="#x1a00" Flags="#x0011" SyncMan="0">
-								<Entry Name="Input" Index="#x6000" Sub="#x01">
+								<Entry Name="设备右侧启动按钮" Index="#x6000" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
@@ -3649,17 +3495,17 @@ External Setpoint Generation:
 								</Entry>
 							</Pdo>
 							<Pdo Name="Channel 3" Index="#x1a02" Flags="#x0011" SyncMan="0">
-								<Entry Name="Input" Index="#x6020" Sub="#x01">
+								<Entry Name="设备下侧上料按钮" Index="#x6020" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
 							<Pdo Name="Channel 4" Index="#x1a03" Flags="#x0011" SyncMan="0">
-								<Entry Name="Input" Index="#x6030" Sub="#x01">
+								<Entry Name="设备右侧停止按钮(常闭)" Index="#x6030" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
 							<Pdo Name="Channel 5" Index="#x1a04" Flags="#x0011" SyncMan="0">
-								<Entry Name="Input" Index="#x6040" Sub="#x01">
+								<Entry Name="设备下侧启动按钮" Index="#x6040" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
@@ -3687,42 +3533,42 @@ External Setpoint Generation:
 							<SyncMan>001001000000010004000000000000000100001000010000</SyncMan>
 							<Fmmu>0000000000000000001000010100000002000000000000000000000000000000</Fmmu>
 							<Pdo Name="Channel 1" Index="#x1a00" Flags="#x0011" SyncMan="0">
-								<Entry Name="Input" Index="#x6000" Sub="#x01">
+								<Entry Name="料盘1层传感器" Index="#x6000" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
 							<Pdo Name="Channel 2" Index="#x1a01" Flags="#x0011" SyncMan="0">
-								<Entry Name="Input" Index="#x6010" Sub="#x01">
+								<Entry Name="料盘5层传感器" Index="#x6010" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
 							<Pdo Name="Channel 3" Index="#x1a02" Flags="#x0011" SyncMan="0">
-								<Entry Name="Input" Index="#x6020" Sub="#x01">
+								<Entry Name="料盘2层传感器" Index="#x6020" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
 							<Pdo Name="Channel 4" Index="#x1a03" Flags="#x0011" SyncMan="0">
-								<Entry Name="Input" Index="#x6030" Sub="#x01">
+								<Entry Name="上侧左边门" Index="#x6030" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
 							<Pdo Name="Channel 5" Index="#x1a04" Flags="#x0011" SyncMan="0">
-								<Entry Name="Input" Index="#x6040" Sub="#x01">
+								<Entry Name="料盘3层传感器" Index="#x6040" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
 							<Pdo Name="Channel 6" Index="#x1a05" Flags="#x0011" SyncMan="0">
-								<Entry Name="Input" Index="#x6050" Sub="#x01">
+								<Entry Name="上侧右边门" Index="#x6050" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
 							<Pdo Name="Channel 7" Index="#x1a06" Flags="#x0011" SyncMan="0">
-								<Entry Name="Input" Index="#x6060" Sub="#x01">
+								<Entry Name="料盘4层传感器" Index="#x6060" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
 							<Pdo Name="Channel 8" Index="#x1a07" Flags="#x0011" SyncMan="0">
-								<Entry Name="Input" Index="#x6070" Sub="#x01">
+								<Entry Name="下侧门" Index="#x6070" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
@@ -3735,7 +3581,7 @@ External Setpoint Generation:
 							<SyncMan>001001000000010004000000000000000100001000010000</SyncMan>
 							<Fmmu>0000000000000000001000010100000002000000000000000000000000000000</Fmmu>
 							<Pdo Name="Channel 1" Index="#x1a00" Flags="#x0011" SyncMan="0">
-								<Entry Name="Input" Index="#x6000" Sub="#x01">
+								<Entry Name="不合格料盘到位" Index="#x6000" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
@@ -3765,7 +3611,7 @@ External Setpoint Generation:
 								</Entry>
 							</Pdo>
 							<Pdo Name="Channel 7" Index="#x1a06" Flags="#x0011" SyncMan="0">
-								<Entry Name="Input" Index="#x6060" Sub="#x01">
+								<Entry Name="取到料盘" Index="#x6060" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
@@ -3783,17 +3629,17 @@ External Setpoint Generation:
 							<SyncMan>000f01004400010003000000000000000000000f44090000</SyncMan>
 							<Fmmu>0000000000000000000f00020100000001000000000000000000000000000000</Fmmu>
 							<Pdo Name="Channel 1" Index="#x1600" InOut="1" Flags="#x0011" SyncMan="0">
-								<Entry Name="Output" Index="#x7000" Sub="#x01">
+								<Entry Name="1层灯" Index="#x7000" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
 							<Pdo Name="Channel 2" Index="#x1601" InOut="1" Flags="#x0011" SyncMan="0">
-								<Entry Name="Output" Index="#x7010" Sub="#x01">
+								<Entry Name="2层灯" Index="#x7010" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
 							<Pdo Name="Channel 3" Index="#x1602" InOut="1" Flags="#x0011" SyncMan="0">
-								<Entry Name="Output" Index="#x7020" Sub="#x01">
+								<Entry Name="3层灯" Index="#x7020" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
@@ -3803,7 +3649,7 @@ External Setpoint Generation:
 								</Entry>
 							</Pdo>
 							<Pdo Name="Channel 5" Index="#x1604" InOut="1" Flags="#x0011" SyncMan="0">
-								<Entry Name="Output" Index="#x7040" Sub="#x01">
+								<Entry Name="4层灯" Index="#x7040" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
@@ -3813,7 +3659,7 @@ External Setpoint Generation:
 								</Entry>
 							</Pdo>
 							<Pdo Name="Channel 7" Index="#x1606" InOut="1" Flags="#x0011" SyncMan="0">
-								<Entry Name="Output" Index="#x7060" Sub="#x01">
+								<Entry Name="5层灯" Index="#x7060" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
@@ -3831,7 +3677,7 @@ External Setpoint Generation:
 							<SyncMan>000f01004400010003000000000000000000000f44090000</SyncMan>
 							<Fmmu>0000000000000000000f00020100000001000000000000000000000000000000</Fmmu>
 							<Pdo Name="Channel 1" Index="#x1600" InOut="1" Flags="#x0011" SyncMan="0">
-								<Entry Name="Output" Index="#x7000" Sub="#x01">
+								<Entry Name="红" Index="#x7000" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
@@ -3841,7 +3687,7 @@ External Setpoint Generation:
 								</Entry>
 							</Pdo>
 							<Pdo Name="Channel 3" Index="#x1602" InOut="1" Flags="#x0011" SyncMan="0">
-								<Entry Name="Output" Index="#x7020" Sub="#x01">
+								<Entry Name="黄" Index="#x7020" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
@@ -3851,7 +3697,7 @@ External Setpoint Generation:
 								</Entry>
 							</Pdo>
 							<Pdo Name="Channel 5" Index="#x1604" InOut="1" Flags="#x0011" SyncMan="0">
-								<Entry Name="Output" Index="#x7040" Sub="#x01">
+								<Entry Name="绿" Index="#x7040" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
@@ -3861,7 +3707,7 @@ External Setpoint Generation:
 								</Entry>
 							</Pdo>
 							<Pdo Name="Channel 7" Index="#x1606" InOut="1" Flags="#x0011" SyncMan="0">
-								<Entry Name="Output" Index="#x7060" Sub="#x01">
+								<Entry Name="蜂鸣" Index="#x7060" Sub="#x01">
 									<Type>BIT</Type>
 								</Entry>
 							</Pdo>
@@ -6632,6 +6478,7 @@ External Setpoint Generation:
 				</Box>
 				<Box Id="16" BoxType="9099" BoxFlags="#x00000020">
 					<Name>驱动器 16 (InoSV670N)</Name>
+					<Comment><![CDATA[同轴度左右运动]]></Comment>
 					<ImageId>1004</ImageId>
 					<EtherCAT SlaveType="2" PdiType="#x0c08" MboxDataLinkLayer="true" StateMBoxPolling="true" CycleMBoxPollingTime="0" CoeType="13" EoeType="1" VendorId="#x00100000" ProductCode="#x000c011e" RevisionNo="#x00010000" InfoDataAddr="true" InfoDataSoeDS401="true" InfoDataDcTimes="true" PortPhys="17" MaxSlotCount="256" MaxSlotGroupCount="1" SlotPdoIncrement="1" SlotIndexIncrement="16" Type="SV670_1Axis_05002" Desc="InoSV670N" PortABoxInfo="#x0100000f">
 						<SyncMan>001000012600010001000000000000000001001026010000</SyncMan>
@@ -6991,6 +6838,7 @@ External Setpoint Generation:
 				</Box>
 				<Box Id="17" BoxType="9099" BoxFlags="#x00000020">
 					<Name>驱动器 17 (InoSV670N)</Name>
+					<Comment><![CDATA[同轴度前后运动]]></Comment>
 					<ImageId>1004</ImageId>
 					<EtherCAT SlaveType="2" PdiType="#x0c08" MboxDataLinkLayer="true" StateMBoxPolling="true" CycleMBoxPollingTime="0" CoeType="13" EoeType="1" VendorId="#x00100000" ProductCode="#x000c011e" RevisionNo="#x00010000" InfoDataAddr="true" InfoDataSoeDS401="true" InfoDataDcTimes="true" PortPhys="17" MaxSlotCount="256" MaxSlotGroupCount="1" SlotPdoIncrement="1" SlotIndexIncrement="16" Type="SV670_1Axis_05002" Desc="InoSV670N" PortABoxInfo="#x01000010">
 						<SyncMan>001000012600010001000000000000000001001026010000</SyncMan>
@@ -7350,6 +7198,7 @@ External Setpoint Generation:
 				</Box>
 				<Box Id="18" BoxType="9099" BoxFlags="#x00000020">
 					<Name>驱动器 18 (InoSV670N)</Name>
+					<Comment><![CDATA[同轴度上下运动]]></Comment>
 					<ImageId>1004</ImageId>
 					<EtherCAT SlaveType="2" PdiType="#x0c08" MboxDataLinkLayer="true" StateMBoxPolling="true" CycleMBoxPollingTime="0" CoeType="13" EoeType="1" VendorId="#x00100000" ProductCode="#x000c011e" RevisionNo="#x00010000" InfoDataAddr="true" InfoDataSoeDS401="true" InfoDataDcTimes="true" PortPhys="17" MaxSlotCount="256" MaxSlotGroupCount="1" SlotPdoIncrement="1" SlotIndexIncrement="16" Type="SV670_1Axis_05002" Desc="InoSV670N" PortABoxInfo="#x01000011">
 						<SyncMan>001000012600010001000000000000000001001026010000</SyncMan>
@@ -8431,8 +8280,6 @@ External Setpoint Generation:
 	</Project>
 	<Mappings>
 		<MappingInfo Identifier="{00000000-2001-0850-0020-500841000403}" Id="#x02030020"/>
-		<MappingInfo Identifier="{00000000-0020-0304-1000-040320000403}" Id="#x02030010"/>
-		<MappingInfo Identifier="{00000000-0030-0304-1000-040332000403}" Id="#x02030040"/>
 		<MappingInfo Identifier="{05000010-2001-0850-1000-040300205008}" Id="#x02030030" Watchdog="14000000040000000400000004000000"/>
 		<OwnerA Name="TINC^Servo SAF^Axes^AdjustmentX">
 			<OwnerB Name="TIID^设备 1 (EtherCAT)^驱动器 17 (InoSV670N)">
@@ -8748,53 +8595,53 @@ External Setpoint Generation:
 		</OwnerA>
 		<OwnerA Name="TIPC^inovance_ctrl^inovance_ctrl Instance">
 			<OwnerB Name="TIID^设备 1 (EtherCAT)^模块 1 (EK1100)^模块 2 (EL1008)">
-				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_01[1]" VarB="Channel 1^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_01[1]" VarB="Channel 1^设备右侧启动按钮"/>
 				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_01[2]" VarB="Channel 2^Input"/>
-				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_01[3]" VarB="Channel 3^Input"/>
-				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_01[4]" VarB="Channel 4^Input"/>
-				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_01[5]" VarB="Channel 5^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_01[3]" VarB="Channel 3^设备下侧上料按钮"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_01[4]" VarB="Channel 4^设备右侧停止按钮(常闭)"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_01[5]" VarB="Channel 5^设备下侧启动按钮"/>
 				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_01[6]" VarB="Channel 6^Input"/>
 				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_01[7]" VarB="Channel 7^Input"/>
 				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_01[8]" VarB="Channel 8^Input"/>
 			</OwnerB>
 			<OwnerB Name="TIID^设备 1 (EtherCAT)^模块 1 (EK1100)^模块 3 (EL1008)">
-				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[1]" VarB="Channel 1^Input"/>
-				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[2]" VarB="Channel 2^Input"/>
-				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[3]" VarB="Channel 3^Input"/>
-				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[4]" VarB="Channel 4^Input"/>
-				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[5]" VarB="Channel 5^Input"/>
-				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[6]" VarB="Channel 6^Input"/>
-				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[7]" VarB="Channel 7^Input"/>
-				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[8]" VarB="Channel 8^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[1]" VarB="Channel 1^料盘1层传感器"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[2]" VarB="Channel 2^料盘5层传感器"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[3]" VarB="Channel 3^料盘2层传感器"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[4]" VarB="Channel 4^上侧左边门"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[5]" VarB="Channel 5^料盘3层传感器"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[6]" VarB="Channel 6^上侧右边门"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[7]" VarB="Channel 7^料盘4层传感器"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_02[8]" VarB="Channel 8^下侧门"/>
 			</OwnerB>
 			<OwnerB Name="TIID^设备 1 (EtherCAT)^模块 1 (EK1100)^模块 4 (EL1008)">
-				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_03[1]" VarB="Channel 1^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_03[1]" VarB="Channel 1^不合格料盘到位"/>
 				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_03[2]" VarB="Channel 2^Input"/>
 				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_03[3]" VarB="Channel 3^Input"/>
 				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_03[4]" VarB="Channel 4^Input"/>
 				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_03[5]" VarB="Channel 5^Input"/>
 				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_03[6]" VarB="Channel 6^Input"/>
-				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_03[7]" VarB="Channel 7^Input"/>
+				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_03[7]" VarB="Channel 7^取到料盘"/>
 				<Link VarA="PlcTask Inputs^GVL_IO_Raw.aEL1008_03[8]" VarB="Channel 8^Input"/>
 			</OwnerB>
 			<OwnerB Name="TIID^设备 1 (EtherCAT)^模块 1 (EK1100)^模块 5 (EL2008)">
-				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[1]" VarB="Channel 1^Output"/>
-				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[2]" VarB="Channel 2^Output"/>
-				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[3]" VarB="Channel 3^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[1]" VarB="Channel 1^1层灯"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[2]" VarB="Channel 2^2层灯"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[3]" VarB="Channel 3^3层灯"/>
 				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[4]" VarB="Channel 4^Output"/>
-				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[5]" VarB="Channel 5^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[5]" VarB="Channel 5^4层灯"/>
 				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[6]" VarB="Channel 6^Output"/>
-				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[7]" VarB="Channel 7^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[7]" VarB="Channel 7^5层灯"/>
 				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_01[8]" VarB="Channel 8^Output"/>
 			</OwnerB>
 			<OwnerB Name="TIID^设备 1 (EtherCAT)^模块 1 (EK1100)^模块 6 (EL2008)">
-				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[1]" VarB="Channel 1^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[1]" VarB="Channel 1^红"/>
 				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[2]" VarB="Channel 2^Output"/>
-				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[3]" VarB="Channel 3^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[3]" VarB="Channel 3^黄"/>
 				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[4]" VarB="Channel 4^Output"/>
-				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[5]" VarB="Channel 5^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[5]" VarB="Channel 5^绿"/>
 				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[6]" VarB="Channel 6^Output"/>
-				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[7]" VarB="Channel 7^Output"/>
+				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[7]" VarB="Channel 7^蜂鸣"/>
 				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[8]" VarB="Channel 8^Output"/>
 			</OwnerB>
 			<OwnerB Name="TINC^Servo SAF^Axes^AdjustmentX">
@@ -8812,10 +8659,6 @@ External Setpoint Generation:
 			<OwnerB Name="TINC^Servo SAF^Axes^Clamping">
 				<Link VarA="PlcTask Inputs^GVL_AxisRef.AxisRefs[9].NcToPlc" VarB="输出^ToPlc"/>
 				<Link VarA="PlcTask Outputs^GVL_AxisRef.AxisRefs[9].PlcToNc" VarB="输入^FromPlc"/>
-			</OwnerB>
-			<OwnerB Name="TINC^Servo SAF^Axes^DamperGripper">
-				<Link VarA="PlcTask Inputs^GVL_AxisRef.AxisRefs[7].NcToPlc" VarB="输出^ToPlc"/>
-				<Link VarA="PlcTask Outputs^GVL_AxisRef.AxisRefs[7].PlcToNc" VarB="输入^FromPlc"/>
 			</OwnerB>
 			<OwnerB Name="TINC^Servo SAF^Axes^DamperRotation">
 				<Link VarA="PlcTask Inputs^GVL_AxisRef.AxisRefs[6].NcToPlc" VarB="输出^ToPlc"/>

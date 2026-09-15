@@ -64,6 +64,7 @@ VAR
 
         tSimulatedClampAction := T#500MS,
         tSimulatedAdjustment := T#3S
+		
     );
 	
 	//==========================================================
@@ -88,23 +89,33 @@ VAR
     eTurntableTargetPosition : E_DamperTurntablePosition;
 
     ePositionStateTemp : E_DamperSlotState;
+	
+	// 转台自动流程使能下降沿。
+	// 只在自动流程退出时清理一次自动命令。
+	trigDisable : F_TRIG;
+
 END_VAR
 ]]></Declaration>
     <Implementation>
       <ST><![CDATA[//==============================================================
 // 1. 输入沿与模拟定时器
 //==============================================================
-	trigReset(CLK := stInput.bReset);
+trigReset(CLK := stInput.bReset);
 
-	fbSimulatedClampAction(
-		IN := bClampDelayEnable,
-		PT := stConfig.tSimulatedClampAction
-	);
+trigDisable(
+    CLK := stInput.bEnable
+);
+
+fbSimulatedClampAction(
+	IN := bClampDelayEnable,
+	PT := stConfig.tSimulatedClampAction
+);
 
 	// 调整定时器独立于转台主CASE运行，允许机械手并行装下一件。
 	fbSimulatedAdjustment(
 		IN :=
-			stConfig.bSimulationMode
+			stInput.bEnable
+			AND stConfig.bSimulationMode
 			AND
 			(
 				eAdjustmentPositionState
@@ -113,34 +124,54 @@ END_VAR
 		PT := stConfig.tSimulatedAdjustment
 	);
 
-
-	//==============================================================
-	// 2. 默认清除一次性轴命令
-	//
-	// 初始化、交换请求或转台流程执行期间才接管轴命令。
-	// 空闲状态下不清除WPF的手动运动命令。
-	//==============================================================
-	bOwnsAxes :=
-		stInput.bEnable
-		AND
+//==============================================================
+// 2. 默认清除一次性轴命令
+//
+// 初始化、交换请求或转台流程执行期间才接管轴命令。
+// 空闲状态下不清除WPF的手动运动命令。
+//==============================================================
+bOwnsAxes :=
+	stInput.bEnable
+	AND
+	(
+		NOT bInitialized
+		OR stInput.bExchangeRequest
+		OR
 		(
-			NOT bInitialized
-			OR stInput.bExchangeRequest
-			OR
-			(
-				stStatus.eStep
-				<> E_DamperTurntableStep.Idle
-			)
-		);
+			stStatus.eStep
+			<> E_DamperTurntableStep.Idle
+		)
+	);
+
+IF bOwnsAxes THEN
 	
-	IF bOwnsAxes THEN
-		
-		stTurntableAxis.Cmd.bMoveAbs := FALSE;
-		stClampingAxis.Cmd.bMoveAbs := FALSE;
-	
-		// 当前版本只使用位置模式。
-		stClampingAxis.Cmd.bTorqueControl := FALSE;
-	END_IF;
+	stTurntableAxis.AutoCmd.bMoveAbs := FALSE;
+	stClampingAxis.AutoCmd.bMoveAbs := FALSE;
+
+	// 当前版本只使用位置模式。
+	stClampingAxis.AutoCmd.bTorqueControl := FALSE;
+END_IF;
+
+//==============================================================
+// 自动流程退出或流程复位时，只清理一次自动运动命令
+//
+// 不能在stInput.bEnable=FALSE期间持续清理，
+// 否则会覆盖WPF手动控制命令。
+//==============================================================
+IF trigDisable.Q OR trigReset.Q THEN
+    // 转台轴命令。
+    stTurntableAxis.AutoCmd.bMoveAbs := FALSE;
+    stTurntableAxis.AutoCmd.bMoveRel := FALSE;
+    stTurntableAxis.AutoCmd.bJogPos := FALSE;
+    stTurntableAxis.AutoCmd.bJogNeg := FALSE;
+
+    // 夹紧轴命令。
+    stClampingAxis.AutoCmd.bMoveAbs := FALSE;
+    stClampingAxis.AutoCmd.bMoveRel := FALSE;
+    stClampingAxis.AutoCmd.bJogPos := FALSE;
+    stClampingAxis.AutoCmd.bJogNeg := FALSE;
+    stClampingAxis.AutoCmd.bTorqueControl := FALSE;
+END_IF;
 //==============================================================
 // 3. 模拟或实际调整完成处理
 //==============================================================
@@ -214,7 +245,6 @@ IF (NOT stInput.bEnable) OR trigReset.Q THEN
         E_DamperTurntablePosition.Unknown;
     stStatus.eClampStep := E_DamperClampStep.Idle;
     stStatus.eStep := E_DamperTurntableStep.Idle;
-
 ELSE
     //==========================================================
     // 5. 转台、夹紧与调整协调状态机
@@ -265,19 +295,19 @@ ELSE
 		
 				ELSE
 					// 轴已Ready，但尚未到达松开位置。
-					stClampingAxis.Set.Position.fAbsolutePosition :=
+					stClampingAxis.AutoSet.Position.fAbsolutePosition :=
 						stConfig.fClampOpenPosition;
 		
-					stClampingAxis.Set.Position.fVelocity :=
+					stClampingAxis.AutoSet.Position.fVelocity :=
 						stConfig.fClampPositionVelocity;
 		
-					stClampingAxis.Set.Position.fAcceleration :=
+					stClampingAxis.AutoSet.Position.fAcceleration :=
 						stConfig.fClampPositionAcceleration;
 		
-					stClampingAxis.Set.Position.fDeceleration :=
+					stClampingAxis.AutoSet.Position.fDeceleration :=
 						stConfig.fClampPositionDeceleration;
 		
-					stClampingAxis.Cmd.bMoveAbs := TRUE;
+					stClampingAxis.AutoCmd.bMoveAbs := TRUE;
 					bClampCommandIssued := TRUE;
 					bClampDelayEnable := FALSE;
 		
@@ -361,19 +391,19 @@ ELSE
 		
 				ELSE
 					// 轴已Ready，但不在0°，发送绝对运动命令。
-					stTurntableAxis.Set.Position.fAbsolutePosition :=
+					stTurntableAxis.AutoSet.Position.fAbsolutePosition :=
 						stConfig.fTurntablePosition0;
 		
-					stTurntableAxis.Set.Position.fVelocity :=
+					stTurntableAxis.AutoSet.Position.fVelocity :=
 						stConfig.fTurntableVelocity;
 		
-					stTurntableAxis.Set.Position.fAcceleration :=
+					stTurntableAxis.AutoSet.Position.fAcceleration :=
 						stConfig.fTurntableAcceleration;
 		
-					stTurntableAxis.Set.Position.fDeceleration :=
+					stTurntableAxis.AutoSet.Position.fDeceleration :=
 						stConfig.fTurntableDeceleration;
 		
-					stTurntableAxis.Cmd.bMoveAbs := TRUE;
+					stTurntableAxis.AutoCmd.bMoveAbs := TRUE;
 					bTurntableCommandIssued := TRUE;
 		
 					stStatus.eStep :=
@@ -549,19 +579,19 @@ ELSE
 		
 				bClampDelayEnable := FALSE;
 		
-				stClampingAxis.Set.Position.fAbsolutePosition :=
+				stClampingAxis.AutoSet.Position.fAbsolutePosition :=
 					stConfig.fClampOpenPosition;
 		
-				stClampingAxis.Set.Position.fVelocity :=
+				stClampingAxis.AutoSet.Position.fVelocity :=
 					stConfig.fClampPositionVelocity;
 		
-				stClampingAxis.Set.Position.fAcceleration :=
+				stClampingAxis.AutoSet.Position.fAcceleration :=
 					stConfig.fClampPositionAcceleration;
 		
-				stClampingAxis.Set.Position.fDeceleration :=
+				stClampingAxis.AutoSet.Position.fDeceleration :=
 					stConfig.fClampPositionDeceleration;
 		
-				stClampingAxis.Cmd.bMoveAbs := TRUE;
+				stClampingAxis.AutoCmd.bMoveAbs := TRUE;
 				bClampCommandIssued := TRUE;
 		
 				stStatus.eStep :=
@@ -651,19 +681,19 @@ ELSE
 				(NOT stStatus.bError)
 				AND stTurntableAxis.State.bReady
 			THEN
-				stTurntableAxis.Set.Position.fAbsolutePosition :=
+				stTurntableAxis.AutoSet.Position.fAbsolutePosition :=
 					fTurntableTargetPosition;
 			
-				stTurntableAxis.Set.Position.fVelocity :=
+				stTurntableAxis.AutoSet.Position.fVelocity :=
 					stConfig.fTurntableVelocity;
 			
-				stTurntableAxis.Set.Position.fAcceleration :=
+				stTurntableAxis.AutoSet.Position.fAcceleration :=
 					stConfig.fTurntableAcceleration;
 			
-				stTurntableAxis.Set.Position.fDeceleration :=
+				stTurntableAxis.AutoSet.Position.fDeceleration :=
 					stConfig.fTurntableDeceleration;
 			
-				stTurntableAxis.Cmd.bMoveAbs := TRUE;
+				stTurntableAxis.AutoCmd.bMoveAbs := TRUE;
 				bTurntableCommandIssued := TRUE;
 			
 				stStatus.eStep :=
@@ -747,19 +777,19 @@ ELSE
 			bClampDelayEnable := FALSE;
 		
 			IF stClampingAxis.State.bReady THEN
-				stClampingAxis.Set.Position.fAbsolutePosition :=
+				stClampingAxis.AutoSet.Position.fAbsolutePosition :=
 					stConfig.fClampApproachPosition;
 		
-				stClampingAxis.Set.Position.fVelocity :=
+				stClampingAxis.AutoSet.Position.fVelocity :=
 					stConfig.fClampPositionVelocity;
 		
-				stClampingAxis.Set.Position.fAcceleration :=
+				stClampingAxis.AutoSet.Position.fAcceleration :=
 					stConfig.fClampPositionAcceleration;
 		
-				stClampingAxis.Set.Position.fDeceleration :=
+				stClampingAxis.AutoSet.Position.fDeceleration :=
 					stConfig.fClampPositionDeceleration;
 		
-				stClampingAxis.Cmd.bMoveAbs := TRUE;
+				stClampingAxis.AutoCmd.bMoveAbs := TRUE;
 				bClampCommandIssued := TRUE;
 		
 				stStatus.eStep :=

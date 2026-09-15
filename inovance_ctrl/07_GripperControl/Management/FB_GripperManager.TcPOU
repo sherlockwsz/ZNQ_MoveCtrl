@@ -1,0 +1,28 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <POU Name="FB_GripperManager" Id="{604d8b30-294c-4983-864c-d7b539e9942c}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_GripperManager
+
+VAR_INPUT
+    bEnableComm : BOOL; // 是否打开并轮询本台电机的COM口
+	bStopRequested : BOOL;
+END_VAR
+
+VAR_IN_OUT
+    ioGripper : ST_GripperInterface; // 由MAIN传入当前要管理的电机
+END_VAR
+
+VAR
+    fbGripperControl : FB_GripperControl;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// 当前阶段：管理器只负责调用本台夹爪的通信控制功能块。
+// 手动/自动命令仲裁和HMI保护，等运动命令接入时再增加。
+fbGripperControl(
+    bEnableComm    := bEnableComm,
+    bStopRequested := bStopRequested,
+    ioGripper      := ioGripper
+);]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

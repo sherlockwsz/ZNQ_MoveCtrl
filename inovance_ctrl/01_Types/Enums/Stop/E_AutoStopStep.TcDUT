@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_AutoStopStep" Id="{9c525c17-ac98-4d95-bba1-50b048b996c7}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+TYPE E_AutoStopStep :
+(
+    Idle            := 0,   // 等待停止请求
+    RequestStop     := 10,  // 保持使能，等待 MC_Stop 完成
+    ReleaseStop     := 20,  // 撤销 Stop 请求，等待 Busy 释放
+    DisableAxes     := 30,  // 统一掉使能并确认
+    Completed       := 40,  // 已停止并掉使能；保持到外部停止请求释放
+    Fault           := 90   // 故障锁存，不发布 Done
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

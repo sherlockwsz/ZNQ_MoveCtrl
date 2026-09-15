@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_AutoStartStep" Id="{c7c4639f-a212-4202-90f3-adc2847232b6}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+TYPE E_AutoStartStep :
+(
+    Idle             := 0,   // 等待新的自动启动上升沿
+    WaitAxesReady    := 10,  // 请求八轴使能，等待全部轴就绪
+    Running          := 20   // 允许现有五盘流程运行
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

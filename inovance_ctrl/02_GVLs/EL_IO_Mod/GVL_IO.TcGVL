@@ -3,6 +3,75 @@
   <GVL Name="GVL_IO" Id="{0ac7a41d-8b6c-4990-bdba-82b5af4db2e1}">
     <Declaration><![CDATA[{attribute 'qualified_only'}
 VAR_GLOBAL
+    // =========================================================
+    // 操作按钮输入
+    // =========================================================
+
+    // 设备右侧启动按钮
+    // TRUE：按钮按下
+    bRightStartButton         : BOOL;
+
+    // 设备下侧启动按钮
+    // TRUE：按钮按下
+    bLowerStartButton         : BOOL;
+
+    // 设备下侧上料按钮
+    // TRUE：按钮按下
+    bLowerLoadButton          : BOOL;
+
+    // 设备右侧普通停止按钮，采用常闭触点
+    // TRUE ：按钮未按下、回路正常
+    // FALSE：按钮按下或者线路断开
+    bRightStopCircuitOK       : BOOL;
+
+
+    // =========================================================
+    // 料盘位置检测输入
+    // =========================================================
+
+    // 各层料盘传感器
+    // 下标1～5分别对应料架1～5层
+    // TRUE：相应层传感器检测到料盘
+    aTrayLevelDetected        : ARRAY[1..5] OF BOOL;
+
+    // 不合格料盘到位
+    // TRUE：不合格料盘已经到位
+    bRejectTrayInPosition     : BOOL;
+
+    // TrayZ叉臂料盘检测
+    // TRUE ：叉臂上存在料盘
+    // FALSE：叉臂上没有料盘
+    bTrayPresentOnFork        : BOOL;
+
+
+    // =========================================================
+    // 防护门输入
+    // =========================================================
+
+    // 以下三个信号均已确认：
+    // TRUE  = 门已关闭
+    // FALSE = 门已打开
+    bUpperLeftDoorClosed      : BOOL;
+    bUpperRightDoorClosed     : BOOL;
+    bLowerDoorClosed          : BOOL;
+
+
+    // =========================================================
+    // 料盘层指示灯输出命令
+    // =========================================================
+
+    // 下标1～5分别对应料架1～5层指示灯
+    aTrayLevelLampCmd         : ARRAY[1..5] OF BOOL;
+
+
+    // =========================================================
+    // 三色灯及蜂鸣器输出命令
+    // =========================================================
+
+    bStackLightRedCmd         : BOOL;
+    bStackLightYellowCmd      : BOOL;
+    bStackLightGreenCmd       : BOOL;
+    bBuzzerCmd                : BOOL;
 END_VAR]]></Declaration>
   </GVL>
 </TcPlcObject>

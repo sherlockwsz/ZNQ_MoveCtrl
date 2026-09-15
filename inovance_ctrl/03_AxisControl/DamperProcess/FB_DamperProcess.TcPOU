@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
   <POU Name="FB_DamperProcess" Id="{e2418071-795b-41d1-bc54-bf400327a8f1}" SpecialFunc="None">
     <Declaration><![CDATA[//==============================================================
 // 五盘阻尼器上下料主流程
@@ -20,6 +20,9 @@
 FUNCTION_BLOCK FB_DamperProcess
 
 VAR_INPUT
+	
+	bGripperActionDone  : BOOL; // 上一扫描至本扫描的动作FB结果
+	bGripperActionError : BOOL;
     // FALSE变为TRUE时启动完整五盘循环。
     bStart : BOOL;
 
@@ -38,6 +41,9 @@ VAR_INPUT
 	
 	// 当前位于阻尼器工作位置的实际料盘层号。
 	nTrayAtDamperLayer : INT;
+	// TRUE：立即中止本轮阻尼器自动流程。
+	// 不清空料位、备料位、调整位和缓冲位物料状态。
+	bAbort : BOOL;
 END_VAR
 
 VAR_IN_OUT
@@ -110,6 +116,9 @@ VAR_OUTPUT
     fBufferY       : LREAL;
     fBufferPickZ   : LREAL;
     fBufferSafeZ   : LREAL;
+	
+	bGripperActionExecute : BOOL; // 给COM3动作FB的保持型请求
+	eGripperActionCommand : E_GripperCommand;
 END_VAR
 
 VAR
@@ -119,7 +128,7 @@ VAR
     //==========================================================
     // 料盘坐标参数
     //==========================================================
-    fFirstSlotX : LREAL := -195;
+    fFirstSlotX : LREAL := -191.5;
     fFirstSlotY : LREAL :=  95;
 
     fRowPitchX    : LREAL := 80.0;
@@ -291,7 +300,8 @@ VAR
 	
 	// TRUE：本次阻尼器角度修正已经完成。
 	bTakeRotationDoneLatched : BOOL;	
-END_VAR]]></Declaration>
+END_VAR
+]]></Declaration>
     <Implementation>
       <ST><![CDATA[//==============================================================
 // 1. 更新输入上升沿
@@ -302,6 +312,24 @@ trigReinitializeCoordinates(
     CLK := bReinitializeCoordinates
 );
 
+bGripperActionExecute := FALSE;
+eGripperActionCommand := E_GripperCommand.None;
+
+//==============================================================
+// 外部中止优先级最高
+//==============================================================
+IF bAbort THEN
+    M_AbortProcess(
+        ioAxisX := stAxisX,
+        ioAxisY := stAxisY,
+        ioAxisZ := stAxisZ,
+        ioAxisRotation := stAxisRotation
+    );
+
+    RETURN;
+END_IF;
+
+
 IF trigStart.Q THEN
     // 锁存一次完整五盘流程启动请求。
     bStartPending := TRUE;
@@ -310,6 +338,7 @@ IF trigStart.Q THEN
     // 防止上一轮残留的TRUE让Tray机构提前启动。
     bPrePositionDone := FALSE;
 END_IF;
+
 
 	// 当前测试阶段让转台协调FB一直保持使能，先完成0°和松开位置初始化。
 	// 实机后可改为系统自动模式许可。
@@ -381,13 +410,13 @@ END_IF;
 // 一个PLC周期的bMoveAbs命令脉冲。
 //==============================================================
 IF bBusy THEN
-    stAxisX.Cmd.bMoveAbs := FALSE;
-    stAxisY.Cmd.bMoveAbs := FALSE;
-    stAxisZ.Cmd.bMoveAbs := FALSE;
+    stAxisX.AutoCmd.bMoveAbs := FALSE;
+    stAxisY.AutoCmd.bMoveAbs := FALSE;
+    stAxisZ.AutoCmd.bMoveAbs := FALSE;
 
     // DamperRotation使用相对运动，
     // bMoveRel只保持一个PLC扫描周期。
-    stAxisRotation.Cmd.bMoveRel := FALSE;
+    stAxisRotation.AutoCmd.bMoveRel := FALSE;
 END_IF;
 
 //==============================================================
@@ -972,6 +1001,127 @@ ELSE
 
 END_CASE;]]></ST>
     </Implementation>
+    <Method Name="M_AbortProcess" Id="{82b37050-c640-466e-b95e-c85810e5c597}">
+      <Declaration><![CDATA[METHOD PRIVATE M_AbortProcess
+
+VAR_IN_OUT
+    ioAxisX        : ST_AxisInterface;
+    ioAxisY        : ST_AxisInterface;
+    ioAxisZ        : ST_AxisInterface;
+    ioAxisRotation : ST_AxisInterface;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[//==============================================================
+// 1. 清除本流程产生的运动命令
+//==============================================================
+ioAxisX.AutoCmd.bMoveAbs := FALSE;
+ioAxisX.AutoCmd.bMoveRel := FALSE;
+ioAxisX.AutoCmd.bJogPos := FALSE;
+ioAxisX.AutoCmd.bJogNeg := FALSE;
+
+ioAxisY.AutoCmd.bMoveAbs := FALSE;
+ioAxisY.AutoCmd.bMoveRel := FALSE;
+ioAxisY.AutoCmd.bJogPos := FALSE;
+ioAxisY.AutoCmd.bJogNeg := FALSE;
+
+ioAxisZ.AutoCmd.bMoveAbs := FALSE;
+ioAxisZ.AutoCmd.bMoveRel := FALSE;
+ioAxisZ.AutoCmd.bJogPos := FALSE;
+ioAxisZ.AutoCmd.bJogNeg := FALSE;
+
+ioAxisRotation.AutoCmd.bMoveAbs := FALSE;
+ioAxisRotation.AutoCmd.bMoveRel := FALSE;
+ioAxisRotation.AutoCmd.bJogPos := FALSE;
+ioAxisRotation.AutoCmd.bJogNeg := FALSE;
+
+ioAxisX.AutoCmd.bTorqueControl := FALSE;
+ioAxisY.AutoCmd.bTorqueControl := FALSE;
+ioAxisZ.AutoCmd.bTorqueControl := FALSE;
+ioAxisRotation.AutoCmd.bTorqueControl := FALSE;
+//==============================================================
+// 2. 复位运动辅助锁存
+//==============================================================
+M_ResetMotionHelpers(
+    ioAxisX := ioAxisX,
+    ioAxisY := ioAxisY,
+    ioAxisZ := ioAxisZ,
+    ioAxisRotation := ioAxisRotation
+);
+
+bWaitingTrayResult := FALSE;
+bPreviousPlaceDone := FALSE;
+bExchangeCompleteLatched := FALSE;
+bStartPending := FALSE;
+
+bRotationCommandIssued := FALSE;
+bQrScanCommandIssued := FALSE;
+bTakeLiftZDoneLatched := FALSE;
+bTakeRotationDoneLatched := FALSE;
+
+
+//==============================================================
+// 3. 关闭模拟相机定时器
+//
+// 主体在RETURN后不会继续调用该定时器，
+// 因此必须在这里显式使用IN=FALSE复位。
+//==============================================================
+fbSimulatedVisionDetection(
+    IN := FALSE,
+    PT := tSimulatedVisionDetection
+);
+
+
+//==============================================================
+// 4. 撤销发往转台的全部请求
+//
+// stTurntableInput.bEnable=FALSE后，
+// FB_TurntableProcess会进入现有的禁用复位分支。
+//==============================================================
+stTurntableInput.bEnable := FALSE;
+stTurntableInput.bExchangeRequest := FALSE;
+stTurntableInput.bNoMorePartsToLoad := FALSE;
+stTurntableInput.bAdjustmentAccepted := FALSE;
+stTurntableInput.bAdjustmentDone := FALSE;
+stTurntableInput.bAdjustmentQualified := FALSE;
+stTurntableInput.bFinalUnloadDone := FALSE;
+stTurntableInput.bTransferCaptureOK := FALSE;
+stTurntableInput.bAdjustmentCaptureOK := FALSE;
+stTurntableInput.bReset := FALSE;
+
+
+//==============================================================
+// 5. 清除流程输出和握手
+//==============================================================
+bBusy := FALSE;
+bDone := FALSE;
+bCurrentTrayDone := FALSE;
+bTrayChangeRequest := FALSE;
+bPrePositionDone := FALSE;
+
+
+//==============================================================
+// 6. 状态机返回空闲
+//==============================================================
+eCurrentStep := E_DamperProcessStep.Idle;
+eTakeStep := E_DamperTakeStep.Idle;
+ePlaceStep := E_DamperPlaceStep.Idle;
+
+
+//==============================================================
+// 7. 有意保留的物料数据
+//
+// 不修改：
+// aSlots
+// eTransferPositionState
+// eAdjustmentPositionState
+// eBufferPositionState
+// bPreviousPartAvailable及原料位索引
+//
+// 停止时物料可能正在夹爪或转台中，
+// 当前版本由操作员确认并手动恢复现场。
+//==============================================================]]></ST>
+      </Implementation>
+    </Method>
     <Method Name="M_InitializeDamperCoordinates" Id="{cbc15f78-c68b-41b2-aed4-3f31228f7cac}">
       <Declaration><![CDATA[//==============================================================
 // 初始化24个料位坐标以及公共工作位置
@@ -1079,21 +1229,21 @@ IF NOT bXYCommandIssued THEN
 
     // X轴尚未到位时发送绝对运动脉冲。
     IF NOT bXDoneLatched THEN
-        ioAxisX.Set.Position.fAbsolutePosition := fTargetX;
-        ioAxisX.Set.Position.fVelocity :=
+        ioAxisX.AutoSet.Position.fAbsolutePosition := fTargetX;
+        ioAxisX.AutoSet.Position.fVelocity :=
             fDamperXVelocity;
 
-        ioAxisX.Cmd.bMoveAbs := TRUE;
+        ioAxisX.AutoCmd.bMoveAbs := TRUE;
     END_IF;
 
 
     // Y轴尚未到位时发送绝对运动脉冲。
     IF NOT bYDoneLatched THEN
-        ioAxisY.Set.Position.fAbsolutePosition := fTargetY;
-        ioAxisY.Set.Position.fVelocity :=
+        ioAxisY.AutoSet.Position.fAbsolutePosition := fTargetY;
+        ioAxisY.AutoSet.Position.fVelocity :=
             fDamperYVelocity;
 
-        ioAxisY.Cmd.bMoveAbs := TRUE;
+        ioAxisY.AutoCmd.bMoveAbs := TRUE;
     END_IF;
 
     bXYCommandIssued := TRUE;
@@ -1147,11 +1297,11 @@ IF NOT bZCommandIssued THEN
         <= fPositionTolerance;
 
     IF NOT bZDoneLatched THEN
-        ioAxisZ.Set.Position.fAbsolutePosition := fTargetZ;
-        ioAxisZ.Set.Position.fVelocity :=
+        ioAxisZ.AutoSet.Position.fAbsolutePosition := fTargetZ;
+        ioAxisZ.AutoSet.Position.fVelocity :=
             fDamperZVelocity;
 
-        ioAxisZ.Cmd.bMoveAbs := TRUE;
+        ioAxisZ.AutoCmd.bMoveAbs := TRUE;
     END_IF;
 
     bZCommandIssued := TRUE;
@@ -1242,10 +1392,17 @@ CASE ePlaceStep OF
 
 
     // 夹爪夹紧占位。
-    E_DamperPlaceStep.ClampPlaceholder:
-        ePlaceStep :=
-            E_DamperPlaceStep.LiftZFromTransfer;
-
+	// DamperZ已下降至转台取回高度。
+	// 请求COM3夹爪夹紧；只有本次动作完成，才允许Z带料抬升。
+	E_DamperPlaceStep.ClampPlaceholder:
+		bGripperActionExecute := TRUE;
+		eGripperActionCommand := E_GripperCommand.Close;
+	
+		// FB_GripperAction负责锁存本次请求编号，并验证有效反馈及bClosed。
+		// Error由MAIN转入现有流程中止/全轴停止路径；本步骤不得继续。
+		IF bGripperActionDone AND NOT bGripperActionError THEN
+			ePlaceStep := E_DamperPlaceStep.LiftZFromTransfer;
+		END_IF;
 
     // 从转台取回位升到15mm。
     E_DamperPlaceStep.LiftZFromTransfer:
@@ -1283,10 +1440,15 @@ CASE ePlaceStep OF
 
 
     // 夹爪松开占位。
-    E_DamperPlaceStep.ReleasePlaceholder:
-        ePlaceStep :=
-            E_DamperPlaceStep.LiftZFromTarget;
-
+	// DamperZ已下降至料盘目标位或最终缓冲位的放料高度。
+	// 请求COM3夹爪张开；确认本次Open完成后才允许Z抬升。
+	E_DamperPlaceStep.ReleasePlaceholder:
+		bGripperActionExecute := TRUE;
+		eGripperActionCommand := E_GripperCommand.Open;
+	
+		IF bGripperActionDone AND NOT bGripperActionError THEN
+			ePlaceStep := E_DamperPlaceStep.LiftZFromTarget;
+		END_IF;
 
     // 放料完成后回到目标安全高度。
     E_DamperPlaceStep.LiftZFromTarget:
@@ -1355,9 +1517,9 @@ bZCommandIssued := FALSE;
 bZDoneLatched := FALSE;
 
 // 清除可能残留的绝对运动命令
-ioAxisX.Cmd.bMoveAbs := FALSE;
-ioAxisY.Cmd.bMoveAbs := FALSE;
-ioAxisZ.Cmd.bMoveAbs := FALSE;
+ioAxisX.AutoCmd.bMoveAbs := FALSE;
+ioAxisY.AutoCmd.bMoveAbs := FALSE;
+ioAxisZ.AutoCmd.bMoveAbs := FALSE;
 
 // 复位相机检测和旋转运行状态。
 fAngleCorrectionLatched := 0.0;
@@ -1368,7 +1530,7 @@ bTakeRotationDoneLatched := FALSE;
 // 清除二维码扫描旋转发令状态。
 bQrScanCommandIssued := FALSE;
 // 清除可能残留的DamperRotation相对运动命令。
-ioAxisRotation.Cmd.bMoveRel := FALSE;]]></ST>
+ioAxisRotation.AutoCmd.bMoveRel := FALSE;]]></ST>
       </Implementation>
     </Method>
     <Method Name="M_TakeDamper" Id="{d36fa61d-b49a-449e-ad76-302f3cdb0cc6}">
@@ -1509,14 +1671,18 @@ CASE eTakeStep OF
 	// 后续接入夹爪后，应在这里发送夹紧命令并等待夹紧反馈。
 	//==========================================================
 	E_DamperTakeStep.ClampPlaceholder:
-		// 准备启动Z轴抬升与DamperRotation并行运动。
-		bTakeLiftZDoneLatched := FALSE;
-		bTakeRotationDoneLatched := FALSE;
-		bRotationCommandIssued := FALSE;
+		// DamperZ已到料盘取料高度。保持请求，动作FB仅在上升沿发一次Close。
+		bGripperActionExecute := TRUE;
+		eGripperActionCommand := E_GripperCommand.Close;
 	
-		eTakeStep :=
-			E_DamperTakeStep.LiftZFromSlot;
-
+		// 本次Close被验证完成之前，禁止Z抬升和DamperRotation运动。
+		IF bGripperActionDone AND NOT bGripperActionError THEN
+			bTakeLiftZDoneLatched := FALSE;
+			bTakeRotationDoneLatched := FALSE;
+			bRotationCommandIssued := FALSE;
+	
+			eTakeStep := E_DamperTakeStep.LiftZFromSlot;
+		END_IF;
 	//==========================================================
 	// 7. Z轴抬升与DamperRotation相对旋转并行执行
 	//
@@ -1560,20 +1726,20 @@ CASE eTakeStep OF
 			ELSE
 				// 每件阻尼器只允许发送一次相对旋转命令。
 				IF NOT bRotationCommandIssued THEN
-					ioAxisRotation.Set.Position.fRelativeDistance :=
+					ioAxisRotation.AutoSet.Position.fRelativeDistance :=
 						fAngleCorrectionLatched;
 	
-					ioAxisRotation.Set.Position.fVelocity :=
+					ioAxisRotation.AutoSet.Position.fVelocity :=
 						fDamperRotationVelocity;
 	
-					ioAxisRotation.Set.Position.fAcceleration :=
+					ioAxisRotation.AutoSet.Position.fAcceleration :=
 						fDamperRotationAcceleration;
 	
-					ioAxisRotation.Set.Position.fDeceleration :=
+					ioAxisRotation.AutoSet.Position.fDeceleration :=
 						fDamperRotationDeceleration;
 	
 					// 产生一个PLC扫描周期的相对运动命令。
-					ioAxisRotation.Cmd.bMoveRel := TRUE;
+					ioAxisRotation.AutoCmd.bMoveRel := TRUE;
 					bRotationCommandIssued := TRUE;
 	
 				ELSIF ioAxisRotation.State.bDone THEN
@@ -1649,20 +1815,20 @@ CASE eTakeStep OF
 		ELSE
 			// 每件阻尼器只发送一次二维码扫描旋转命令。
 			IF NOT bQrScanCommandIssued THEN
-				ioAxisRotation.Set.Position.fRelativeDistance :=
+				ioAxisRotation.AutoSet.Position.fRelativeDistance :=
 					fQrScanRelativeAngle;
 	
-				ioAxisRotation.Set.Position.fVelocity :=
+				ioAxisRotation.AutoSet.Position.fVelocity :=
 					fQrScanVelocity;
 	
-				ioAxisRotation.Set.Position.fAcceleration :=
+				ioAxisRotation.AutoSet.Position.fAcceleration :=
 					fQrScanAcceleration;
 	
-				ioAxisRotation.Set.Position.fDeceleration :=
+				ioAxisRotation.AutoSet.Position.fDeceleration :=
 					fQrScanDeceleration;
 	
 				// 产生一个PLC扫描周期的相对运动命令。
-				ioAxisRotation.Cmd.bMoveRel := TRUE;
+				ioAxisRotation.AutoCmd.bMoveRel := TRUE;
 				bQrScanCommandIssued := TRUE;
 	
 			ELSIF ioAxisRotation.State.bDone THEN
@@ -1688,10 +1854,14 @@ CASE eTakeStep OF
 
 
     // 夹爪松开占位。
-    E_DamperTakeStep.ReleasePlaceholder:
-        eTakeStep :=
-            E_DamperTakeStep.LiftZFromTransfer;
-
+	E_DamperTakeStep.ReleasePlaceholder:
+		// 已到备料位放料高度。确认本次Open完成后才允许Z抬升。
+		bGripperActionExecute := TRUE;
+		eGripperActionCommand := E_GripperCommand.Open;
+	
+		IF bGripperActionDone AND NOT bGripperActionError THEN
+			eTakeStep := E_DamperTakeStep.LiftZFromTransfer;
+		END_IF;
 
     // 阻尼器放入备料位后，
 	// DamperZ回到统一安全高度fTransferSafeZ。

@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <POU Name="FB_AxisCommandArbiter" Id="{7619af51-d5c4-4e45-8437-e43ed894b844}" SpecialFunc="None">
+    <Declaration><![CDATA[//==============================================================
+// 单轴唯一命令所有权仲裁器
+//
+// 命令源：Manual、Auto、Homing、Stop。
+// 每个PLC周期只复制一个命令源到ActiveCmd/ActiveSet；
+// FB_AxisControl只执行Active通道，不再读取各原始命令源。
+//==============================================================
+FUNCTION_BLOCK FB_AxisCommandArbiter
+VAR_INPUT
+    bAxisConfigured : BOOL;
+    bAxisUsedByAuto : BOOL;
+    eMachineMode    : E_MachineMode;
+END_VAR
+VAR_IN_OUT
+    stAxis : ST_AxisInterface;
+END_VAR
+VAR_OUTPUT
+    eOwner                 : E_AxisControlOwner;
+    bOwnerChanged          : BOOL;
+    bManualCommandRejected : BOOL; // 非手动模式收到手动运动命令
+    bAutoCommandRejected   : BOOL; // 非自动模式残留自动运动命令
+END_VAR
+VAR
+    eRequestedOwner : E_AxisControlOwner;
+    bRecoveryResetRequest : BOOL;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[//==============================================================
+// 1. 根据整机模式确定当前轴唯一所有者
+// Stop/Fault优先级最高；非自动流程轴在自动模式下保持None。
+//==============================================================
+IF NOT bAxisConfigured THEN
+    eRequestedOwner := E_AxisControlOwner.None;
+ELSE
+    CASE eMachineMode OF
+        E_MachineMode.Stopping:
+            eRequestedOwner := E_AxisControlOwner.Stop;
+
+        E_MachineMode.Fault:
+            // 停止已经完成但整机故障仍锁存时，只开放MC_Reset。
+            eRequestedOwner := E_AxisControlOwner.Recovery;
+
+        E_MachineMode.Homing:
+            eRequestedOwner := E_AxisControlOwner.Homing;
+
+        E_MachineMode.AutoStarting,
+        E_MachineMode.Automatic:
+            IF bAxisUsedByAuto THEN
+                eRequestedOwner := E_AxisControlOwner.Auto;
+            ELSE
+                eRequestedOwner := E_AxisControlOwner.None;
+            END_IF;
+
+        E_MachineMode.Manual:
+            eRequestedOwner := E_AxisControlOwner.Manual;
+
+        ELSE
+            eRequestedOwner := E_AxisControlOwner.None;
+    END_CASE;
+END_IF;
+
+//==============================================================
+// 2. 在清除无权命令前记录拒绝脉冲
+//==============================================================
+bManualCommandRejected :=
+    (eRequestedOwner <> E_AxisControlOwner.Manual)
+    AND
+    (
+        M_HasMotionCommand(iCmd := stAxis.Cmd)
+        OR
+        (
+            stAxis.Cmd.bReset
+            AND (eRequestedOwner <> E_AxisControlOwner.Recovery)
+        )
+    );
+
+bAutoCommandRejected :=
+    (eRequestedOwner <> E_AxisControlOwner.Auto)
+    AND M_HasActiveCommand(iCmd := stAxis.AutoCmd);
+
+//==============================================================
+// 3. 只保留当前所有者的请求并生成唯一Active通道
+// Set也按来源隔离，防止WPF在自动流程中改写自动目标参数。
+//==============================================================
+CASE eRequestedOwner OF
+    E_AxisControlOwner.Manual:
+        M_ClearCommand(ioCmd := stAxis.AutoCmd);
+        M_ClearCommand(ioCmd := stAxis.HomingCmd);
+        M_ClearCommand(ioCmd := stAxis.StopCmd);
+        stAxis.ActiveCmd := stAxis.Cmd;
+        stAxis.ActiveSet := stAxis.Set;
+
+    E_AxisControlOwner.Auto:
+        M_ClearCommand(ioCmd := stAxis.Cmd);
+        M_ClearCommand(ioCmd := stAxis.HomingCmd);
+        M_ClearCommand(ioCmd := stAxis.StopCmd);
+        stAxis.ActiveCmd := stAxis.AutoCmd;
+        stAxis.ActiveSet := stAxis.AutoSet;
+
+    E_AxisControlOwner.Homing:
+        M_ClearCommand(ioCmd := stAxis.Cmd);
+        M_ClearCommand(ioCmd := stAxis.AutoCmd);
+        M_ClearCommand(ioCmd := stAxis.StopCmd);
+        stAxis.ActiveCmd := stAxis.HomingCmd;
+        stAxis.ActiveSet := stAxis.HomingSet;
+
+    E_AxisControlOwner.Recovery:
+        // 先保存复位请求，再清除所有可能产生运动的手动命令。
+        bRecoveryResetRequest := stAxis.Cmd.bReset;
+        M_ClearCommand(ioCmd := stAxis.Cmd);
+        M_ClearCommand(ioCmd := stAxis.AutoCmd);
+        M_ClearCommand(ioCmd := stAxis.HomingCmd);
+        M_ClearCommand(ioCmd := stAxis.StopCmd);
+        M_ClearCommand(ioCmd := stAxis.ActiveCmd);
+        stAxis.ActiveCmd.bReset := bRecoveryResetRequest;
+        stAxis.ActiveSet := stAxis.Set;
+
+    E_AxisControlOwner.Stop:
+        M_ClearCommand(ioCmd := stAxis.Cmd);
+        M_ClearCommand(ioCmd := stAxis.AutoCmd);
+        M_ClearCommand(ioCmd := stAxis.HomingCmd);
+        stAxis.ActiveCmd := stAxis.StopCmd;
+        stAxis.ActiveSet := stAxis.StopSet;
+
+    ELSE
+        M_ClearCommand(ioCmd := stAxis.Cmd);
+        M_ClearCommand(ioCmd := stAxis.AutoCmd);
+        M_ClearCommand(ioCmd := stAxis.HomingCmd);
+        M_ClearCommand(ioCmd := stAxis.StopCmd);
+        M_ClearCommand(ioCmd := stAxis.ActiveCmd);
+END_CASE;
+
+//==============================================================
+// 4. 发布稳定所有者及模式切换脉冲
+//==============================================================
+bOwnerChanged := (eRequestedOwner <> eOwner);
+eOwner := eRequestedOwner;
+stAxis.eControlOwner := eOwner;
+stAxis.bOwnerChanged := bOwnerChanged;
+stAxis.bManualCommandRejected := bManualCommandRejected;
+stAxis.bAutoCommandRejected := bAutoCommandRejected;]]></ST>
+    </Implementation>
+    <Method Name="M_ClearCommand" Id="{fe28975f-9177-48b2-b99e-9aceb2022382}">
+      <Declaration><![CDATA[METHOD PRIVATE M_ClearCommand
+VAR_IN_OUT
+    ioCmd : ST_AxisCmd;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[ioCmd.bEnable := FALSE;
+ioCmd.bReset := FALSE;
+ioCmd.bStop := FALSE;
+ioCmd.bMoveAbs := FALSE;
+ioCmd.bMoveRel := FALSE;
+ioCmd.bJogPos := FALSE;
+ioCmd.bJogNeg := FALSE;
+ioCmd.bTorqueControl := FALSE;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_HasActiveCommand" Id="{9df160ee-b7b0-4cd2-997e-06cd2904d84d}">
+      <Declaration><![CDATA[METHOD PRIVATE M_HasActiveCommand : BOOL
+VAR_INPUT
+    iCmd : ST_AxisCmd;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_HasActiveCommand :=
+    iCmd.bEnable
+    OR iCmd.bReset
+    OR iCmd.bStop
+    OR iCmd.bMoveAbs
+    OR iCmd.bMoveRel
+    OR iCmd.bJogPos
+    OR iCmd.bJogNeg
+    OR iCmd.bTorqueControl;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_HasMotionCommand" Id="{ba5b3f57-36dd-41fd-b48d-42a01052e961}">
+      <Declaration><![CDATA[METHOD PRIVATE M_HasMotionCommand : BOOL
+VAR_INPUT
+    iCmd : ST_AxisCmd;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// 故障恢复模式允许Reset，因此这里仅判断可能产生运动的命令。
+M_HasMotionCommand :=
+    iCmd.bEnable
+    OR iCmd.bStop
+    OR iCmd.bMoveAbs
+    OR iCmd.bMoveRel
+    OR iCmd.bJogPos
+    OR iCmd.bJogNeg
+    OR iCmd.bTorqueControl;]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

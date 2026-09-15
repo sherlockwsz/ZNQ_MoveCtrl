@@ -1,0 +1,181 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <POU Name="FB_AutoStartCoordinator" Id="{d00eb36f-61db-4727-88b2-be6ec64efbc0}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_AutoStartCoordinator
+VAR_INPUT
+    bRequest             : BOOL;  // WPF 的 bControlAuto 请求
+    bCancel              : BOOL;  // Stop、Abort 或停止故障
+    bHmiOnline           : BOOL;
+    bControlAllowed      : BOOL;
+    bGripperReady        : BOOL;
+    bGripperActionFault  : BOOL;
+    bProcessDone         : BOOL;  // 整套五盘流程已完成
+    tEnableTimeout       : TIME := T#15S;
+END_VAR
+
+VAR_IN_OUT
+    // 只读取轴状态；本 FB 不直接写轴命令。
+    aAxes : ARRAY[1..GVL_Constants.cMaxAxisCount] OF ST_AxisInterface;
+END_VAR
+
+VAR_OUTPUT
+    bEnableAxes      : BOOL;  // MAIN 据此请求自动流程涉及的轴使能
+    bProcessStart    : BOOL;  // 全部就绪后保持 TRUE，直到完成或中止
+    bEnabling        : BOOL;  // 正在等待轴使能、就绪
+    bStartRejected   : BOOL;  // 尚未发使能时，启动条件不满足
+    bError           : BOOL;  // 启动阶段故障，保持供诊断
+    bErrorPulse      : BOOL;  // 单周期脉冲，交给现有 Stop 链路
+    bTimeout         : BOOL;
+    uiErrorAxisIndex : UINT;  // 轴故障／超时对应的业务轴下标
+    uiErrorCode      : UINT;  // 见实现区末尾的代码说明
+END_VAR
+
+VAR
+    trigStart       : R_TRIG;
+    fbEnableTimeout : TON;
+
+    uiItem       : UINT;
+    uiAxis       : UINT;
+    bAllAxesReady : BOOL;
+
+    eStep : E_AutoStartStep := E_AutoStartStep.Idle;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// 请求只受理上升沿，防止 WPF 长时间保持 TRUE 时重复启动。
+trigStart(CLK := bRequest);
+
+// TON 每个扫描周期调用一次。进入步骤 10 的下一周期开始计时。
+fbEnableTimeout(
+    IN := (eStep = E_AutoStartStep.WaitAxesReady) AND NOT bCancel,
+    PT := tEnableTimeout
+);
+
+bErrorPulse := FALSE;
+
+// Stop 优先级最高。本 FB 不撤轴使能：受控停止和掉使能
+// 仍由 FB_AutoStopManager 按既有时序完成。
+IF bCancel THEN
+    eStep := E_AutoStartStep.Idle;
+ELSE
+    CASE eStep OF
+
+        E_AutoStartStep.Idle: // 待机：只做一次启动准入检查
+            IF trigStart.Q THEN
+                bStartRejected := FALSE;
+                bError := FALSE;
+                bTimeout := FALSE;
+                uiErrorAxisIndex := 0;
+                uiErrorCode := 0;
+
+                IF NOT bHmiOnline THEN
+                    bStartRejected := TRUE;
+                    uiErrorCode := 1;
+
+                ELSIF NOT bControlAllowed THEN
+                    bStartRejected := TRUE;
+                    uiErrorCode := 2;
+
+                ELSIF bGripperActionFault OR NOT bGripperReady THEN
+                    bStartRejected := TRUE;
+                    uiErrorCode := 3;
+
+                ELSE
+                    // 在发使能之前确认八根参与轴均已配置。
+                    FOR uiItem := 1 TO GVL_AxisIndex.AutoProcessAxisCount DO
+                        uiAxis := GVL_AxisIndex.AutoProcessAxes[uiItem];
+
+                        IF NOT GVL_AxisConfig.AxisLimits[
+                            uiAxis
+                        ].bConfigured THEN
+                            bStartRejected := TRUE;
+                            uiErrorCode := 4;
+                            uiErrorAxisIndex := uiAxis;
+                            EXIT;
+                        END_IF;
+                    END_FOR;
+
+                    IF NOT bStartRejected THEN
+                        eStep := E_AutoStartStep.WaitAxesReady;
+                    END_IF;
+                END_IF;
+            END_IF;
+
+        E_AutoStartStep.WaitAxesReady: // 请求使能，读取 FB_AxisManager 上一扫描周期的轴状态
+            IF NOT bHmiOnline
+                OR NOT bControlAllowed
+                OR bGripperActionFault
+                OR NOT bGripperReady THEN
+
+                bError := TRUE;
+                bErrorPulse := TRUE;
+                uiErrorCode := 5;
+                eStep := E_AutoStartStep.Idle;
+
+            ELSE
+                bAllAxesReady := TRUE;
+                uiErrorAxisIndex := 0;
+
+                FOR uiItem := 1 TO GVL_AxisIndex.AutoProcessAxisCount DO
+                    uiAxis := GVL_AxisIndex.AutoProcessAxes[uiItem];
+
+                    IF aAxes[uiAxis].Alarm.bError THEN
+                        bError := TRUE;
+                        bErrorPulse := TRUE;
+                        uiErrorCode := 6;
+                        uiErrorAxisIndex := uiAxis;
+                        eStep := E_AutoStartStep.Idle;
+                        EXIT;
+                    END_IF;
+
+                    IF NOT aAxes[uiAxis].State.bReady THEN
+                        bAllAxesReady := FALSE;
+
+                        // 保留第一根未就绪轴，供超时诊断。
+                        IF uiErrorAxisIndex = 0 THEN
+                            uiErrorAxisIndex := uiAxis;
+                        END_IF;
+                    END_IF;
+                END_FOR;
+
+                IF NOT bErrorPulse THEN
+                    IF bAllAxesReady THEN
+                        uiErrorAxisIndex := 0;
+                        eStep := E_AutoStartStep.Running;
+
+                    ELSIF fbEnableTimeout.Q THEN
+                        bError := TRUE;
+                        bTimeout := TRUE;
+                        bErrorPulse := TRUE;
+                        uiErrorCode := 7;
+                        eStep := E_AutoStartStep.Idle;
+                    END_IF;
+                END_IF;
+            END_IF;
+
+        E_AutoStartStep.Running: // 保持启动许可；现有流程 FB 自己锁存 bStart 上升沿
+            IF bProcessDone THEN
+                eStep := E_AutoStartStep.Idle;
+            END_IF;
+
+        ELSE
+            bError := TRUE;
+            bErrorPulse := TRUE;
+            uiErrorCode := 8;
+            eStep := E_AutoStartStep.Idle;
+    END_CASE;
+END_IF;
+
+// 统一从状态机导出输出，避免 Stop 同一扫描仍下发启动。
+// 根据本周期最终状态发布输出；Stop 时三个输出立即撤销。
+bEnabling :=
+    (eStep = E_AutoStartStep.WaitAxesReady);
+
+bEnableAxes :=
+    (eStep = E_AutoStartStep.WaitAxesReady)
+    OR (eStep = E_AutoStartStep.Running);
+
+bProcessStart :=
+    (eStep = E_AutoStartStep.Running);]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

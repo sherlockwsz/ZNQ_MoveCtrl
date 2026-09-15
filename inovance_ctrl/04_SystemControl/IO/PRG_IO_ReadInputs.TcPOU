@@ -1,0 +1,88 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+  <POU Name="PRG_IO_ReadInputs" Id="{7d99c679-151c-418c-a613-efee64604b63}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM PRG_IO_ReadInputs
+VAR
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// =============================================================
+// 第1个EL1008：设备操作按钮
+// =============================================================
+
+// EL1008_01 Channel 1：设备右侧启动按钮
+GVL_IO.bRightStartButton :=
+    GVL_IO_Raw.aEL1008_01[1];
+
+// EL1008_01 Channel 3：设备下侧上料按钮
+GVL_IO.bLowerLoadButton :=
+    GVL_IO_Raw.aEL1008_01[3];
+
+// EL1008_01 Channel 4：设备右侧停止按钮（常闭）
+// TRUE ：停止按钮未按下、回路正常
+// FALSE：停止按钮按下或线路断开
+GVL_IO.bRightStopCircuitOK :=
+    GVL_IO_Raw.aEL1008_01[4];
+
+// EL1008_01 Channel 5：设备下侧启动按钮
+GVL_IO.bLowerStartButton :=
+    GVL_IO_Raw.aEL1008_01[5];
+
+
+// =============================================================
+// 第2个EL1008：料架各层检测
+// =============================================================
+
+// Channel 1：料盘1层传感器
+GVL_IO.aTrayLevelDetected[1] :=
+    GVL_IO_Raw.aEL1008_02[1];
+
+// Channel 3：料盘2层传感器
+GVL_IO.aTrayLevelDetected[2] :=
+    GVL_IO_Raw.aEL1008_02[3];
+
+// Channel 5：料盘3层传感器
+GVL_IO.aTrayLevelDetected[3] :=
+    GVL_IO_Raw.aEL1008_02[5];
+
+// Channel 7：料盘4层传感器
+GVL_IO.aTrayLevelDetected[4] :=
+    GVL_IO_Raw.aEL1008_02[7];
+
+// Channel 2：料盘5层传感器
+GVL_IO.aTrayLevelDetected[5] :=
+    GVL_IO_Raw.aEL1008_02[2];
+
+
+// =============================================================
+// 第2个EL1008：防护门检测
+// 已确认门关闭时EL1008输入为TRUE，因此不取反
+// =============================================================
+
+// Channel 4：上侧左门
+GVL_IO.bUpperLeftDoorClosed :=
+    GVL_IO_Raw.aEL1008_02[4];
+
+// Channel 6：上侧右门
+GVL_IO.bUpperRightDoorClosed :=
+    GVL_IO_Raw.aEL1008_02[6];
+
+// Channel 8：下侧门
+GVL_IO.bLowerDoorClosed :=
+    GVL_IO_Raw.aEL1008_02[8];
+
+
+// =============================================================
+// 第3个EL1008：料盘状态检测
+// =============================================================
+
+// Channel 1：不合格料盘到位
+GVL_IO.bRejectTrayInPosition :=
+    GVL_IO_Raw.aEL1008_03[1];
+
+// Channel 7：TrayZ叉臂上存在料盘
+GVL_IO.bTrayPresentOnFork :=
+    GVL_IO_Raw.aEL1008_03[7];]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

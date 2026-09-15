@@ -76,7 +76,7 @@ M_ClearCycleResults(
 //==============================================================
 
 M_UpdateCommandEdges(
-    iCmd := stAxis.Cmd
+    iCmd := stAxis.ActiveCmd
 );
 //==============================================================
 // 3. 更新软件限位状态
@@ -192,69 +192,6 @@ M_UpdateMotionDirection(
     ioAxis := stAxis
 );]]></ST>
     </Implementation>
-    <Method Name="M_ReadAxisStatus" Id="{d0e5ee8d-228a-4964-9d8c-da9887885914}">
-      <Declaration><![CDATA[// 刷新NC轴状态。每根轴、每周期只调用一次。
-METHOD PRIVATE M_ReadAxisStatus
-VAR_IN_OUT
-    ioAxisRef : AXIS_REF;
-END_VAR]]></Declaration>
-      <Implementation>
-        <ST><![CDATA[ioAxisRef.ReadStatus();]]></ST>
-      </Implementation>
-    </Method>
-    <Method Name="M_UpdateCommandArbitration" Id="{d8b16562-dea7-412c-a822-b092e5d2cca8}">
-      <Declaration><![CDATA[//==============================================================
-// 汇总运动状态、生成停止请求、选择唯一命令并锁存停止。
-//==============================================================
-METHOD PRIVATE M_UpdateCommandArbitration
-VAR_IN_OUT
-    ioAxis : ST_AxisInterface;
-END_VAR]]></Declaration>
-      <Implementation>
-        <ST><![CDATA[// Execute已锁存但Busy尚未建立时，同样视为运动有效。
-stInternal.bMotionActive :=
-    fbJog.Busy
-    OR fbMoveAbs.Busy
-    OR fbMoveRel.Busy
-    OR stInternal.bMoveAbsExecute
-    OR stInternal.bMoveRelExecute;
-
-
-// 外部Stop、运动中撤销控制许可或撤销使能均请求停止。
-stInternal.bStopRequest :=
-    ioAxis.Cmd.bStop
-    OR
-    (
-        NOT bControlAllowed
-        AND stInternal.bMotionActive
-    )
-    OR
-    (
-        NOT ioAxis.Cmd.bEnable
-        AND stInternal.bMotionActive
-    );
-
-
-// 优先级：Stop > Reset > Jog > MoveAbsolute/MoveRelative。
-stInternal.eRequestedCommand := M_SelectCommand(
-    bStopRequest := stInternal.bStopRequest,
-    bResetPulse := trigReset.Q,
-    bJogPositive := ioAxis.Cmd.bJogPos,
-    bJogNegative := ioAxis.Cmd.bJogNeg,
-    bMoveAbsPulse := trigMoveAbs.Q,
-    bMoveRelPulse := trigMoveRel.Q
-);
-
-
-// Stop一旦被选中，保持Execute直至停止完成并释放外部Stop。
-IF
-    (stInternal.eRequestedCommand = E_AxisCommand.Stop)
-    AND fbPower.Status
-THEN
-    stInternal.bStopExecute := TRUE;
-END_IF;]]></ST>
-      </Implementation>
-    </Method>
     <Method Name="M_ClearCycleResults" Id="{b0100f26-6f1e-463a-8206-ad01d5a00796}">
       <Declaration><![CDATA[//==============================================================
 // 方法名称：M_ClearCycleResults
@@ -341,9 +278,9 @@ bJogCommandEdge :=
 //==============================================================
 
 bJogDynamicsValid :=
-    ioAxis.Set.Jog.fVelocity > 0.0
-    AND ioAxis.Set.Jog.fAcceleration >= 0.0
-    AND ioAxis.Set.Jog.fDeceleration >= 0.0;
+    ioAxis.ActiveSet.Jog.fVelocity > 0.0
+    AND ioAxis.ActiveSet.Jog.fAcceleration >= 0.0
+    AND ioAxis.ActiveSet.Jog.fDeceleration >= 0.0;
 
 //==============================================================
 // 4. 生成点动许可
@@ -372,8 +309,8 @@ bJogAllowed :=
 
 IF
     bJogCommandEdge
-    AND ioAxis.Cmd.bJogPos
-    AND ioAxis.Cmd.bJogNeg
+    AND ioAxis.ActiveCmd.bJogPos
+    AND ioAxis.ActiveCmd.bJogNeg
 THEN
 
     ioAxis.State.bCmdRejected := TRUE;
@@ -422,12 +359,12 @@ ELSIF
     AND
     (
         (
-            ioAxis.Cmd.bJogPos
+            ioAxis.ActiveCmd.bJogPos
             AND NOT stInternal.stSoftLimitResult.bJogPositiveAllowed
         )
         OR
         (
-            ioAxis.Cmd.bJogNeg
+            ioAxis.ActiveCmd.bJogNeg
             AND NOT stInternal.stSoftLimitResult.bJogNegativeAllowed
         )
     )
@@ -473,9 +410,9 @@ fbJog(
 
     Mode         := MC_JOGMODE_CONTINOUS,
     Position     := 0.0,
-    Velocity     := ioAxis.Set.Jog.fVelocity,
-    Acceleration := ioAxis.Set.Jog.fAcceleration,
-    Deceleration := ioAxis.Set.Jog.fDeceleration,
+    Velocity     := ioAxis.ActiveSet.Jog.fVelocity,
+    Acceleration := ioAxis.ActiveSet.Jog.fAcceleration,
+    Deceleration := ioAxis.ActiveSet.Jog.fDeceleration,
     Jerk         := 0.0
 );
 
@@ -514,9 +451,9 @@ END_VAR
 //==============================================================
 
 bPositionDynamicsValid :=
-    ioAxis.Set.Position.fVelocity > 0.0
-    AND ioAxis.Set.Position.fAcceleration >= 0.0
-    AND ioAxis.Set.Position.fDeceleration >= 0.0;
+    ioAxis.ActiveSet.Position.fVelocity > 0.0
+    AND ioAxis.ActiveSet.Position.fAcceleration >= 0.0
+    AND ioAxis.ActiveSet.Position.fDeceleration >= 0.0;
 
 
 //==============================================================
@@ -531,8 +468,8 @@ bPositionAllowed :=
     AND NOT fbStop.Busy
     AND NOT fbReset.Busy
     AND NOT fbJog.Busy
-    AND NOT ioAxis.Cmd.bJogPos
-    AND NOT ioAxis.Cmd.bJogNeg
+    AND NOT ioAxis.ActiveCmd.bJogPos
+    AND NOT ioAxis.ActiveCmd.bJogNeg
     AND NOT fbMoveAbs.Busy
     AND NOT fbMoveRel.Busy
     AND NOT stInternal.bMoveAbsExecute
@@ -693,10 +630,10 @@ END_IF;
 fbMoveAbs(
     Axis         := ioAxisRef,
     Execute      := stInternal.bMoveAbsExecute,
-    Position     := ioAxis.Set.Position.fAbsolutePosition,
-    Velocity     := ioAxis.Set.Position.fVelocity,
-    Acceleration := ioAxis.Set.Position.fAcceleration,
-    Deceleration := ioAxis.Set.Position.fDeceleration,
+    Position     := ioAxis.ActiveSet.Position.fAbsolutePosition,
+    Velocity     := ioAxis.ActiveSet.Position.fVelocity,
+    Acceleration := ioAxis.ActiveSet.Position.fAcceleration,
+    Deceleration := ioAxis.ActiveSet.Position.fDeceleration,
     Jerk         := 0.0,
     BufferMode   := MC_Aborting
 );
@@ -709,10 +646,10 @@ fbMoveAbs(
 fbMoveRel(
     Axis         := ioAxisRef,
     Execute      := stInternal.bMoveRelExecute,
-    Distance     := ioAxis.Set.Position.fRelativeDistance,
-    Velocity     := ioAxis.Set.Position.fVelocity,
-    Acceleration := ioAxis.Set.Position.fAcceleration,
-    Deceleration := ioAxis.Set.Position.fDeceleration,
+    Distance     := ioAxis.ActiveSet.Position.fRelativeDistance,
+    Velocity     := ioAxis.ActiveSet.Position.fVelocity,
+    Acceleration := ioAxis.ActiveSet.Position.fAcceleration,
+    Deceleration := ioAxis.ActiveSet.Position.fDeceleration,
     Jerk         := 0.0,
     BufferMode   := MC_Aborting
 );
@@ -782,7 +719,7 @@ END_VAR
 //==============================================================
 
 bPowerEnable :=
-    ioAxis.Cmd.bEnable
+    ioAxis.ActiveCmd.bEnable
     OR
     (
         (stInternal.bStopExecute OR fbStop.Busy)
@@ -878,11 +815,7 @@ END_VAR
       <Implementation>
         <ST><![CDATA[//==============================================================
 // 1. Stop开始后撤销定位Execute
-//
-// 点动由stInternal.bStopExecute使bJogAllowed变为FALSE，
-// MC_Jog会撤销点动请求，MC_Stop负责最终停止。
 //==============================================================
-
 IF stInternal.bStopExecute THEN
     stInternal.bMoveAbsExecute := FALSE;
     stInternal.bMoveRelExecute := FALSE;
@@ -892,12 +825,11 @@ END_IF;
 //==============================================================
 // 2. 选择停止减速度
 //
-// 当前使用定位减速度。
-// 设置为0时，由NC轴使用默认减速度。
+// 当前沿用位置运动减速度。
+// 如果配置值小于0，则使用0，让NC采用默认减速度。
 //==============================================================
-
 fStopDeceleration :=
-    ioAxis.Set.Position.fDeceleration;
+    ioAxis.ActiveSet.Position.fDeceleration;
 
 IF fStopDeceleration < 0.0 THEN
     fStopDeceleration := 0.0;
@@ -905,11 +837,8 @@ END_IF;
 
 
 //==============================================================
-// 3. MC_Stop每周期调用
-//
-// 该方法必须在点动和定位方法之后调用。
+// 3. 每周期调用MC_Stop
 //==============================================================
-
 fbStop(
     Axis         := ioAxisRef,
     Execute      := stInternal.bStopExecute,
@@ -919,23 +848,55 @@ fbStop(
 
 
 //==============================================================
-// 4. 停止完成
+// 4. 发布MC_Stop专用状态
 //
-// 外部Stop恢复FALSE后，撤销Execute并释放轴锁定。
+// 不使用通用State.bDone，避免与MoveAbs、MoveRel等完成信号混淆。
 //==============================================================
+ioAxis.State.bStopDone :=
+    fbStop.Done;
 
-IF fbStop.Done AND NOT stInternal.bStopRequest THEN
+// Done仅代表停住；释放Execute并等待Busy结束后才能掉使能。
+ioAxis.State.bStopReleased :=
+    NOT stInternal.bStopExecute
+    AND NOT fbStop.Busy;
+
+ioAxis.State.bStopError :=
+    fbStop.Error;
+
+ioAxis.State.nStopErrorID :=
+    fbStop.ErrorID;
+
+
+//==============================================================
+// 5. 外部停止请求释放后，解除MC_Stop锁定
+//==============================================================
+IF
+    fbStop.Done
+    AND NOT stInternal.bStopRequest
+THEN
     stInternal.bStopExecute := FALSE;
 END_IF;
 
 
 //==============================================================
-// 5. Stop错误
+// 6. Stop错误
+//
+// 即使停止发生错误，也要撤销内部Execute，
+// 错误信息由State和Alarm继续对外发布。
 //==============================================================
-
 IF fbStop.Error THEN
     stInternal.bStopExecute := FALSE;
 END_IF;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ReadAxisStatus" Id="{d0e5ee8d-228a-4964-9d8c-da9887885914}">
+      <Declaration><![CDATA[// 刷新NC轴状态。每根轴、每周期只调用一次。
+METHOD PRIVATE M_ReadAxisStatus
+VAR_IN_OUT
+    ioAxisRef : AXIS_REF;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[ioAxisRef.ReadStatus();]]></ST>
       </Implementation>
     </Method>
     <Method Name="M_SelectCommand" Id="{3eba9e33-1af3-4d6b-bf6d-4e9299aa666b}">
@@ -1246,6 +1207,59 @@ ioAxis.State.bReady :=
 
 ioAxis.State.bHomed :=
     ioAxisRef.Status.Homed;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_UpdateCommandArbitration" Id="{d8b16562-dea7-412c-a822-b092e5d2cca8}">
+      <Declaration><![CDATA[//==============================================================
+// 汇总运动状态、生成停止请求、选择唯一命令并锁存停止。
+//==============================================================
+METHOD PRIVATE M_UpdateCommandArbitration
+VAR_IN_OUT
+    ioAxis : ST_AxisInterface;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Execute已锁存但Busy尚未建立时，同样视为运动有效。
+stInternal.bMotionActive :=
+    fbJog.Busy
+    OR fbMoveAbs.Busy
+    OR fbMoveRel.Busy
+    OR stInternal.bMoveAbsExecute
+    OR stInternal.bMoveRelExecute;
+
+
+// 外部Stop、运动中撤销控制许可或撤销使能均请求停止。
+stInternal.bStopRequest :=
+    ioAxis.ActiveCmd.bStop
+    OR
+    (
+        NOT bControlAllowed
+        AND stInternal.bMotionActive
+    )
+    OR
+    (
+        NOT ioAxis.ActiveCmd.bEnable
+        AND stInternal.bMotionActive
+    );
+
+
+// 优先级：Stop > Reset > Jog > MoveAbsolute/MoveRelative。
+stInternal.eRequestedCommand := M_SelectCommand(
+    bStopRequest := stInternal.bStopRequest,
+    bResetPulse := trigReset.Q,
+    bJogPositive := ioAxis.ActiveCmd.bJogPos,
+    bJogNegative := ioAxis.ActiveCmd.bJogNeg,
+    bMoveAbsPulse := trigMoveAbs.Q,
+    bMoveRelPulse := trigMoveRel.Q
+);
+
+
+// Stop一旦被选中，保持Execute直至停止完成并释放外部Stop。
+IF
+    (stInternal.eRequestedCommand = E_AxisCommand.Stop)
+    AND fbPower.Status
+THEN
+    stInternal.bStopExecute := TRUE;
+END_IF;]]></ST>
       </Implementation>
     </Method>
     <Method Name="M_UpdateCommandEdges" Id="{4c7b1159-4005-4e07-bab0-2bc66c855e7f}">
@@ -1803,7 +1817,7 @@ stInternal.stSoftLimitResult.bReady :=
 
 stInternal.stSoftLimitResult.fRelativeTargetPosition :=
     ioAxisRef.NcToPlc.SetPos
-    + ioAxis.Set.Position.fRelativeDistance;
+    + ioAxis.ActiveSet.Position.fRelativeDistance;
 
 
 //==============================================================
@@ -1870,10 +1884,10 @@ ELSIF stInternal.stSoftLimitResult.bReady THEN
 
     // 检查绝对目标
     stInternal.stSoftLimitResult.bAbsoluteTargetValid :=
-        ioAxis.Set.Position.fAbsolutePosition
+        ioAxis.ActiveSet.Position.fAbsolutePosition
             >= iLimit.fSoftwareLimitNeg
         AND
-        ioAxis.Set.Position.fAbsolutePosition
+        ioAxis.ActiveSet.Position.fAbsolutePosition
             <= iLimit.fSoftwareLimitPos;
 
 

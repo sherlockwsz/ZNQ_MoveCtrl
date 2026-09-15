@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_GripperCommStep" Id="{1de5945a-0227-49eb-85bb-d6cb43c6efb3}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+TYPE E_GripperCommStep :
+(
+    SelectRequest := 0,  // 选择写命令或轮询项
+    SendRequest   := 10, // 将请求送入发送缓冲区
+    WaitReply     := 20, // 等待并校验应答
+    CommError     := 90  // 通信错误处理
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

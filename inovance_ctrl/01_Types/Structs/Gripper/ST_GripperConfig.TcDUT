@@ -1,0 +1,23 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_GripperConfig" Id="{c5bc5ca7-a21c-4ddf-b414-82823314ae08}">
+    <Declaration><![CDATA[TYPE ST_GripperConfig :
+STRUCT
+    nStationId            : BYTE;   // Modbus RTU站号；两台位于不同COM口，可相同
+    diOpenPosition        : DINT;   // 完全张开绝对位置，单位：脉冲
+    diClosePosition       : DINT;   // 夹紧绝对目标，单位：脉冲
+    bPositivePulseCloses  : BOOL;   // TRUE：位置增大是夹紧方向；供标定和诊断使用
+    diPositionTolerance   : DINT;   // 到位允许偏差，单位：脉冲，必须 >= 0
+
+    uiCloseCurrentMin     : UINT;   // 夹紧判定的电流幅值下限，单位：0.01 A
+                                    // 0表示尚未标定，不能据此判定夹紧成功
+
+    tReplyTimeout         : TIME;   // 单次Modbus请求的应答超时
+    tMoveTimeout          : TIME;   // 一次张开/夹紧动作的总超时
+
+    bParametersVerified   : BOOL;   // 站号、方向、行程和电流阈值实测确认后置TRUE
+                                    // FALSE时，自动流程不得发起运动
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

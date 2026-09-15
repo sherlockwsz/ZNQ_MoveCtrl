@@ -1,0 +1,204 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <POU Name="FB_MachineSupervisor" Id="{fc2b982c-5e98-4a97-a88f-d4f5ed8a1278}" SpecialFunc="None">
+    <Declaration><![CDATA[//==============================================================
+// 整机自动运行故障监控与第一故障汇总
+//
+// 职责：
+// 1. 统一监控HMI、启动、全部已配置轴、COM3、转台和Stop链路；
+// 2. 锁存第一次故障来源、轴号和错误码；
+// 3. 对需要停止的新增故障输出一个扫描周期的Stop请求；
+// 4. 不直接修改流程状态，也不直接写任何轴命令。
+//
+// 人工停止属于正常控制命令，不作为整机故障记录。
+//==============================================================
+FUNCTION_BLOCK FB_MachineSupervisor
+
+VAR_INPUT
+    bReset                   : BOOL;  // 人工故障复位脉冲；仅在故障条件消失后有效
+    bAutoActive              : BOOL;  // 自动启动准备或五盘流程正在执行
+    bHmiWatchdogTimeout      : BOOL;
+
+    bAutoStartErrorPulse     : BOOL;
+    bAutoStartTimeout        : BOOL;
+    uiAutoStartErrorAxis     : UINT;
+    uiAutoStartErrorCode     : UINT;
+
+    bDamperGripperHealthOK   : BOOL;  // 只使用稳定在线/通信/设备故障反馈
+    bDamperGripperFault      : BOOL;
+    udiDamperGripperError    : UDINT;
+
+    bTurntableFault          : BOOL;
+    udiTurntableError        : UDINT;
+
+    bAutoStopFault           : BOOL;
+    bAutoStopTimeout         : BOOL;
+    uiAutoStopErrorAxis      : UINT;
+    udiAutoStopError         : UDINT;
+END_VAR
+
+VAR_IN_OUT
+    aAxes : ARRAY[1..GVL_Constants.cMaxAxisCount] OF ST_AxisInterface;
+END_VAR
+
+VAR_OUTPUT
+    stFault          : ST_MachineFaultStatus;
+    bStopRequestPulse : BOOL; // 新故障需要进入受控Stop时，仅保持一个扫描周期
+    bResetBlocked     : BOOL; // 稳定状态：已锁存故障且源故障条件仍存在
+END_VAR
+
+VAR
+    uiItem            : UINT;
+    uiAxis            : UINT;
+    bAxisFaultFound   : BOOL;
+    uiFaultAxis       : UINT;
+    udiAxisError      : UDINT;
+    bGripperHealthFault : BOOL;
+    bActiveCondition  : BOOL;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[//==============================================================
+// 1. 扫描整机全部已配置轴
+// 轴7当前bConfigured=FALSE会自动跳过；以后有新轴完成配置后，
+// 无需在故障监控器内再次维护轴号清单。
+//==============================================================
+bAxisFaultFound := FALSE;
+uiFaultAxis := 0;
+udiAxisError := 0;
+
+// 已锁存轴故障后即使自动流程已经退出，也继续监视原轴报警，
+// 防止轴错误尚未复位时错误清除整机故障。
+IF bAutoActive
+    OR (stFault.bActive AND (stFault.eSource = E_MachineFaultSource.Axis))
+THEN
+    FOR uiItem := 1 TO GVL_Constants.cMaxAxisCount DO
+        uiAxis := uiItem;
+
+        IF GVL_AxisConfig.AxisLimits[uiAxis].bConfigured
+            AND aAxes[uiAxis].Alarm.bError THEN
+            bAxisFaultFound := TRUE;
+            uiFaultAxis := uiAxis;
+            udiAxisError := aAxes[uiAxis].Alarm.nErrorID;
+            EXIT;
+        END_IF;
+    END_FOR;
+END_IF;
+
+// PositionValid/CurrentValid在动作写入后会暂时失效，不能用于运行期健康判断。
+// 这里只监控稳定的在线、通信和设备故障组合结果。
+bGripperHealthFault :=
+    (
+        bAutoActive
+        OR
+        (
+            stFault.bActive
+            AND (stFault.eSource = E_MachineFaultSource.DamperGripper)
+        )
+    )
+    AND NOT bDamperGripperHealthOK;
+
+// 当前仍存在的故障条件，用于禁止“带故障复位”。
+bActiveCondition :=
+    bHmiWatchdogTimeout
+    OR bAxisFaultFound
+    OR bGripperHealthFault
+    OR bDamperGripperFault
+    OR bTurntableFault
+    OR bAutoStopFault;
+
+bStopRequestPulse := FALSE;
+
+//==============================================================
+// 2. 人工故障复位
+// 启动错误使用单周期事件锁存，因此不加入bActiveCondition；
+// 轴、通信或设备持续故障必须先在源模块中清除。
+//==============================================================
+IF bReset AND NOT bActiveCondition THEN
+    stFault.bActive := FALSE;
+    stFault.eSource := E_MachineFaultSource.None;
+    stFault.uiAxisIndex := 0;
+    stFault.udiErrorCode := 0;
+END_IF;
+
+//==============================================================
+// 3. 锁存第一故障
+// 同一扫描周期优先级：HMI → 轴 → COM3 → 转台 → 启动 → Stop。
+// 锁存后不被后续连带故障覆盖，便于定位最初原因。
+//==============================================================
+IF NOT stFault.bActive THEN
+    IF bHmiWatchdogTimeout THEN
+        stFault.bActive := TRUE;
+        stFault.eSource := E_MachineFaultSource.HmiWatchdog;
+        stFault.uiAxisIndex := 0;
+        stFault.udiErrorCode := 16#A001;
+        bStopRequestPulse := TRUE;
+
+    ELSIF bAxisFaultFound THEN
+        stFault.bActive := TRUE;
+        stFault.eSource := E_MachineFaultSource.Axis;
+        stFault.uiAxisIndex := uiFaultAxis;
+        IF udiAxisError = 0 THEN
+            stFault.udiErrorCode := 16#A201;
+        ELSE
+            stFault.udiErrorCode := udiAxisError;
+        END_IF;
+        bStopRequestPulse := TRUE;
+
+    ELSIF bDamperGripperFault OR bGripperHealthFault THEN
+        stFault.bActive := TRUE;
+        stFault.eSource := E_MachineFaultSource.DamperGripper;
+        stFault.uiAxisIndex := 0;
+        IF bDamperGripperFault AND (udiDamperGripperError <> 0) THEN
+            stFault.udiErrorCode := udiDamperGripperError;
+        ELSIF bDamperGripperFault THEN
+            stFault.udiErrorCode := 16#A301;
+        ELSE
+            stFault.udiErrorCode := 16#A302;
+        END_IF;
+        bStopRequestPulse := TRUE;
+
+    ELSIF bTurntableFault THEN
+        stFault.bActive := TRUE;
+        stFault.eSource := E_MachineFaultSource.TurntableProcess;
+        stFault.uiAxisIndex := GVL_AxisIndex.Turntable;
+        IF udiTurntableError = 0 THEN
+            stFault.udiErrorCode := 16#A401;
+        ELSE
+            stFault.udiErrorCode := udiTurntableError;
+        END_IF;
+        bStopRequestPulse := TRUE;
+
+    ELSIF bAutoStartErrorPulse THEN
+        stFault.bActive := TRUE;
+        stFault.eSource := E_MachineFaultSource.AutoStart;
+        stFault.uiAxisIndex := uiAutoStartErrorAxis;
+        IF bAutoStartTimeout THEN
+            stFault.udiErrorCode := 16#A107;
+        ELSE
+            stFault.udiErrorCode := UINT_TO_UDINT(uiAutoStartErrorCode);
+        END_IF;
+        bStopRequestPulse := TRUE;
+
+    ELSIF bAutoStopFault THEN
+        // Stop链路已经处于故障安全分支，不再次触发新的Stop上升沿。
+        stFault.bActive := TRUE;
+        stFault.eSource := E_MachineFaultSource.AutoStop;
+        stFault.uiAxisIndex := uiAutoStopErrorAxis;
+        IF udiAutoStopError = 0 THEN
+            IF bAutoStopTimeout THEN
+                stFault.udiErrorCode := 16#A501;
+            ELSE
+                stFault.udiErrorCode := 16#A502;
+            END_IF;
+        ELSE
+            stFault.udiErrorCode := udiAutoStopError;
+        END_IF;
+    END_IF;
+END_IF;
+
+// 作为稳定ADS状态发布，不做成一个扫描周期的脉冲。
+// WPF可据此提示“请先排除源故障，再执行复位”。
+bResetBlocked := stFault.bActive AND bActiveCondition;]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

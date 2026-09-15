@@ -27,6 +27,23 @@ VAR_GLOBAL CONSTANT
     // 螺丝刀机构
     ScrewdriverY   : UINT := 13; // Y轴
     ScrewdriverZ   : UINT := 14; // Z轴
+
+    //==========================================================
+    // 当前五盘自动流程实际使用的NC轴
+    // 启动检查、自动使能和运行故障监控共用这一份清单，
+    // 避免多个功能块分别维护轴号而产生遗漏。
+    //==========================================================
+    AutoProcessAxisCount : UINT := 8;
+    AutoProcessAxes : ARRAY[1..8] OF UINT := [
+        TrayX,
+        TrayZ,
+        DamperX,
+        DamperY,
+        DamperZ,
+        DamperRotation,
+        Turntable,
+        Clamping
+    ];
 END_VAR]]></Declaration>
   </GVL>
 </TcPlcObject>

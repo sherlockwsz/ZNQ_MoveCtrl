@@ -2,13 +2,13 @@
 <TcLicenseInfo xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.beckhoff.com/schemas/2011/11/TcLicenseInfo">
 	<LicenseInfo>
 		<SystemId>{30447388-C9E6-87D3-FB3E-87041D59A37C}</SystemId>
-		<IssueTime>2026-08-28T02:50:00</IssueTime>
-		<ExpireTime>2026-09-05T00:00:00</ExpireTime>
-		<LicenseKey>cad46c9aabce2358818c56c0c80c379c0eb412551355ad89a16df7d05cb1877fdb9cf2bf88f97d327d1099e680c04202dd51bd0657521fcc9cdc2da80e77c0a27834a8c824042b42217da0f50ea452f1b9843294736c9449a07c07bb04a88fe8d03f7604f222c5010c39b5ee3815b2d87bfe457f549ae192bf6ae91c9ff2ba9dfa4983d1007fdef4f424a83099334bb06f7cd89e1b9c6f699589e4c831ff47e6aca8fea6022388b77380fdec0b696d689ea0d96b15eb6bd01e96df9c29f1b193339bed2af1100bbd165830d5296965846008dd9867dd43dbe5de575f0754cdc84075ef4192806bdbf7a3ee58155b269acac28c7fc981e198157beb47c3e30808</LicenseKey>
+		<IssueTime>2026-09-14T09:40:00</IssueTime>
+		<ExpireTime>2026-09-22T00:00:00</ExpireTime>
+		<LicenseKey>794787c6371bd3dceef8d9afa33a68e4efdef27b68e771896b8ef395ffb9ee8eba1557a966f5232daccabe12707a5d1dcd9aecc7581c1c5aa36971c7adf0520144786208dccc20163dd34295a4242206d60e848dd94bbc475f90555e5e00d2e7625cd95ccfaec2af347fbb511f7d035017b4a7e2f0416491ff5f5ffca60b250c3eca8fc8aa903b27719f36e09882efbebdbbe22abc95b5baf14cebd32342341b398a3349cfff6acfe009083e271fde3b4192938f12a4c837949b19be2538b0102f7f41c36eced1d93b42fecac99af32f4924bab1ca3c4e945ff97e325dcea829609a76d9907204b18ac9c72f8b54627e79e15413bc0aebe745388862c1a6607c</LicenseKey>
 		<License>
 			<LicenseId>{A19036CF-A53B-4E3A-99FF-023EF5C4798B}</LicenseId>
 			<Name>TC3 NC PTP Axis</Name>
-			<Instances>10</Instances>
+			<Instances>25</Instances>
 		</License>
 		<License>
 			<LicenseId>{520DE751-9DB6-47CB-8240-BD5C466E7E64}</LicenseId>
@@ -29,6 +29,16 @@
 			<LicenseId>{66689887-CCBD-452C-AC9A-039D997C6E66}</LicenseId>
 			<Name>TC3 PLC</Name>
 			<OrderNo>TC1200</OrderNo>
+		</License>
+		<License>
+			<LicenseId>{BCA6EE0A-9CE1-4D3F-98CA-413ABC0D94FD}</LicenseId>
+			<Name>TC3 Serial-Communication</Name>
+			<OrderNo>TF6340</OrderNo>
+		</License>
+		<License>
+			<LicenseId>{BF78CFC7-2E63-42C3-8C07-BB6C346BFB8B}</LicenseId>
+			<Name>TC3 NC PTP Axes Pack 25</Name>
+			<OrderNo>TF5010</OrderNo>
 		</License>
 	</LicenseInfo>
 </TcLicenseInfo>

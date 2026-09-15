@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_MachineFaultStatus" Id="{63349f76-3efe-4866-a467-502bf4562522}">
+    <Declaration><![CDATA[TYPE ST_MachineFaultStatus :
+STRUCT
+    // 第一故障锁存。仅在复位请求有效且当前故障条件已消失后清除。
+    bActive          : BOOL;
+    eSource          : E_MachineFaultSource;
+    uiAxisIndex      : UINT;  // 仅Axis/AutoStart/AutoStop来源使用，0表示无指定轴
+    udiErrorCode     : UDINT;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <POU Name="FB_MachineModeManager" Id="{7e1df4a3-9510-47bb-a318-b24a2b278219}" SpecialFunc="None">
+    <Declaration><![CDATA[//==============================================================
+// 整机运行模式管理器
+//
+// 只根据整机请求和运行反馈确定唯一模式，不直接写轴命令。
+// 模式优先级：Stopping > Fault > Automatic > AutoStarting
+//              > Homing > Manual > Disabled。
+//==============================================================
+FUNCTION_BLOCK FB_MachineModeManager
+VAR_INPUT
+    bControlAllowed  : BOOL; // HMI通信保护和全部已配置轴允许控制
+    bAutoRequest     : BOOL; // WPF自动运行请求
+    bAutoEnabling    : BOOL; // 自动启动协调器正在使能/等待Ready
+    bAutoRunning     : BOOL; // 自动流程启动许可或流程Busy
+    bHomingRequest   : BOOL; // 回零模式预留请求
+    bHomingBusy      : BOOL; // 回零流程预留状态
+    bStopActive      : BOOL; // Stop请求、Abort锁存或Stop管理器Busy/Error
+    bMachineFault    : BOOL; // 整机第一故障已经锁存
+END_VAR
+VAR_OUTPUT
+    eMode             : E_MachineMode := E_MachineMode.Disabled;
+    ePreviousMode     : E_MachineMode := E_MachineMode.Disabled;
+    bModeChanged      : BOOL; // 模式切换脉冲
+    bManualAllowed    : BOOL;
+    bAutoAllowed      : BOOL;
+    bHomingAllowed    : BOOL;
+    bStopOwnerActive  : BOOL;
+    bRecoveryModeActive : BOOL;
+END_VAR
+VAR
+    eRequestedMode : E_MachineMode;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[//==============================================================
+// 1. 按固定优先级确定本周期唯一整机模式
+//==============================================================
+IF bStopActive THEN
+    eRequestedMode := E_MachineMode.Stopping;
+ELSIF bMachineFault THEN
+    eRequestedMode := E_MachineMode.Fault;
+ELSIF bAutoRunning THEN
+    eRequestedMode := E_MachineMode.Automatic;
+ELSIF bAutoRequest OR bAutoEnabling THEN
+    eRequestedMode := E_MachineMode.AutoStarting;
+ELSIF bHomingRequest OR bHomingBusy THEN
+    eRequestedMode := E_MachineMode.Homing;
+ELSIF bControlAllowed THEN
+    eRequestedMode := E_MachineMode.Manual;
+ELSE
+    eRequestedMode := E_MachineMode.Disabled;
+END_IF;
+
+//==============================================================
+// 2. 发布模式切换状态
+//==============================================================
+bModeChanged := (eRequestedMode <> eMode);
+IF bModeChanged THEN
+    ePreviousMode := eMode;
+    eMode := eRequestedMode;
+END_IF;
+
+//==============================================================
+// 3. 从唯一模式导出权限，禁止多个模式同时有效
+//==============================================================
+bManualAllowed := (eMode = E_MachineMode.Manual);
+bAutoAllowed :=
+    (eMode = E_MachineMode.AutoStarting)
+    OR (eMode = E_MachineMode.Automatic);
+bHomingAllowed := (eMode = E_MachineMode.Homing);
+bStopOwnerActive := (eMode = E_MachineMode.Stopping);
+bRecoveryModeActive := (eMode = E_MachineMode.Fault);]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

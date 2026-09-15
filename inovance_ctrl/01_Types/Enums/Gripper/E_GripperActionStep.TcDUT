@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_GripperActionStep" Id="{09658995-f501-4c9c-a5cc-fbc6da59ada7}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+TYPE E_GripperActionStep :
+(
+    Idle          := 0,  // 等待新动作
+    WaitAccepted  := 10, // 等待底层受理或明确拒绝本次编号
+    WaitCompleted := 20, // 等待本次动作完成及有效反馈
+    Done          := 30, // 完成；保持到bExecute撤销
+    Error         := 90  // 失败；保持到bExecute撤销
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

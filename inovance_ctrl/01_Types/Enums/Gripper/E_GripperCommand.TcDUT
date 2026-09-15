@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_GripperCommand" Id="{dc48c468-1127-4b85-8a8d-bcc98096a591}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+TYPE E_GripperCommand :
+(
+    None       := 0,    // 无新命令
+    Open       := 1,    // 运动至张开绝对位置
+    Close      := 2,    // 运动至夹紧绝对位置
+    Stop       := 3,    // 停止当前运动
+    ResetFault := 4     // 故障复位
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

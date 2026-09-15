@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
   <POU Name="FB_AxisCommandGuard" Id="{7cfd58f3-d9dc-4e70-9f98-d249022d8f85}" SpecialFunc="None">
     <Declaration><![CDATA[//==============================================================
@@ -16,6 +16,7 @@ FUNCTION_BLOCK FB_AxisCommandGuard
 VAR_INPUT
     bProtectionEnabled : BOOL;     // 是否启用HMI通信保护
     bCommunicationOnline : BOOL;   // FB_HmiWatchdog输出的在线状态
+    bHoldEnableForStop : BOOL;      // 停止期间不得由通信保护提前撤使能
 END_VAR
 
 VAR_IN_OUT
@@ -63,7 +64,8 @@ END_IF;
 //==============================================================
 IF NOT bControlAllowed THEN
     M_ClearCommands(
-        ioCmd := ioCmd
+        ioCmd := ioCmd,
+        bHoldEnableForStop := bHoldEnableForStop
     );
 END_IF;]]></ST>
     </Implementation>
@@ -73,34 +75,47 @@ VAR_INPUT
     iCmd : ST_AxisCmd;
 END_VAR]]></Declaration>
       <Implementation>
-        <ST><![CDATA[M_AreCommandsSafe :=
+        <ST><![CDATA[//==============================================================
+// 所有可能导致轴动作的命令都必须已经清零，
+// 才允许HMI通信恢复后重新开放控制。
+//==============================================================
+M_AreCommandsSafe :=
     NOT iCmd.bEnable
     AND NOT iCmd.bReset
     AND NOT iCmd.bStop
     AND NOT iCmd.bMoveAbs
     AND NOT iCmd.bMoveRel
     AND NOT iCmd.bJogPos
-    AND NOT iCmd.bJogNeg;]]></ST>
+    AND NOT iCmd.bJogNeg
+    AND NOT iCmd.bTorqueControl;]]></ST>
       </Implementation>
     </Method>
     <Method Name="M_ClearCommands" Id="{fa777cdb-175b-4e5f-af64-a332007c3aae}">
       <Declaration><![CDATA[METHOD PRIVATE M_ClearCommands
+VAR_INPUT
+    bHoldEnableForStop : BOOL;
+END_VAR
 VAR_IN_OUT
     ioCmd : ST_AxisCmd;
 END_VAR]]></Declaration>
       <Implementation>
-        <ST><![CDATA[// 撤销持续型使能和停止请求。
-ioCmd.bEnable := FALSE;
-ioCmd.bStop := FALSE;
+        <ST><![CDATA[//==============================================================
+// 通信无效时清除所有控制命令并撤销轴使能
+//==============================================================
+// 停止管理器先执行MC_Stop；其确认后统一撤使能。
+IF NOT bHoldEnableForStop THEN
+    ioCmd.bEnable := FALSE;
+END_IF;
 
-// 清除上升沿命令，防止重连后重新触发。
 ioCmd.bReset := FALSE;
 ioCmd.bMoveAbs := FALSE;
 ioCmd.bMoveRel := FALSE;
 
-// 清除保持型点动命令，避免HMI失联后继续点动。
 ioCmd.bJogPos := FALSE;
-ioCmd.bJogNeg := FALSE;]]></ST>
+ioCmd.bJogNeg := FALSE;
+
+// 必须补充，防止夹紧轴在HMI失联后继续保持转矩。
+ioCmd.bTorqueControl := FALSE;]]></ST>
       </Implementation>
     </Method>
   </POU>

@@ -17,6 +17,21 @@ STRUCT
     bDone           : BOOL;// 最近命令完成
     bCommandAborted : BOOL;// 命令被中止
     bCmdRejected    : BOOL;// 命令被拒绝
+	//==============================================================
+	// MC_Stop停止反馈
+	//==============================================================
+	
+	// TRUE：MC_Stop已经确认轴停止。
+	// 该信号专供FB_AutoStopManager判断，不与普通运动bDone混用。
+	bStopDone : BOOL;
+	// Stop.Execute撤销且Busy结束后，轴已解除Stop锁定。
+	bStopReleased : BOOL;
+	
+	// TRUE：MC_Stop执行发生错误。
+	bStopError : BOOL;
+	
+	// MC_Stop错误代码。
+	nStopErrorID : UDINT;	
 	
     eMotionState    : E_AxisMotionState;// 轴当前正在进行的运动	
 	// 当前有效运动的坐标方向。

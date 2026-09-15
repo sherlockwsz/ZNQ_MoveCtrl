@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_AxisControlOwner" Id="{2e1c349c-d789-41b1-a524-af184585db74}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_AxisControlOwner :
+(
+    None        := 0,   // 当前轴不接受任何命令源
+    Manual      := 10,  // WPF手动命令Cmd/Set
+    Auto        := 20,  // 机构自动流程AutoCmd/AutoSet
+    Homing      := 30,  // 回零流程HomingCmd/HomingSet
+    Recovery    := 35,  // 故障停止完成后只允许手动Reset
+    Stop        := 40   // 受控停止StopCmd/StopSet，最高优先级
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

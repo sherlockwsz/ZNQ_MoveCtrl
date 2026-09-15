@@ -1,11 +1,32 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
   <DUT Name="ST_AxisInterface" Id="{bc384f07-bbf3-4f6c-845f-b9ff7ce0549c}">
-    <Declaration><![CDATA[TYPE ST_AxisInterface ://汇总Cmd、Set、Data、State、Alarm
+    <Declaration><![CDATA[TYPE ST_AxisInterface ://汇总多来源命令、唯一执行命令及轴反馈
 STRUCT
-    Cmd       : ST_AxisCmd;//动作命令
-    Set       : ST_AxisSet;//本次运动参数
-	
+    // WPF手动命令源：保留原Cmd/Set ADS路径。
+    Cmd       : ST_AxisCmd;
+    Set       : ST_AxisSet;
+
+    // 机构自动流程命令源。
+    AutoCmd   : ST_AxisCmd;
+    AutoSet   : ST_AxisSet;
+
+    // 回零流程预留命令源。
+    HomingCmd : ST_AxisCmd;
+    HomingSet : ST_AxisSet;
+
+    // 受控停止命令源。
+    StopCmd   : ST_AxisCmd;
+    StopSet   : ST_AxisSet;
+
+    // 唯一执行通道：Arbiter写入，AxisControl读取。
+    ActiveCmd : ST_AxisCmd;
+    ActiveSet : ST_AxisSet;
+    eControlOwner          : E_AxisControlOwner;
+    bOwnerChanged          : BOOL;
+    bManualCommandRejected : BOOL;
+    bAutoCommandRejected   : BOOL;
+
     Data      : ST_AxisData;//实时数据
     State     : ST_AxisState;//运行状态
     Alarm     : ST_AxisAlarm;//报警信息

@@ -1,0 +1,366 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <POU Name="FB_AutoStopManager" Id="{665f07f3-f653-4973-bc04-b82c1c70bf7a}" SpecialFunc="None">
+    <Declaration><![CDATA[//==============================================================
+// 全轴停止协调器
+//
+// 功能：
+// 1. 清除所有已配置轴的运动命令；
+// 2. 停止期间保持已使能轴的使能；
+// 3. 等待全部已使能轴的MC_Stop.Done；
+// 4. 释放Stop并等待Busy结束；
+// 5. 统一撤使能，等待全部MC_Power.Status为FALSE。
+// 任一阶段失败进入锁存故障，不发布正常完成。
+//==============================================================
+
+FUNCTION_BLOCK FB_AutoStopManager
+
+VAR_INPUT
+    // 上升沿触发一次完整停止过程；故障不允许自动重试。
+    bExecute : BOOL;
+
+    // 全轴停止最大等待时间。
+    tStopTimeout : TIME := T#10S;
+END_VAR
+
+VAR_IN_OUT
+    // 统一14轴运行接口。
+    aAxes :
+        ARRAY[1..GVL_Constants.cMaxAxisCount]
+        OF ST_AxisInterface;
+END_VAR
+
+VAR_OUTPUT
+    // 停止过程正在执行。
+    bBusy : BOOL;
+
+    // 仅正常完成；保持到bExecute撤销，错误/超时绝不置位。
+    bDone : BOOL;
+
+    // 停止、Stop释放或掉使能发生错误/超时，锁存直到PLC人工恢复。
+    bError : BOOL;
+
+    // 停止过程发生超时。
+    bTimeout : BOOL;
+
+    // 最近一次发生MC_Stop错误的轴号。
+    uiErrorAxisIndex : UINT;
+
+    // 最近一次MC_Stop错误代码。
+    nErrorID : UDINT;
+END_VAR
+
+VAR
+    trigExecute : R_TRIG;
+    fbStopTimeout : TON;
+    fbReleaseTimeout : TON;
+    fbDisableTimeout : TON;
+
+    uiAxisIndex : UINT;
+    bAllAxesStopped : BOOL;
+    bAllAxesReleased : BOOL;
+    bAllAxesDisabled : BOOL;
+    bStopConfirmed : BOOL;
+    bEnableWithdrawalStarted : BOOL;
+    aWasEnabled : ARRAY[1..GVL_Constants.cMaxAxisCount] OF BOOL;
+
+	eStep : E_AutoStopStep := E_AutoStopStep.Idle;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[//==============================================================
+// 1. 更新停止请求上升沿
+//==============================================================
+trigExecute(CLK := bExecute);
+
+
+//==============================================================
+// 2. 默认清除单周期完成信号
+//==============================================================
+bDone := FALSE;
+
+
+//==============================================================
+// 3. 停止超时计时器
+//==============================================================
+fbStopTimeout(
+    IN := (eStep = E_AutoStopStep.RequestStop),
+    PT := tStopTimeout
+);
+fbReleaseTimeout(IN := (eStep = E_AutoStopStep.ReleaseStop), PT := tStopTimeout);
+fbDisableTimeout(IN := (eStep = E_AutoStopStep.DisableAxes), PT := tStopTimeout);
+
+
+//==============================================================
+// 4. 全轴停止状态机
+//==============================================================
+CASE eStep OF
+
+    //==========================================================
+    // 空闲
+    //==========================================================
+    E_AutoStopStep.Idle:
+        bBusy := FALSE;
+
+        IF trigExecute.Q THEN
+            bBusy := TRUE;
+            bError := FALSE;
+            bTimeout := FALSE;
+            uiErrorAxisIndex := 0;
+            nErrorID := 0;
+            bStopConfirmed := FALSE;
+            bEnableWithdrawalStarted := FALSE;
+
+            // 只要求本次停止开始时实际使能的轴报告Stop完成。
+            FOR uiAxisIndex := 1 TO GVL_Constants.cMaxAxisCount DO
+                aWasEnabled[uiAxisIndex] :=
+                    GVL_AxisConfig.AxisLimits[uiAxisIndex].bConfigured
+                    AND aAxes[uiAxisIndex].State.bPowerStatus;
+            END_FOR;
+			// 接受 Stop 的同一扫描周期就覆盖普通运动命令。
+			FOR uiAxisIndex := 1 TO GVL_Constants.cMaxAxisCount DO
+				IF GVL_AxisConfig.AxisLimits[uiAxisIndex].bConfigured THEN
+					aAxes[uiAxisIndex].StopCmd.bReset := FALSE;
+					aAxes[uiAxisIndex].StopCmd.bMoveAbs := FALSE;
+					aAxes[uiAxisIndex].StopCmd.bMoveRel := FALSE;
+					aAxes[uiAxisIndex].StopCmd.bJogPos := FALSE;
+					aAxes[uiAxisIndex].StopCmd.bJogNeg := FALSE;
+					aAxes[uiAxisIndex].StopCmd.bTorqueControl := FALSE;
+			
+					IF aWasEnabled[uiAxisIndex] THEN
+						// 已使能轴先保持使能并请求受控停止。
+						aAxes[uiAxisIndex].StopCmd.bEnable := TRUE;
+						aAxes[uiAxisIndex].StopCmd.bStop := TRUE;
+					ELSE
+						// 未实际使能的轴不启动新的使能过程。
+						aAxes[uiAxisIndex].StopCmd.bEnable := FALSE;
+						aAxes[uiAxisIndex].StopCmd.bStop := FALSE;
+					END_IF;
+				END_IF;
+			END_FOR;
+            eStep := E_AutoStopStep.RequestStop;
+        END_IF;
+
+
+    //==========================================================
+    // 清除命令并保持MC_Stop请求
+    //==========================================================
+    E_AutoStopStep.RequestStop:
+        bBusy := TRUE;
+        bAllAxesStopped := TRUE;
+
+        FOR uiAxisIndex :=
+            1 TO GVL_Constants.cMaxAxisCount
+        DO
+            IF
+                GVL_AxisConfig.AxisLimits[
+                    uiAxisIndex
+                ].bConfigured
+            THEN
+                // 清除全部自动和手动运动命令。
+                aAxes[uiAxisIndex].StopCmd.bReset := FALSE;
+                aAxes[uiAxisIndex].StopCmd.bMoveAbs := FALSE;
+                aAxes[uiAxisIndex].StopCmd.bMoveRel := FALSE;
+                aAxes[uiAxisIndex].StopCmd.bJogPos := FALSE;
+                aAxes[uiAxisIndex].StopCmd.bJogNeg := FALSE;
+                aAxes[uiAxisIndex].StopCmd.bTorqueControl := FALSE;
+
+                IF aWasEnabled[uiAxisIndex] THEN
+                    // 即使HMI失联，也必须先受控停止，不能提前撤使能。
+                    aAxes[uiAxisIndex].StopCmd.bEnable := TRUE;
+                    aAxes[uiAxisIndex].StopCmd.bStop := TRUE;
+                    IF aAxes[uiAxisIndex].State.bStopError THEN
+                        bError := TRUE;
+                        uiErrorAxisIndex := uiAxisIndex;
+                        nErrorID :=
+                            aAxes[uiAxisIndex].State.nStopErrorID;
+                    ELSIF NOT aAxes[uiAxisIndex].State.bPowerStatus THEN
+                        // 未确认停稳前异常失去使能，不得报告正常停止。
+                        bError := TRUE;
+                        uiErrorAxisIndex := uiAxisIndex;
+                        nErrorID := 16#E501;
+                    END_IF;
+                    IF NOT aAxes[uiAxisIndex].State.bStopDone THEN
+                        bAllAxesStopped := FALSE;
+                    END_IF;
+
+                ELSE
+					// 本次停止开始时未使能的轴始终保持禁止。
+					aAxes[uiAxisIndex].StopCmd.bEnable := FALSE;
+                    // 未使能轴不需要执行MC_Stop。
+                    aAxes[uiAxisIndex].StopCmd.bStop := FALSE;
+                END_IF;
+            END_IF;
+        END_FOR;
+
+
+        IF bError THEN
+            eStep := E_AutoStopStep.Fault;
+        ELSIF bAllAxesStopped THEN
+            bStopConfirmed := TRUE;
+            eStep := E_AutoStopStep.ReleaseStop;
+        ELSIF fbStopTimeout.Q THEN
+            bError := TRUE;
+            bTimeout := TRUE;
+            nErrorID := 16#E502;
+            eStep := E_AutoStopStep.Fault;
+        END_IF;
+
+
+	//==============================================================
+	// 释放MC_Stop；轴可能在Done之后仍处于Busy锁定状态
+	//==============================================================
+	E_AutoStopStep.ReleaseStop:
+		bBusy := TRUE;
+		bAllAxesReleased := TRUE;
+		FOR uiAxisIndex :=
+			1 TO GVL_Constants.cMaxAxisCount
+		DO
+			IF
+				GVL_AxisConfig.AxisLimits[
+					uiAxisIndex
+				].bConfigured
+			THEN
+				// 继续禁止运动，已使能轴暂不撤使能。
+				aAxes[uiAxisIndex].StopCmd.bReset := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bMoveAbs := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bMoveRel := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bJogPos := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bJogNeg := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bTorqueControl := FALSE;
+	
+				aAxes[uiAxisIndex].StopCmd.bStop := FALSE;
+				IF aWasEnabled[uiAxisIndex] THEN
+					aAxes[uiAxisIndex].StopCmd.bEnable := TRUE;
+					IF NOT aAxes[uiAxisIndex].State.bStopReleased THEN
+						bAllAxesReleased := FALSE;
+					END_IF;
+				END_IF;
+			END_IF;
+		END_FOR;
+		IF bAllAxesReleased THEN
+			bEnableWithdrawalStarted := TRUE;
+			eStep := E_AutoStopStep.DisableAxes;
+		ELSIF fbReleaseTimeout.Q THEN
+			bError := TRUE;
+			bTimeout := TRUE;
+			nErrorID := 16#E503;
+			eStep := E_AutoStopStep.Fault;
+		END_IF;
+	
+	
+	//==============================================================
+	// 等待所有已配置轴实际掉使能
+	//==============================================================
+	E_AutoStopStep.DisableAxes:
+		bBusy := TRUE;
+		bAllAxesDisabled := TRUE;
+	
+		FOR uiAxisIndex :=
+			1 TO GVL_Constants.cMaxAxisCount
+		DO
+			IF
+				GVL_AxisConfig.AxisLimits[
+					uiAxisIndex
+				].bConfigured
+			THEN
+				// 停止期间持续清除全部命令。
+				aAxes[uiAxisIndex].StopCmd.bEnable := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bStop := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bReset := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bMoveAbs := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bMoveRel := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bJogPos := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bJogNeg := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bTorqueControl := FALSE;
+	
+				// 任意轴仍处于实际使能状态，就继续等待。
+				IF aAxes[uiAxisIndex].State.bPowerStatus THEN
+					bAllAxesDisabled := FALSE;
+				END_IF;
+			END_IF;
+		END_FOR;
+	
+		IF bAllAxesDisabled THEN
+			eStep := E_AutoStopStep.Completed;
+		ELSIF fbDisableTimeout.Q THEN
+			bError := TRUE;
+			bTimeout := TRUE;
+			nErrorID := 16#E504;
+			eStep := E_AutoStopStep.Fault;
+		END_IF;
+	
+	
+	//==============================================================
+	// 停止过程完成
+	//==============================================================
+	E_AutoStopStep.Completed:
+		bBusy := FALSE;
+		bDone := TRUE;
+
+		// Stop按钮未释放期间持续保持所有已配置轴禁止，
+		// 防止没有新上升沿时手动命令重新写入。
+		FOR uiAxisIndex := 1 TO GVL_Constants.cMaxAxisCount DO
+			IF GVL_AxisConfig.AxisLimits[uiAxisIndex].bConfigured THEN
+				aAxes[uiAxisIndex].StopCmd.bEnable := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bStop := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bReset := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bMoveAbs := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bMoveRel := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bJogPos := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bJogNeg := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bTorqueControl := FALSE;
+			END_IF;
+		END_FOR;
+
+		IF NOT bExecute THEN
+			bDone := FALSE;
+			eStep := E_AutoStopStep.Idle;
+		END_IF;
+
+	// 故障锁存：失败的Stop不得伪装为完成，也不得自动重试。
+	// 若此前尚未确认停稳，则继续保持已使能轴并请求Stop。
+	// 若已进入掉使能阶段，则继续尝试掉使能，但不发布Done。
+	E_AutoStopStep.Fault:
+		bBusy := FALSE;
+		bError := TRUE;
+		FOR uiAxisIndex := 1 TO GVL_Constants.cMaxAxisCount DO
+			IF GVL_AxisConfig.AxisLimits[uiAxisIndex].bConfigured THEN
+				aAxes[uiAxisIndex].StopCmd.bReset := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bMoveAbs := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bMoveRel := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bJogPos := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bJogNeg := FALSE;
+				aAxes[uiAxisIndex].StopCmd.bTorqueControl := FALSE;
+				IF bEnableWithdrawalStarted THEN
+					// 已进入掉使能阶段：持续禁止所有轴重新使能。
+					aAxes[uiAxisIndex].StopCmd.bStop := FALSE;
+					aAxes[uiAxisIndex].StopCmd.bEnable := FALSE;
+				
+				ELSIF aWasEnabled[uiAxisIndex] THEN
+					// 停止开始时已使能的轴：
+					// 未确认停稳前保持使能和Stop请求。
+					aAxes[uiAxisIndex].StopCmd.bEnable :=
+						aAxes[uiAxisIndex].State.bPowerStatus;
+				
+					aAxes[uiAxisIndex].StopCmd.bStop :=
+						NOT bStopConfirmed;
+				
+				ELSE
+					// 停止开始时未使能的轴不得在故障锁存期间重新使能。
+					aAxes[uiAxisIndex].StopCmd.bEnable := FALSE;
+					aAxes[uiAxisIndex].StopCmd.bStop := FALSE;
+				END_IF;
+			END_IF;
+		END_FOR;
+
+
+ELSE
+    bBusy := FALSE;
+    bDone := FALSE;
+    bError := TRUE;
+    eStep := E_AutoStopStep.Idle;
+
+END_CASE;]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

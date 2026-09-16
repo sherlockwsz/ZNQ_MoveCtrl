@@ -63,6 +63,9 @@
     <Compile Include="01_Types\Enums\Gripper\E_GripperCommStep.TcDUT">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="01_Types\Enums\Screwdriver\E_ScrewdriverStep.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="01_Types\Enums\Startup\E_AutoStartStep.TcDUT">
       <SubType>Code</SubType>
     </Compile>
@@ -214,6 +217,9 @@
     <Compile Include="03_AxisControl\GripperProcess\FB_GripperAction.TcPOU">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="03_AxisControl\ScrewdriverProcess\FB_ScrewdriverProcess.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="03_AxisControl\StopControl\FB_AutoStopManager.TcPOU">
       <SubType>Code</SubType>
     </Compile>
@@ -277,6 +283,7 @@
     <Folder Include="01_Types\Enums\Axes\Alarms" />
     <Folder Include="01_Types\Enums\Damper" />
     <Folder Include="01_Types\Enums\Gripper" />
+    <Folder Include="01_Types\Enums\Screwdriver" />
     <Folder Include="01_Types\Enums\Stop" />
     <Folder Include="01_Types\Enums\Startup" />
     <Folder Include="01_Types\Enums\System" />
@@ -315,6 +322,7 @@
     <Folder Include="03_AxisControl\Management" />
     <Folder Include="03_AxisControl\DamperProcess" />
     <Folder Include="03_AxisControl\GripperProcess" />
+    <Folder Include="03_AxisControl\ScrewdriverProcess" />
     <Folder Include="03_AxisControl\StopControl" />
     <Folder Include="03_AxisControl\TurntableProcess" />
     <Folder Include="03_AxisControl\TrayProcess" />

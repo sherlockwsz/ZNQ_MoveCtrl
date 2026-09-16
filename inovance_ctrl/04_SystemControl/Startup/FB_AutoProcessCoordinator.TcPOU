@@ -14,6 +14,8 @@ VAR_INPUT
 
     // 原 MAIN 中保留的在线坐标重初始化请求。
     bReinitializeCoordinates : BOOL;
+	
+	bSkipCom3ForSimulation : BOOL;
 END_VAR
 
 VAR_IN_OUT
@@ -24,7 +26,7 @@ VAR_IN_OUT
     ioGripperAction     : FB_GripperAction;
 
     ioGripper : ST_GripperInterface;
-
+	ioScrewdriverProcess : FB_ScrewdriverProcess;
     // 复用统一轴数组，不在协调器中重新定义轴。
     aAxes : ARRAY[1..GVL_Constants.cMaxAxisCount] OF ST_AxisInterface;
 END_VAR
@@ -37,12 +39,16 @@ VAR_OUTPUT
     bGripperActionFault : BOOL;
 	bTurntableFault : BOOL;
     udGripperActionError : UDINT;
+	bScrewdriverFault : BOOL;
+	uiScrewdriverErrorAxis : UINT;
+	udScrewdriverError : UDINT;
 END_VAR
 
 VAR
     // 本周期供 Damper 流程使用的 Abort。
     // COM3 动作本周期报错时，Damper 可在同周期收到 TRUE。
     bEffectiveAbort : BOOL;
+	stTurntableInputForThisScan : ST_DamperTurntableInput;
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[// ============================================================
@@ -81,7 +87,7 @@ ioTrayProcess(
 // Damper 本周期提出的新请求，将在下一扫描由此处受理。
 // ------------------------------------------------------------
 ioGripperAction(
-    bExecute := ioDamperProcess.bGripperActionExecute,
+    bExecute := ioDamperProcess.bGripperActionExecute AND NOT bSkipCom3ForSimulation,
     eCommand := ioDamperProcess.eGripperActionCommand,
     bCancel := bStopRequest OR bAbort,
     tAcceptTimeout := T#3S,
@@ -93,6 +99,7 @@ ioGripperAction(
 // 将 COM3 动作失败升级为整机流程中止。
 IF ioGripperAction.bError
     AND ioDamperProcess.bBusy
+	AND NOT bSkipCom3ForSimulation
     AND NOT bAbort THEN
 
     bGripperActionFault := TRUE;
@@ -109,9 +116,23 @@ ioDamperProcess(
     bStart := bStart,
     bAbort := bEffectiveAbort,
 
-    bGripperActionDone := ioGripperAction.bDone,
-    bGripperActionError := ioGripperAction.bError,
-
+	// 使用上一扫描保持的请求：第一次提出请求后，下一扫描返回Done。
+	// 不写假的COM3位置、电流或在线反馈。
+	bGripperActionDone :=
+		(
+			bSkipCom3ForSimulation
+			AND ioDamperProcess.bGripperActionExecute
+		)
+		OR
+		(
+			NOT bSkipCom3ForSimulation
+			AND ioGripperAction.bDone
+		),
+	
+	bGripperActionError :=
+		NOT bSkipCom3ForSimulation
+		AND ioGripperAction.bError,
+		
     bReinitializeCoordinates :=
         bReinitializeCoordinates,
 
@@ -139,14 +160,49 @@ ioDamperProcess(
     stAxisRotation :=
         aAxes[GVL_AxisIndex.DamperRotation]
 );
-
 // ------------------------------------------------------------
-// 4. 转台与夹紧轴流程
+// 4.螺丝刀流程
+// 读取转台上一扫描保持的请求/确认。
+// 顺序：Damper → Screwdriver → Turntable；新反馈本扫描送给转台。
+// ------------------------------------------------------------
+
+ioScrewdriverProcess(
+    bEnable := bStart,
+    bAbort := bEffectiveAbort,
+    bRequest :=
+        ioTurntableProcess.stStatus.bAdjustmentRequest,
+    bClampHolding :=
+        ioTurntableProcess.stStatus.bClampHolding,
+    bDoneAck :=
+        ioTurntableProcess.stStatus.bAdjustmentDoneAck,
+    stAxisY := aAxes[GVL_AxisIndex.ScrewdriverY],
+    stAxisZ := aAxes[GVL_AxisIndex.ScrewdriverZ]
+);
+
+stTurntableInputForThisScan := ioDamperProcess.stTurntableInput;
+stTurntableInputForThisScan.bAdjustmentAccepted :=
+    ioScrewdriverProcess.bAccepted;
+stTurntableInputForThisScan.bAdjustmentStarted :=
+    ioScrewdriverProcess.bAdjustmentStarted;
+stTurntableInputForThisScan.bAdjustmentDone :=
+    ioScrewdriverProcess.bPartDone;
+
+// 当前模拟流程按合格反馈；今后可由真实调整结果替换。
+stTurntableInputForThisScan.bAdjustmentQualified := TRUE;
+
+bScrewdriverFault :=
+    bStart AND ioScrewdriverProcess.bError AND NOT bAbort;
+uiScrewdriverErrorAxis :=
+    ioScrewdriverProcess.uiErrorAxis;
+udScrewdriverError :=
+    ioScrewdriverProcess.udErrorCode;
+// ------------------------------------------------------------
+// 5. 转台与夹紧轴流程
 // 保持两个物理位置状态仍存于 MAIN.fbDamperProcess，
 // 避免改变现有 ADS/WPF 读取路径。
 // ------------------------------------------------------------
 ioTurntableProcess(
-    stInput := ioDamperProcess.stTurntableInput,
+    stInput := stTurntableInputForThisScan,
 
     stTurntableAxis :=
         aAxes[GVL_AxisIndex.Turntable],
@@ -173,8 +229,8 @@ bBusy :=
     ioTrayProcess.bBusy
     OR ioDamperProcess.bBusy
     OR ioTurntableProcess.stStatus.bBusy
-    OR ioGripperAction.bBusy;
-
+    OR ioGripperAction.bBusy
+	OR ioScrewdriverProcess.bBusy;
 bDone := ioTrayProcess.bDone;]]></ST>
     </Implementation>
   </POU>

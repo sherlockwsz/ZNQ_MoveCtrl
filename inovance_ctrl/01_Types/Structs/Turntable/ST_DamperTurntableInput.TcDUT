@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
   <DUT Name="ST_DamperTurntableInput" Id="{756521ca-292f-48ef-b69f-a37c1f7de9a4}">
     <Declaration><![CDATA[(*
     转台协调流程输入及保持型握手信号。
@@ -35,6 +35,8 @@ STRUCT
     bAdjustmentCaptureOK : BOOL;
 
     bReset : BOOL; // 流程故障复位，上升沿触发
+	bAdjustmentStarted : BOOL; // 螺丝刀预拧紧后已到(Y0,Z85)，允许将调整位状态变为Adjusting。
+
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

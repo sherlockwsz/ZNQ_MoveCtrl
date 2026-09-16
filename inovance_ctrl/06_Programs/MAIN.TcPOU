@@ -29,6 +29,7 @@ VAR
 	fbDamperProcess : FB_DamperProcess;
 	// 转台与夹紧轴协调流程。
 	fbTurntableProcess : FB_TurntableProcess;
+	fbScrewdriverProcess : FB_ScrewdriverProcess;
 	fbDamperGripperAction : FB_GripperAction; // COM3唯一的自动动作实例
 	fbAutoProcessCoordinator : FB_AutoProcessCoordinator;
 	// 在线调试时置TRUE产生一次上升沿，重新计算全部坐标。
@@ -185,6 +186,9 @@ bDamperGripperAutoReady :=
     AND GVL_DamperGripper.stDamperGripper.Feedback.bFaultCodeValid
     AND NOT GVL_DamperGripper.stDamperGripper.Feedback.bFault;
 	
+	IF GVL_System.bSkipCom3ForSimulation THEN
+		bDamperGripperAutoReady := TRUE;
+	END_IF;
 	// 必须放在 Stop 请求处理、COM3 就绪计算之后，
 	// 且必须放在 Tray/Damper/Turntable 流程调用之前。
 	fbAutoStart(
@@ -197,7 +201,7 @@ bDamperGripperAutoReady :=
 		bHmiOnline := fbHmiWatchdog.bOnline,
 		bControlAllowed := GVL_HMI.Comm.bControlAllowed,
 		bGripperReady := bDamperGripperAutoReady,
-		bGripperActionFault := bDamperGripperActionFault,
+		bGripperActionFault := bDamperGripperActionFault AND NOT GVL_System.bSkipCom3ForSimulation,
 		bProcessDone := bAutoProcessDone,
 		tEnableTimeout := T#15S,
 		aAxes := GVL_AxisRuntime.Axes
@@ -255,7 +259,10 @@ fbAutoProcessCoordinator(
     ioGripperAction := fbDamperGripperAction,
 
     ioGripper := GVL_DamperGripper.stDamperGripper,
-    aAxes := GVL_AxisRuntime.Axes
+	ioScrewdriverProcess := fbScrewdriverProcess,
+    aAxes := GVL_AxisRuntime.Axes,
+	bSkipCom3ForSimulation :=
+		GVL_System.bSkipCom3ForSimulation,
 );
 
 // 启动准备阶段由启动协调器负责；运行阶段由流程协调器负责。
@@ -295,10 +302,13 @@ fbMachineSupervisor(
     uiAutoStartErrorCode := fbAutoStart.uiErrorCode,
 
     bDamperGripperHealthOK :=
-        GVL_DamperGripper.stDamperGripper.Feedback.bOnline
-        AND NOT GVL_DamperGripper.stDamperGripper.Feedback.bCommFault
-        AND NOT GVL_DamperGripper.stDamperGripper.Feedback.bFault,
-
+		GVL_System.bSkipCom3ForSimulation
+		OR
+		(
+			GVL_DamperGripper.stDamperGripper.Feedback.bOnline
+			AND NOT GVL_DamperGripper.stDamperGripper.Feedback.bCommFault
+			AND NOT GVL_DamperGripper.stDamperGripper.Feedback.bFault
+		),
     bDamperGripperFault :=
         fbAutoProcessCoordinator.bGripperActionFault,
     udiDamperGripperError :=
@@ -306,7 +316,12 @@ fbMachineSupervisor(
 
     bTurntableFault := fbAutoProcessCoordinator.bTurntableFault,
     udiTurntableError := fbTurntableProcess.stStatus.nErrorID,
-
+	bScrewdriverFault :=
+    fbAutoProcessCoordinator.bScrewdriverFault,
+	uiScrewdriverErrorAxis :=
+		fbAutoProcessCoordinator.uiScrewdriverErrorAxis,
+	udiScrewdriverError :=
+		fbAutoProcessCoordinator.udScrewdriverError,
     // Stop管理器在本调用之后执行，因此这里读取其上一扫描周期状态。
     bAutoStopFault := fbAutoStopManager.bError,
     bAutoStopTimeout := fbAutoStopManager.bTimeout,
@@ -417,7 +432,7 @@ END_IF;
 //==============================================================
 // 此处bAbortProcesses尚未被清除，本扫描周期不会漏掉停止请求。
 fbDamperGripperManager(
-    bEnableComm    := TRUE,
+    bEnableComm    := NOT GVL_System.bSkipCom3ForSimulation,
     bStopRequested := bStopRequestRaw OR bAbortProcesses,
     ioGripper      := GVL_DamperGripper.stDamperGripper
 );

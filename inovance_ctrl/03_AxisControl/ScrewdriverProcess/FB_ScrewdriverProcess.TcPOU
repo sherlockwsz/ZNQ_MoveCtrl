@@ -1,0 +1,360 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <POU Name="FB_ScrewdriverProcess" Id="{69c8edf6-10e2-4dec-a0f5-1fc8ed61fc43}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_ScrewdriverProcess
+VAR_INPUT
+    bEnable       : BOOL;
+    bAbort        : BOOL;
+    bRequest      : BOOL; // 转台保持型调整请求
+    bClampHolding : BOOL; // 调整位夹紧确认
+    bDoneAck      : BOOL; // 转台已处理本件完成信号
+END_VAR
+
+VAR_IN_OUT
+    stAxisY : ST_AxisInterface;
+    stAxisZ : ST_AxisInterface;
+END_VAR
+
+VAR_OUTPUT
+    bAccepted          : BOOL; // 请求受理；请求撤销后自动撤销
+    bAdjustmentStarted : BOOL; // 预拧紧撤离完成，开始模拟调整
+    bPartDone          : BOOL; // 最终拧紧、Z抬升完成；保持到DoneAck
+    bBusy              : BOOL;
+    bError             : BOOL;
+    uiErrorAxis        : UINT;
+    udErrorCode        : UDINT;
+    eStep              : E_ScrewdriverStep := E_ScrewdriverStep.Idle;
+END_VAR
+
+VAR
+    // 以下位置为本次确认的绝对坐标。
+    fYZero : LREAL := 0.0;
+    fYWork : LREAL := 62.0;
+    fZSafe : LREAL := 85.0;
+    fZWork : LREAL := 44.0;
+
+    fPositionTolerance : LREAL := 0.1;
+
+    // 仿真临时速度；实轴使用前填写已验证的Y/Z运动参数。
+    fYVelocity : LREAL := 10.0;
+    fZVelocity : LREAL := 10.0;
+
+    // 两次拧紧尚未实现：暂以可修改延时代替。
+    tPreTightenSimulation   : TIME := T#2S;
+    tAdjustmentSimulation   : TIME := T#3S;
+    tFinalTightenSimulation : TIME := T#2S;
+    tMoveTimeout            : TIME := T#15S;
+
+    fbPreTighten   : TON;
+    fbAdjustment   : TON;
+    fbFinalTighten : TON;
+    fbMoveTimeout  : TON;
+
+    bInitialized    : BOOL;
+    bCycleAccepted  : BOOL;
+    bMoveIssued     : BOOL; // 所有步骤顺序运动，共用一次命令锁存
+    uiMovingAxis    : UINT;
+	
+	bTimedMovement  : BOOL;
+	bTimerRestart   : BOOL;
+
+	eTimedStep : E_ScrewdriverStep := E_ScrewdriverStep.Idle;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// 定时器每周期调用。调整计时仅在预拧紧后Z85、Y0均到位时开始。
+fbPreTighten(
+    IN := bEnable
+          AND NOT bAbort
+          AND (eStep = E_ScrewdriverStep.WaitPreTighten),
+    PT := tPreTightenSimulation
+);
+
+fbAdjustment(
+    IN := bEnable
+          AND NOT bAbort
+          AND (eStep = E_ScrewdriverStep.WaitAdjustment),
+    PT := tAdjustmentSimulation
+);
+
+fbFinalTighten(
+    IN := bEnable
+          AND NOT bAbort
+          AND (eStep = E_ScrewdriverStep.WaitFinalTighten),
+    PT := tFinalTightenSimulation
+);
+
+// 进入新步骤的首扫描先复位TON，下一扫描开始计时。
+// 即使轴一直未Ready、尚未发出运动命令，也能报超时。
+bTimerRestart := (eStep <> eTimedStep);
+eTimedStep := eStep;
+
+bTimedMovement :=
+    (eStep = E_ScrewdriverStep.InitializeSafeZ)
+    OR (eStep = E_ScrewdriverStep.InitializeYZero)
+    OR (eStep = E_ScrewdriverStep.MoveYForPreTighten)
+    OR (eStep = E_ScrewdriverStep.LowerForPreTighten)
+    OR (eStep = E_ScrewdriverStep.LiftAfterPreTighten)
+    OR (eStep = E_ScrewdriverStep.RetreatYForAdjustment)
+    OR (eStep = E_ScrewdriverStep.MoveYForFinalTighten)
+    OR (eStep = E_ScrewdriverStep.LowerForFinalTighten)
+    OR (eStep = E_ScrewdriverStep.FinalLiftZ);
+
+// 在未发命令时也记录当前等待的是哪根轴，供超时诊断。
+IF bTimedMovement THEN
+    CASE eStep OF
+        E_ScrewdriverStep.InitializeSafeZ,
+        E_ScrewdriverStep.LowerForPreTighten,
+        E_ScrewdriverStep.LiftAfterPreTighten,
+        E_ScrewdriverStep.LowerForFinalTighten,
+        E_ScrewdriverStep.FinalLiftZ:
+            uiMovingAxis := GVL_AxisIndex.ScrewdriverZ;
+    ELSE
+        uiMovingAxis := GVL_AxisIndex.ScrewdriverY;
+    END_CASE;
+END_IF;
+
+fbMoveTimeout(
+    IN := bEnable
+          AND NOT bAbort
+          AND bTimedMovement
+          AND NOT bTimerRestart,
+    PT := tMoveTimeout
+);
+// 本FB只写Auto命令源；不覆盖WPF原有的手动Cmd/Set。
+stAxisY.AutoCmd.bMoveAbs := FALSE;
+stAxisZ.AutoCmd.bMoveAbs := FALSE;
+
+IF NOT bEnable OR bAbort THEN
+    bAccepted := FALSE;
+    bAdjustmentStarted := FALSE;
+    bPartDone := FALSE;
+    bBusy := FALSE;
+    bError := FALSE;
+    bInitialized := FALSE;
+    bCycleAccepted := FALSE;
+    bMoveIssued := FALSE;
+    uiErrorAxis := 0;
+    udErrorCode := 0;
+    eStep := E_ScrewdriverStep.Idle;
+    RETURN;
+END_IF;
+
+IF stAxisY.Alarm.bError OR stAxisZ.Alarm.bError THEN
+    bError := TRUE;
+    eStep := E_ScrewdriverStep.Error;
+
+    IF stAxisY.Alarm.bError THEN
+        uiErrorAxis := GVL_AxisIndex.ScrewdriverY;
+        udErrorCode := stAxisY.Alarm.nErrorID;
+    ELSE
+        uiErrorAxis := GVL_AxisIndex.ScrewdriverZ;
+        udErrorCode := stAxisZ.Alarm.nErrorID;
+    END_IF;
+END_IF;
+
+IF fbMoveTimeout.Q AND NOT bError THEN
+    bError := TRUE;
+    uiErrorAxis := uiMovingAxis;
+    udErrorCode := 16#B601; // 螺丝刀单步定位超时
+    bMoveIssued := FALSE;
+    eStep := E_ScrewdriverStep.Error;
+END_IF;
+
+CASE eStep OF
+    E_ScrewdriverStep.Idle:
+        bPartDone := FALSE;
+        bCycleAccepted := FALSE;
+
+        IF NOT bInitialized THEN
+            eStep := E_ScrewdriverStep.InitializeSafeZ;
+        ELSIF bRequest AND bClampHolding THEN
+            // 一个保持型请求只受理一次。
+            bCycleAccepted := TRUE;
+            eStep := E_ScrewdriverStep.MoveYForPreTighten;
+        END_IF;
+
+    E_ScrewdriverStep.InitializeSafeZ:
+        IF M_MoveAxisAbsolute(
+            fTarget := fZSafe,
+            fVelocity := fZVelocity,
+            uiAxis := GVL_AxisIndex.ScrewdriverZ,
+            ioAxis := stAxisZ
+        ) THEN
+            eStep := E_ScrewdriverStep.InitializeYZero;
+        END_IF;
+
+    E_ScrewdriverStep.InitializeYZero:
+        IF M_MoveAxisAbsolute(
+            fTarget := fYZero,
+            fVelocity := fYVelocity,
+            uiAxis := GVL_AxisIndex.ScrewdriverY,
+            ioAxis := stAxisY
+        ) THEN
+            bInitialized := TRUE;
+            eStep := E_ScrewdriverStep.Idle;
+        END_IF;
+
+    E_ScrewdriverStep.MoveYForPreTighten:
+        // 后续件Y已经保持在62；到位判断会直接完成，不再往返零位。
+        IF M_MoveAxisAbsolute(
+            fTarget := fYWork,
+            fVelocity := fYVelocity,
+            uiAxis := GVL_AxisIndex.ScrewdriverY,
+            ioAxis := stAxisY
+        ) THEN
+            eStep := E_ScrewdriverStep.LowerForPreTighten;
+        END_IF;
+
+    E_ScrewdriverStep.LowerForPreTighten:
+        IF M_MoveAxisAbsolute(
+            fTarget := fZWork,
+            fVelocity := fZVelocity,
+            uiAxis := GVL_AxisIndex.ScrewdriverZ,
+            ioAxis := stAxisZ
+        ) THEN
+            eStep := E_ScrewdriverStep.WaitPreTighten;
+        END_IF;
+
+    E_ScrewdriverStep.WaitPreTighten:
+        IF fbPreTighten.Q THEN
+            eStep := E_ScrewdriverStep.LiftAfterPreTighten;
+        END_IF;
+
+    E_ScrewdriverStep.LiftAfterPreTighten:
+        IF M_MoveAxisAbsolute(
+            fTarget := fZSafe,
+            fVelocity := fZVelocity,
+            uiAxis := GVL_AxisIndex.ScrewdriverZ,
+            ioAxis := stAxisZ
+        ) THEN
+            eStep := E_ScrewdriverStep.RetreatYForAdjustment;
+        END_IF;
+
+    E_ScrewdriverStep.RetreatYForAdjustment:
+        IF M_MoveAxisAbsolute(
+            fTarget := fYZero,
+            fVelocity := fYVelocity,
+            uiAxis := GVL_AxisIndex.ScrewdriverY,
+            ioAxis := stAxisY
+        ) THEN
+            // 当前机械结构与调整机构干涉，必须确认完整撤离。
+            eStep := E_ScrewdriverStep.WaitAdjustment;
+        END_IF;
+
+    E_ScrewdriverStep.WaitAdjustment:
+        IF fbAdjustment.Q THEN
+            eStep := E_ScrewdriverStep.MoveYForFinalTighten;
+        END_IF;
+
+    E_ScrewdriverStep.MoveYForFinalTighten:
+        IF M_MoveAxisAbsolute(
+            fTarget := fYWork,
+            fVelocity := fYVelocity,
+            uiAxis := GVL_AxisIndex.ScrewdriverY,
+            ioAxis := stAxisY
+        ) THEN
+            eStep := E_ScrewdriverStep.LowerForFinalTighten;
+        END_IF;
+
+    E_ScrewdriverStep.LowerForFinalTighten:
+        IF M_MoveAxisAbsolute(
+            fTarget := fZWork,
+            fVelocity := fZVelocity,
+            uiAxis := GVL_AxisIndex.ScrewdriverZ,
+            ioAxis := stAxisZ
+        ) THEN
+            eStep := E_ScrewdriverStep.WaitFinalTighten;
+        END_IF;
+
+    E_ScrewdriverStep.WaitFinalTighten:
+        IF fbFinalTighten.Q THEN
+            eStep := E_ScrewdriverStep.FinalLiftZ;
+        END_IF;
+
+    E_ScrewdriverStep.FinalLiftZ:
+        IF M_MoveAxisAbsolute(
+            fTarget := fZSafe,
+            fVelocity := fZVelocity,
+            uiAxis := GVL_AxisIndex.ScrewdriverZ,
+            ioAxis := stAxisZ
+        ) THEN
+            // 此时Y仍在62；你已确认不妨碍转台旋转。
+            bPartDone := TRUE;
+            eStep := E_ScrewdriverStep.WaitDoneAck;
+        END_IF;
+
+    E_ScrewdriverStep.WaitDoneAck:
+        // 完成保持到转台确实收到并确认。
+        bPartDone := TRUE;
+
+        IF bDoneAck THEN
+            bPartDone := FALSE;
+            eStep := E_ScrewdriverStep.Idle;
+        END_IF;
+
+    E_ScrewdriverStep.Error:
+        bPartDone := FALSE;
+        bError := TRUE;
+END_CASE;
+
+bAccepted := bRequest AND bCycleAccepted;
+bAdjustmentStarted := (eStep = E_ScrewdriverStep.WaitAdjustment);
+bBusy :=
+    (eStep <> E_ScrewdriverStep.Idle)
+    AND (eStep <> E_ScrewdriverStep.Error);]]></ST>
+    </Implementation>
+    <Method Name="M_MoveAxisAbsolute" Id="{bfc0332f-7a5f-4d81-9b60-94a3464198df}">
+      <Declaration><![CDATA[METHOD PRIVATE M_MoveAxisAbsolute : BOOL
+VAR_INPUT
+    fTarget   : LREAL;
+    fVelocity : LREAL;
+    uiAxis    : UINT;
+END_VAR
+VAR_IN_OUT
+    ioAxis : ST_AxisInterface;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_MoveAxisAbsolute := FALSE;
+
+IF NOT bMoveIssued THEN
+    IF NOT ioAxis.State.bReady THEN
+        RETURN;
+    END_IF;
+
+    IF ABS(ioAxis.Data.fActPosition - fTarget)
+       <= fPositionTolerance THEN
+        M_MoveAxisAbsolute := TRUE;
+        RETURN;
+    END_IF;
+
+    ioAxis.AutoSet.Position.fAbsolutePosition := fTarget;
+    ioAxis.AutoSet.Position.fVelocity := fVelocity;
+    ioAxis.AutoCmd.bMoveAbs := TRUE; // 一个扫描周期的启动命令
+
+    bMoveIssued := TRUE;
+    uiMovingAxis := uiAxis;
+    RETURN;
+END_IF;
+
+IF ioAxis.State.bCmdRejected
+   OR ioAxis.State.bCommandAborted THEN
+    bError := TRUE;
+    uiErrorAxis := uiAxis;
+    udErrorCode := 16#B602; // 定位命令拒绝或中止
+    bMoveIssued := FALSE;
+    eStep := E_ScrewdriverStep.Error;
+    RETURN;
+END_IF;
+
+// 不单独相信旧的bDone：还要核对本步目标与轴已不再忙。
+IF ioAxis.State.bReady
+   AND
+   (ABS(ioAxis.Data.fActPosition - fTarget)
+    <= fPositionTolerance) THEN
+    bMoveIssued := FALSE;
+    M_MoveAxisAbsolute := TRUE;
+END_IF;]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

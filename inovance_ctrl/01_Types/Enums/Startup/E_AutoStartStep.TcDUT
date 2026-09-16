@@ -5,9 +5,10 @@
 {attribute 'strict'}
 TYPE E_AutoStartStep :
 (
-    Idle             := 0,   // 等待新的自动启动上升沿
-    WaitAxesReady    := 10,  // 请求八轴使能，等待全部轴就绪
-    Running          := 20   // 允许现有五盘流程运行
+    Idle             		 := 0,   // 等待新的自动启动上升沿
+    WaitAxesReady    		 := 10,  // 请求八轴使能，等待全部轴就绪
+    WaitMachinePreparation   := 20,  // 允许现有五盘流程运行
+	Running          		 := 30
 );
 END_TYPE]]></Declaration>
   </DUT>

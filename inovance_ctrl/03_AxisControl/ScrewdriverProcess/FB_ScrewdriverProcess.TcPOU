@@ -8,6 +8,7 @@ VAR_INPUT
     bRequest      : BOOL; // 转台保持型调整请求
     bClampHolding : BOOL; // 调整位夹紧确认
     bDoneAck      : BOOL; // 转台已处理本件完成信号
+	bMachinePrepared : BOOL;
 END_VAR
 
 VAR_IN_OUT
@@ -137,6 +138,16 @@ IF NOT bEnable OR bAbort THEN
     udErrorCode := 0;
     eStep := E_ScrewdriverStep.Idle;
     RETURN;
+END_IF;
+
+// 整机准备已经完成ScrewdriverZ=85、ScrewdriverY=0，
+// 不再重复执行螺丝刀内部初始化。
+IF bEnable
+    AND bMachinePrepared
+    AND NOT bInitialized
+    AND (eStep = E_ScrewdriverStep.Idle)
+THEN
+    bInitialized := TRUE;
 END_IF;
 
 IF stAxisY.Alarm.bError OR stAxisZ.Alarm.bError THEN

@@ -16,6 +16,8 @@ VAR_INPUT
     bReinitializeCoordinates : BOOL;
 	
 	bSkipCom3ForSimulation : BOOL;
+	
+	bMachinePrepared : BOOL;
 END_VAR
 
 VAR_IN_OUT
@@ -115,7 +117,7 @@ END_IF;
 ioDamperProcess(
     bStart := bStart,
     bAbort := bEffectiveAbort,
-
+	bMachinePrepared := bMachinePrepared,
 	// 使用上一扫描保持的请求：第一次提出请求后，下一扫描返回Done。
 	// 不写假的COM3位置、电流或在线反馈。
 	bGripperActionDone :=
@@ -169,6 +171,7 @@ ioDamperProcess(
 ioScrewdriverProcess(
     bEnable := bStart,
     bAbort := bEffectiveAbort,
+	bMachinePrepared := bMachinePrepared,
     bRequest :=
         ioTurntableProcess.stStatus.bAdjustmentRequest,
     bClampHolding :=
@@ -202,6 +205,7 @@ udScrewdriverError :=
 // 避免改变现有 ADS/WPF 读取路径。
 // ------------------------------------------------------------
 ioTurntableProcess(
+	bMachinePrepared := bMachinePrepared,
     stInput := stTurntableInputForThisScan,
 
     stTurntableAxis :=

@@ -50,6 +50,10 @@ VAR
 	// WPF停止按钮写TRUE。
 	// PLC接受后WPF可以恢复FALSE。
 	bControlStop : BOOL;
+	// WPF一键整机准备命令。
+	// 建议WPF只写TRUE，完成或失败后PLC自动清FALSE。
+	bControlPrepare : BOOL;
+
 	// 回零模式入口预留；回零状态机接入前保持FALSE。
 	bControlHoming : BOOL;
 	bHomingBusy : BOOL;
@@ -106,6 +110,19 @@ VAR
 	udDamperGripperActionError : UDINT;	
 	bDamperGripperAutoReady     : BOOL;
 	bDamperGripperStartRejected : BOOL; // 供在线诊断；人工确认后清除
+	
+	fbMachinePreparation : FB_MachinePreparation;
+
+	
+	bPreparationStartRequest : BOOL;
+	bMachinePreparationBusy  : BOOL;
+	bMachinePreparationDone  : BOOL;
+	bMachinePreparationError : BOOL;
+	bMachinePreparationTimeout : BOOL;
+	uiMachinePreparationErrorAxis : UINT;
+	udiMachinePreparationError : UDINT;
+	
+	bPreparationModeActive : BOOL;
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[// =============================================================
@@ -144,6 +161,9 @@ bStopRequestRaw :=
 trigStopRequest(
     CLK := bStopRequestRaw
 );
+// 防止WPF或在线调试长时间保持复位位：
+// 只有FALSE->TRUE的边沿才允许执行一次故障复位。
+trigResetMachineFault(CLK := bResetMachineFault);
 
 IF trigStopRequest.Q THEN
     // 清除上一次停止完成反馈。
@@ -151,6 +171,7 @@ IF trigStopRequest.Q THEN
 
     // 清除自动运行请求。
     bControlAuto := FALSE;
+	bControlPrepare := FALSE;
     bControlHoming := FALSE;
 
     // 锁存流程中止和全轴停止。
@@ -170,6 +191,7 @@ IF
     OR (fbMachineModeManager.eMode = E_MachineMode.Homing)
 THEN
     bControlAuto := FALSE;
+	bControlPrepare := FALSE;
 END_IF;
 
 // 只检查新一轮自动启动，不在运动中持续用三项Valid作启动检查：
@@ -192,6 +214,11 @@ bDamperGripperAutoReady :=
 	// 必须放在 Stop 请求处理、COM3 就绪计算之后，
 	// 且必须放在 Tray/Damper/Turntable 流程调用之前。
 	fbAutoStart(
+		bMachinePreparationDone :=
+			fbMachinePreparation.bDone,
+		
+		bMachinePreparationError :=
+			fbMachinePreparation.bError,
 		bRequest := bControlAuto,
 		bCancel := bStopRequestRaw
 				   OR bAbortProcesses
@@ -216,6 +243,109 @@ bDamperGripperAutoReady :=
 		END_IF;
 	END_IF;
 	
+	
+//==============================================================
+// 操作员一键准备准入
+//
+// 只允许在Manual模式并且自动流程未运行时受理。
+// 已经进入准备流程后，允许请求保持到Done/Error。
+//==============================================================
+IF bControlPrepare
+    AND NOT fbMachinePreparation.bBusy
+    AND
+    (
+        (fbMachineModeManager.eMode <> E_MachineMode.Manual)
+        OR bControlAuto
+        OR fbAutoStart.bEnabling
+        OR fbAutoStart.bProcessStart
+        OR fbAutoProcessCoordinator.bBusy
+        OR bControlHoming
+    )
+THEN
+    // 当前模式不允许一键准备，拒绝本次请求。
+    bControlPrepare := FALSE;
+END_IF;
+// 自动启动和操作员一键准备共用同一个FB实例。
+// 禁止分别建立两个FB_MachinePreparation实例。
+bPreparationStartRequest :=
+    (
+        // 自动启动协调器发出的内部准备请求。
+        fbAutoStart.bMachinePreparationRequest
+
+        OR
+
+        // 操作员请求只允许从Manual模式进入。
+        (
+            bControlPrepare
+            AND
+            (
+                (fbMachineModeManager.eMode = E_MachineMode.Manual)
+                OR fbMachinePreparation.bBusy
+            )
+        )
+    )
+    AND NOT bStopRequestRaw
+    AND NOT bAbortProcesses
+    AND NOT bMachineFault
+    AND NOT bControlHoming
+    AND fbHmiWatchdog.bOnline
+    AND GVL_HMI.Comm.bControlAllowed;
+
+fbMachinePreparation(
+    bStart := bPreparationStartRequest,
+    bAbort :=
+        bStopRequestRaw
+        OR bAbortProcesses
+        OR bMachineFault,
+    bReset := trigResetMachineFault.Q,
+    stConfig := GVL_MachinePreparation.stConfig,
+    aAxes := GVL_AxisRuntime.Axes
+);
+
+bMachinePreparationBusy :=
+    fbMachinePreparation.bBusy;
+
+bMachinePreparationDone :=
+    fbMachinePreparation.bDone;
+
+bMachinePreparationError :=
+    fbMachinePreparation.bError;
+
+bMachinePreparationTimeout :=
+    fbMachinePreparation.bTimeout;
+
+uiMachinePreparationErrorAxis :=
+    fbMachinePreparation.uiErrorAxis;
+
+udiMachinePreparationError :=
+    fbMachinePreparation.udiErrorCode;
+
+
+// 操作员一键准备完成后返回手动模式。
+// 将十根轴的手动使能保持为TRUE，避免模式切换时立即掉使能。
+IF bControlPrepare
+    AND fbMachinePreparation.bDone
+THEN
+    FOR uiAutoAxisItem := 1 TO
+        GVL_AxisIndex.AutoProcessAxisCount
+    DO
+        uiAxisIndex :=
+            GVL_AxisIndex.AutoProcessAxes[uiAutoAxisItem];
+
+        GVL_AxisRuntime.Axes[
+            uiAxisIndex
+        ].Cmd.bEnable := TRUE;
+    END_FOR;
+
+    bControlPrepare := FALSE;
+END_IF;
+
+IF bControlPrepare
+    AND fbMachinePreparation.bError
+THEN
+    bControlPrepare := FALSE;
+END_IF;	
+
 //==============================================================
 // 自动流程使用轴的自动使能
 //
@@ -251,6 +381,8 @@ fbAutoProcessCoordinator(
     bStart := fbAutoStart.bProcessStart,
     bAbort := bAbortProcesses OR bStopRequestRaw,
     bStopRequest := bStopRequestRaw,
+	bMachinePrepared := fbMachinePreparation.bDone,
+	
     bReinitializeCoordinates := bReinitializeDamperCoordinates,
 
     ioTrayProcess := fbTrayProcess,
@@ -262,7 +394,7 @@ fbAutoProcessCoordinator(
 	ioScrewdriverProcess := fbScrewdriverProcess,
     aAxes := GVL_AxisRuntime.Axes,
 	bSkipCom3ForSimulation :=
-		GVL_System.bSkipCom3ForSimulation,
+		GVL_System.bSkipCom3ForSimulation
 );
 
 // 启动准备阶段由启动协调器负责；运行阶段由流程协调器负责。
@@ -279,23 +411,31 @@ bAutoProcessDone :=
 // 必须位于流程协调器之后、Stop管理器之前：
 // 本周期产生的COM3/转台故障可在本周期进入Stop首扫覆盖。
 // ============================================================
-// 防止WPF或在线调试长时间保持复位位：
-// 只有FALSE->TRUE的边沿才允许执行一次故障复位。
-trigResetMachineFault(CLK := bResetMachineFault);
 
 fbMachineSupervisor(
     bReset := trigResetMachineFault.Q
               AND NOT bAbortProcesses
               AND NOT fbAutoStopManager.bBusy,
 
+			  
     bAutoActive := bControlAuto
                    OR fbAutoStart.bEnabling
                    OR fbAutoStart.bProcessStart
-                   OR fbAutoProcessCoordinator.bBusy,
-
+                   OR fbAutoProcessCoordinator.bBusy
+				   OR fbMachinePreparation.bBusy
+				   OR bControlPrepare,
     bHmiWatchdogTimeout :=
         GVL_System.bUseHmiWatchdog AND fbHmiWatchdog.bTimeout,
 
+
+	bMachinePreparationFault :=
+    fbMachinePreparation.bError,
+
+	uiMachinePreparationErrorAxis :=
+		fbMachinePreparation.uiErrorAxis,
+	
+	udiMachinePreparationError :=
+		fbMachinePreparation.udiErrorCode,
     bAutoStartErrorPulse := fbAutoStart.bErrorPulse,
     bAutoStartTimeout := fbAutoStart.bTimeout,
     uiAutoStartErrorAxis := fbAutoStart.uiErrorAxisIndex,
@@ -364,9 +504,9 @@ END_IF;
 // 锁存故障期间禁止WPF重新拉起自动流程。
 IF bMachineFault THEN
     bControlAuto := FALSE;
+    bControlPrepare := FALSE;
     bControlHoming := FALSE;
 END_IF;
-
 // ============================================================
 // 自动流程正常完成
 // 只有不存在任何流程故障时才允许发布正常完成。
@@ -451,6 +591,14 @@ fbAdjustGripperManager(
 //==============================================================
 fbMachineModeManager(
     bControlAllowed := GVL_HMI.Comm.bControlAllowed,
+	bPreparationRequest :=
+		bPreparationStartRequest
+		AND
+		(
+			NOT fbMachinePreparation.bDone
+			OR fbAutoStart.bMachinePreparationRequest
+		),
+	bPreparationBusy := fbMachinePreparation.bBusy,
     bAutoRequest := bControlAuto,
     bAutoEnabling := fbAutoStart.bEnabling,
     bAutoRunning :=
@@ -473,7 +621,7 @@ bAutoModeActive := fbMachineModeManager.bAutoAllowed;
 bHomingModeActive := fbMachineModeManager.bHomingAllowed;
 bStopOwnerActive := fbMachineModeManager.bStopOwnerActive;
 bRecoveryModeActive := fbMachineModeManager.bRecoveryModeActive;
-
+bPreparationModeActive := fbMachineModeManager.bPreparationAllowed;
 //==============================================================
 // 停止管理器完成后解除流程Abort
 //

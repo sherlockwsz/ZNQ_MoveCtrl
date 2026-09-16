@@ -15,6 +15,7 @@ END_VAR
 
 VAR_INPUT
     stInput : ST_DamperTurntableInput;
+	bMachinePrepared : BOOL;
 END_VAR
 
 VAR_OUTPUT
@@ -230,6 +231,24 @@ IF (NOT stInput.bEnable) OR trigReset.Q THEN
     stStatus.eClampStep := E_DamperClampStep.Idle;
     stStatus.eStep := E_DamperTurntableStep.Idle;
 ELSE
+	// 整机准备已经完成夹紧轴松开和转台0°定位。
+	// 初始化状态直接同步，不重复运动。
+	IF bMachinePrepared
+		AND NOT bInitialized
+		AND (stStatus.eStep = E_DamperTurntableStep.Idle)
+	THEN
+		bInitialized := TRUE;
+	
+		stStatus.bClampOpen := TRUE;
+		stStatus.bClampHolding := FALSE;
+		stStatus.bTurntableInPosition := TRUE;
+	
+		stStatus.eClampStep :=
+			E_DamperClampStep.Complete;
+	
+		stStatus.eTurntablePosition :=
+			E_DamperTurntablePosition.Position0;
+	END_IF;
     //==========================================================
     // 5. 转台、夹紧与调整协调状态机
     //==========================================================

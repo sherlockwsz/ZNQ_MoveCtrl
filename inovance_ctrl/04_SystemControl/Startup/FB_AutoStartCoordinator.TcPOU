@@ -11,6 +11,8 @@ VAR_INPUT
     bGripperActionFault  : BOOL;
     bProcessDone         : BOOL;  // 整套五盘流程已完成
     tEnableTimeout       : TIME := T#15S;
+	bMachinePreparationDone  : BOOL;
+	bMachinePreparationError : BOOL;
 END_VAR
 
 VAR_IN_OUT
@@ -28,6 +30,7 @@ VAR_OUTPUT
     bTimeout         : BOOL;
     uiErrorAxisIndex : UINT;  // 轴故障／超时对应的业务轴下标
     uiErrorCode      : UINT;  // 见实现区末尾的代码说明
+	bMachinePreparationRequest : BOOL;// 保持型请求，直到整机准备完成。
 END_VAR
 
 VAR
@@ -138,10 +141,9 @@ ELSE
                 END_FOR;
 
                 IF NOT bErrorPulse THEN
-                    IF bAllAxesReady THEN
-                        uiErrorAxisIndex := 0;
-                        eStep := E_AutoStartStep.Running;
-
+					IF bAllAxesReady THEN
+						uiErrorAxisIndex := 0;
+						eStep := E_AutoStartStep.WaitMachinePreparation;
                     ELSIF fbEnableTimeout.Q THEN
                         bError := TRUE;
                         bTimeout := TRUE;
@@ -151,6 +153,15 @@ ELSE
                     END_IF;
                 END_IF;
             END_IF;
+
+		E_AutoStartStep.WaitMachinePreparation:
+			IF bMachinePreparationError THEN
+				// 整机准备故障由MachineSupervisor统一锁存。
+				eStep := E_AutoStartStep.Idle;
+		
+			ELSIF bMachinePreparationDone THEN
+				eStep := E_AutoStartStep.Running;
+			END_IF;
 
         E_AutoStartStep.Running: // 保持启动许可；现有流程 FB 自己锁存 bStart 上升沿
             IF bProcessDone THEN
@@ -168,11 +179,19 @@ END_IF;
 // 统一从状态机导出输出，避免 Stop 同一扫描仍下发启动。
 // 根据本周期最终状态发布输出；Stop 时三个输出立即撤销。
 bEnabling :=
-    (eStep = E_AutoStartStep.WaitAxesReady);
+    (eStep = E_AutoStartStep.WaitAxesReady)
+    OR
+    (eStep = E_AutoStartStep.WaitMachinePreparation);
 
+// WaitMachinePreparation期间使能权属于PreparationCmd，
+// 不再继续写入无权的AutoCmd。
 bEnableAxes :=
     (eStep = E_AutoStartStep.WaitAxesReady)
-    OR (eStep = E_AutoStartStep.Running);
+    OR
+    (eStep = E_AutoStartStep.Running);
+	
+bMachinePreparationRequest :=
+    (eStep = E_AutoStartStep.WaitMachinePreparation);
 
 bProcessStart :=
     (eStep = E_AutoStartStep.Running);]]></ST>

@@ -39,7 +39,10 @@ VAR_INPUT
     bAutoStopTimeout         : BOOL;
     uiAutoStopErrorAxis      : UINT;
     udiAutoStopError         : UDINT;
-	
+
+	bMachinePreparationFault : BOOL;
+	uiMachinePreparationErrorAxis : UINT;
+	udiMachinePreparationError : UDINT;	
 END_VAR
 
 VAR_IN_OUT
@@ -106,6 +109,7 @@ bGripperHealthFault :=
 bActiveCondition :=
     bHmiWatchdogTimeout
     OR bAxisFaultFound
+	OR bMachinePreparationFault
     OR bGripperHealthFault
     OR bDamperGripperFault
     OR bTurntableFault
@@ -138,7 +142,15 @@ IF NOT stFault.bActive THEN
         stFault.uiAxisIndex := 0;
         stFault.udiErrorCode := 16#A001;
         bStopRequestPulse := TRUE;
-
+	ELSIF bMachinePreparationFault THEN
+		stFault.bActive := TRUE;
+		stFault.eSource :=
+			E_MachineFaultSource.MachinePreparation;
+		stFault.uiAxisIndex :=
+			uiMachinePreparationErrorAxis;
+		stFault.udiErrorCode :=
+			udiMachinePreparationError;
+		bStopRequestPulse := TRUE;
     ELSIF bAxisFaultFound THEN
         stFault.bActive := TRUE;
         stFault.eSource := E_MachineFaultSource.Axis;

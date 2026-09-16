@@ -44,6 +44,8 @@ VAR_INPUT
 	// TRUE：立即中止本轮阻尼器自动流程。
 	// 不清空料位、备料位、调整位和缓冲位物料状态。
 	bAbort : BOOL;
+	// TRUE表示整机准备FB已经完成Z=110、XY=(1,1)、Rotation=0。
+	bMachinePrepared : BOOL;
 END_VAR
 
 VAR_IN_OUT
@@ -534,8 +536,14 @@ CASE eCurrentStep OF
 			bBusy := TRUE;
 	
 			// 第一步必须先让DamperZ运动到110mm安全高度。
-			eCurrentStep :=
-				E_DamperProcessStep.InitializeSafeZ;
+			IF bMachinePrepared THEN
+				// 整机准备FB已经完成预定位，直接等待第一盘。
+				bPrePositionDone := TRUE;
+				eCurrentStep := E_DamperProcessStep.WaitFirstTray;
+			ELSE
+				// 保留独立调试时的兼容入口。
+				eCurrentStep := E_DamperProcessStep.InitializeSafeZ;
+			END_IF;
 		END_IF;
 
 	//==========================================================

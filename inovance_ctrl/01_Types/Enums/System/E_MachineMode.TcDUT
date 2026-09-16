@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
   <DUT Name="E_MachineMode" Id="{6b6dc0c8-9717-4dc0-94de-73588146c4f1}">
     <Declaration><![CDATA[{attribute 'qualified_only'}
@@ -9,6 +9,7 @@ TYPE E_MachineMode :
     Disabled        := 0,   // 控制条件无效，所有轴无命令所有者
     Manual          := 10,  // WPF单轴调试拥有命令权
     AutoStarting    := 20,  // 自动准入、使能和就绪等待
+	Preparing 		:= 25,  // 整机运动至标准准备位置
     Automatic       := 30,  // 整机自动流程正在执行
     Homing          := 40,  // 回零流程预留
     Stopping        := 50,  // 受控停止正在执行

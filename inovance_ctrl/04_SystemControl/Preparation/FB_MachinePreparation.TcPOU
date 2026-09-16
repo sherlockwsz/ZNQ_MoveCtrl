@@ -1,0 +1,599 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <POU Name="FB_MachinePreparation" Id="{fc808fdd-65f0-4d53-b018-734da14a8299}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_MachinePreparation
+VAR_INPUT
+    // 自动启动协调器或WPF一键整机准备请求。
+    // 只受理FALSE→TRUE上升沿。
+    bStart : BOOL;
+
+    // Stop、整机故障或流程中止。
+    bAbort : BOOL;
+
+    // 故障复位脉冲。
+    bReset : BOOL;
+
+    stConfig : ST_MachinePreparationConfig;
+END_VAR
+
+VAR_IN_OUT
+    aAxes : ARRAY[1..GVL_Constants.cMaxAxisCount]
+            OF ST_AxisInterface;
+END_VAR
+
+VAR_OUTPUT
+    bBusy       : BOOL;
+    bDone       : BOOL;
+    bError      : BOOL;
+    bErrorPulse : BOOL;
+    bTimeout    : BOOL;
+
+    uiErrorAxis : UINT;
+    udiErrorCode : UDINT;
+
+    eStep : E_MachinePreparationStep :=
+        E_MachinePreparationStep.Idle;
+END_VAR
+
+VAR
+    trigStart : R_TRIG;
+
+    fbReadyTimeout  : TON;
+    fbMotionTimeout : TON;
+
+    uiItem : UINT;
+    uiAxis : UINT;
+    bAllAxesReady : BOOL;
+
+    // 各轴命令已发出锁存
+    bTrayXIssued       : BOOL;
+    bTrayZIssued       : BOOL;
+    bDamperXIssued     : BOOL;
+    bDamperYIssued     : BOOL;
+    bDamperZIssued     : BOOL;
+    bRotationIssued    : BOOL;
+    bClampIssued       : BOOL;
+    bTurntableIssued   : BOOL;
+    bScrewYIssued      : BOOL;
+    bScrewZIssued      : BOOL;
+
+    // 各轴到位锁存
+    bTrayXDone       : BOOL;
+    bTrayZDone       : BOOL;
+    bDamperXDone     : BOOL;
+    bDamperYDone     : BOOL;
+    bDamperZDone     : BOOL;
+    bRotationDone    : BOOL;
+    bClampDone       : BOOL;
+    bTurntableDone   : BOOL;
+    bScrewYDone      : BOOL;
+    bScrewZDone      : BOOL;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[//==============================================================
+// 1. 请求及定时器
+//==============================================================
+trigStart(CLK := bStart);
+
+fbReadyTimeout(
+    IN := (eStep = E_MachinePreparationStep.WaitAxesReady)
+          AND NOT bAbort,
+    PT := stConfig.tReadyTimeout
+);
+
+fbMotionTimeout(
+    IN := (eStep = E_MachinePreparationStep.MoveToStandby)
+          AND NOT bAbort,
+    PT := stConfig.tMotionTimeout
+);
+
+bErrorPulse := FALSE;
+
+
+//==============================================================
+// 2. Preparation命令脉冲默认清除
+// 只处理当前十根已明确准备位置的自动流程轴。
+//==============================================================
+FOR uiItem := 1 TO GVL_AxisIndex.AutoProcessAxisCount DO
+    uiAxis := GVL_AxisIndex.AutoProcessAxes[uiItem];
+
+    aAxes[uiAxis].PreparationCmd.bMoveAbs := FALSE;
+    aAxes[uiAxis].PreparationCmd.bMoveRel := FALSE;
+    aAxes[uiAxis].PreparationCmd.bJogPos := FALSE;
+    aAxes[uiAxis].PreparationCmd.bJogNeg := FALSE;
+END_FOR;
+
+
+//==============================================================
+// 3. 故障复位和Abort
+//
+// 复位优先于Abort：准备故障会使整机进入Fault，
+// 此时bAbort必然为TRUE，因此必须允许复位先清除本FB故障。
+//==============================================================
+IF bReset THEN
+    bBusy := FALSE;
+    bDone := FALSE;
+    bError := FALSE;
+    bTimeout := FALSE;
+
+    uiErrorAxis := 0;
+    udiErrorCode := 0;
+
+    M_ResetProgress();
+
+    eStep := E_MachinePreparationStep.Idle;
+
+ELSIF bAbort THEN
+    bBusy := FALSE;
+    bDone := FALSE;
+
+    M_ResetProgress();
+
+    // 如果本FB本身已经报错，保持Error状态，
+    // 便于故障诊断和后续统一复位。
+    IF bError THEN
+        eStep := E_MachinePreparationStep.Error;
+    ELSE
+        eStep := E_MachinePreparationStep.Idle;
+    END_IF;
+
+ELSE
+    CASE eStep OF
+
+        //======================================================
+        // 等待启动
+        //======================================================
+        E_MachinePreparationStep.Idle:
+            bBusy := FALSE;
+
+            IF trigStart.Q THEN
+                bDone := FALSE;
+                bError := FALSE;
+                bTimeout := FALSE;
+                uiErrorAxis := 0;
+                udiErrorCode := 0;
+
+                M_ResetProgress();
+
+                // 确认十根准备轴均已配置。
+                FOR uiItem := 1 TO
+                    GVL_AxisIndex.AutoProcessAxisCount
+                DO
+                    uiAxis :=
+                        GVL_AxisIndex.AutoProcessAxes[uiItem];
+
+                    IF NOT GVL_AxisConfig.AxisLimits[
+                        uiAxis
+                    ].bConfigured THEN
+                        bError := TRUE;
+                        bErrorPulse := TRUE;
+                        uiErrorAxis := uiAxis;
+                        udiErrorCode := 16#C101;
+                        eStep :=
+                            E_MachinePreparationStep.Error;
+                        EXIT;
+                    END_IF;
+                END_FOR;
+
+                IF NOT bError THEN
+                    bBusy := TRUE;
+                    eStep :=
+                        E_MachinePreparationStep.WaitAxesReady;
+                END_IF;
+            END_IF;
+
+
+        //======================================================
+        // 请求轴使能并等待全部Ready
+        //======================================================
+        E_MachinePreparationStep.WaitAxesReady:
+            bBusy := TRUE;
+            bAllAxesReady := TRUE;
+
+            FOR uiItem := 1 TO
+                GVL_AxisIndex.AutoProcessAxisCount
+            DO
+                uiAxis :=
+                    GVL_AxisIndex.AutoProcessAxes[uiItem];
+
+                IF aAxes[uiAxis].Alarm.bError THEN
+                    bError := TRUE;
+                    bErrorPulse := TRUE;
+                    uiErrorAxis := uiAxis;
+
+                    IF aAxes[uiAxis].Alarm.nErrorID <> 0 THEN
+                        udiErrorCode :=
+                            aAxes[uiAxis].Alarm.nErrorID;
+                    ELSE
+                        udiErrorCode := 16#C200
+                            + UINT_TO_UDINT(uiAxis);
+                    END_IF;
+
+                    eStep :=
+                        E_MachinePreparationStep.Error;
+                    EXIT;
+                END_IF;
+
+                IF NOT aAxes[uiAxis].State.bReady THEN
+                    bAllAxesReady := FALSE;
+
+                    IF uiErrorAxis = 0 THEN
+                        uiErrorAxis := uiAxis;
+                    END_IF;
+                END_IF;
+            END_FOR;
+
+            IF eStep <> E_MachinePreparationStep.Error THEN
+                IF bAllAxesReady THEN
+                    uiErrorAxis := 0;
+                    eStep :=
+                        E_MachinePreparationStep.MoveToStandby;
+
+                ELSIF fbReadyTimeout.Q THEN
+                    bError := TRUE;
+                    bTimeout := TRUE;
+                    bErrorPulse := TRUE;
+                    udiErrorCode := 16#C102;
+                    eStep :=
+                        E_MachinePreparationStep.Error;
+                END_IF;
+            END_IF;
+
+
+        //======================================================
+        // 整机准备位置运动
+        //
+        // 三条机械分支并行执行：
+        // A. TrayX安全后允许TrayZ
+        // B. DamperZ安全后允许DamperXY和Rotation
+        // C. ScrewdriverZ安全后允许夹紧松开和Y回零，
+        //    夹紧松开后允许转台回零
+        //======================================================
+        E_MachinePreparationStep.MoveToStandby:
+            bBusy := TRUE;
+
+            // 第一组保护轴并行运动。
+            IF NOT bTrayXDone THEN
+                bTrayXDone := M_MoveAxisAbsolute(
+                    fTarget := stConfig.fTrayXStandby,
+                    fVelocity := stConfig.fTrayVelocity,
+                    fTolerance := stConfig.fLinearTolerance,
+                    uiAxisIndex := GVL_AxisIndex.TrayX,
+                    ioIssued := bTrayXIssued,
+                    ioAxis := aAxes[GVL_AxisIndex.TrayX]
+                );
+            END_IF;
+
+            IF NOT bDamperZDone THEN
+                bDamperZDone := M_MoveAxisAbsolute(
+                    fTarget := stConfig.fDamperZStandby,
+                    fVelocity := stConfig.fDamperVelocity,
+                    fTolerance := stConfig.fLinearTolerance,
+                    uiAxisIndex := GVL_AxisIndex.DamperZ,
+                    ioIssued := bDamperZIssued,
+                    ioAxis := aAxes[GVL_AxisIndex.DamperZ]
+                );
+            END_IF;
+
+            IF NOT bScrewZDone THEN
+                bScrewZDone := M_MoveAxisAbsolute(
+                    fTarget := stConfig.fScrewdriverZSafe,
+                    fVelocity := stConfig.fScrewdriverVelocity,
+                    fTolerance := stConfig.fLinearTolerance,
+                    uiAxisIndex := GVL_AxisIndex.ScrewdriverZ,
+                    ioIssued := bScrewZIssued,
+                    ioAxis := aAxes[GVL_AxisIndex.ScrewdriverZ]
+                );
+            END_IF;
+
+
+            // TrayX在升降位后，TrayZ才允许下降。
+            IF bTrayXDone AND NOT bTrayZDone THEN
+                bTrayZDone := M_MoveAxisAbsolute(
+                    fTarget := stConfig.fTrayZStandby,
+                    fVelocity := stConfig.fTrayVelocity,
+                    fTolerance := stConfig.fLinearTolerance,
+                    uiAxisIndex := GVL_AxisIndex.TrayZ,
+                    ioIssued := bTrayZIssued,
+                    ioAxis := aAxes[GVL_AxisIndex.TrayZ]
+                );
+            END_IF;
+
+
+            // DamperZ在110mm后，允许XY及旋转轴并行回位。
+            IF bDamperZDone THEN
+                IF NOT bDamperXDone THEN
+                    bDamperXDone := M_MoveAxisAbsolute(
+                        fTarget := stConfig.fDamperXStandby,
+                        fVelocity := stConfig.fDamperVelocity,
+                        fTolerance := stConfig.fLinearTolerance,
+                        uiAxisIndex := GVL_AxisIndex.DamperX,
+                        ioIssued := bDamperXIssued,
+                        ioAxis := aAxes[GVL_AxisIndex.DamperX]
+                    );
+                END_IF;
+
+                IF NOT bDamperYDone THEN
+                    bDamperYDone := M_MoveAxisAbsolute(
+                        fTarget := stConfig.fDamperYStandby,
+                        fVelocity := stConfig.fDamperVelocity,
+                        fTolerance := stConfig.fLinearTolerance,
+                        uiAxisIndex := GVL_AxisIndex.DamperY,
+                        ioIssued := bDamperYIssued,
+                        ioAxis := aAxes[GVL_AxisIndex.DamperY]
+                    );
+                END_IF;
+
+                IF NOT bRotationDone THEN
+                    bRotationDone := M_MoveAxisAbsolute(
+                        fTarget :=
+                            stConfig.fDamperRotationZero,
+                        fVelocity :=
+                            stConfig.fDamperRotationVelocity,
+                        fTolerance :=
+                            stConfig.fRotationTolerance,
+                        uiAxisIndex :=
+                            GVL_AxisIndex.DamperRotation,
+                        ioIssued := bRotationIssued,
+                        ioAxis :=
+                            aAxes[GVL_AxisIndex.DamperRotation]
+                    );
+                END_IF;
+            END_IF;
+
+
+            // ScrewdriverZ到安全高度后：
+            // 夹紧轴松开和ScrewdriverY回零并行。
+            IF bScrewZDone THEN
+                IF NOT bClampDone THEN
+                    bClampDone := M_MoveAxisAbsolute(
+                        fTarget := stConfig.fClampOpenPosition,
+                        fVelocity := stConfig.fClampVelocity,
+                        fTolerance := stConfig.fLinearTolerance,
+                        uiAxisIndex := GVL_AxisIndex.Clamping,
+                        ioIssued := bClampIssued,
+                        ioAxis := aAxes[GVL_AxisIndex.Clamping]
+                    );
+                END_IF;
+
+                IF NOT bScrewYDone THEN
+                    bScrewYDone := M_MoveAxisAbsolute(
+                        fTarget := stConfig.fScrewdriverYZero,
+                        fVelocity :=
+                            stConfig.fScrewdriverVelocity,
+                        fTolerance := stConfig.fLinearTolerance,
+                        uiAxisIndex :=
+                            GVL_AxisIndex.ScrewdriverY,
+                        ioIssued := bScrewYIssued,
+                        ioAxis :=
+                            aAxes[GVL_AxisIndex.ScrewdriverY]
+                    );
+                END_IF;
+            END_IF;
+
+
+            // 只要求夹紧轴松开到位，即可允许转台回零。
+            IF bClampDone AND NOT bTurntableDone THEN
+                bTurntableDone := M_MoveAxisAbsolute(
+                    fTarget := stConfig.fTurntableZero,
+                    fVelocity := stConfig.fTurntableVelocity,
+                    fTolerance := stConfig.fRotationTolerance,
+                    uiAxisIndex := GVL_AxisIndex.Turntable,
+                    ioIssued := bTurntableIssued,
+                    ioAxis := aAxes[GVL_AxisIndex.Turntable]
+                );
+            END_IF;
+
+
+            // 十根轴全部满足目标位置才发布Done。
+            IF bTrayXDone
+                AND bTrayZDone
+                AND bDamperXDone
+                AND bDamperYDone
+                AND bDamperZDone
+                AND bRotationDone
+                AND bClampDone
+                AND bTurntableDone
+                AND bScrewYDone
+                AND bScrewZDone
+            THEN
+                bBusy := FALSE;
+                bDone := TRUE;
+                eStep := E_MachinePreparationStep.Done;
+
+            ELSIF fbMotionTimeout.Q THEN
+                bError := TRUE;
+                bTimeout := TRUE;
+                bErrorPulse := TRUE;
+                udiErrorCode := 16#C103;
+
+                // 保存第一根尚未到位的轴。
+                IF NOT bTrayXDone THEN
+                    uiErrorAxis := GVL_AxisIndex.TrayX;
+                ELSIF NOT bTrayZDone THEN
+                    uiErrorAxis := GVL_AxisIndex.TrayZ;
+                ELSIF NOT bDamperZDone THEN
+                    uiErrorAxis := GVL_AxisIndex.DamperZ;
+                ELSIF NOT bDamperXDone THEN
+                    uiErrorAxis := GVL_AxisIndex.DamperX;
+                ELSIF NOT bDamperYDone THEN
+                    uiErrorAxis := GVL_AxisIndex.DamperY;
+                ELSIF NOT bRotationDone THEN
+                    uiErrorAxis := GVL_AxisIndex.DamperRotation;
+                ELSIF NOT bScrewZDone THEN
+                    uiErrorAxis := GVL_AxisIndex.ScrewdriverZ;
+                ELSIF NOT bClampDone THEN
+                    uiErrorAxis := GVL_AxisIndex.Clamping;
+                ELSIF NOT bScrewYDone THEN
+                    uiErrorAxis := GVL_AxisIndex.ScrewdriverY;
+                ELSIF NOT bTurntableDone THEN
+                    uiErrorAxis := GVL_AxisIndex.Turntable;
+                END_IF;
+
+                eStep := E_MachinePreparationStep.Error;
+            END_IF;
+
+
+        E_MachinePreparationStep.Done:
+            bBusy := FALSE;
+            bDone := TRUE;
+
+
+        E_MachinePreparationStep.Error:
+            bBusy := FALSE;
+            bDone := FALSE;
+            bError := TRUE;
+
+
+        ELSE
+            bError := TRUE;
+            bErrorPulse := TRUE;
+            udiErrorCode := 16#C1FF;
+            eStep := E_MachinePreparationStep.Error;
+    END_CASE;
+END_IF;
+
+
+//==============================================================
+// 4. 准备状态机拥有命令权时保持十根轴使能
+//
+// Done后只要请求尚未撤销，继续保持使能，防止自动启动
+// 切换到Automatic前出现一个扫描周期的掉使能。
+//==============================================================
+IF bBusy
+    OR
+    (
+        (eStep = E_MachinePreparationStep.Done)
+        AND bStart
+    )
+THEN
+    FOR uiItem := 1 TO
+        GVL_AxisIndex.AutoProcessAxisCount
+    DO
+        uiAxis :=
+            GVL_AxisIndex.AutoProcessAxes[uiItem];
+
+        aAxes[uiAxis].PreparationCmd.bEnable := TRUE;
+    END_FOR;
+END_IF;]]></ST>
+    </Implementation>
+    <Method Name="M_MoveAxisAbsolute" Id="{cfaf43b6-532a-449d-9ae3-c6c630b130c4}">
+      <Declaration><![CDATA[METHOD PRIVATE M_MoveAxisAbsolute : BOOL
+VAR_INPUT
+    fTarget     : LREAL;
+    fVelocity   : LREAL;
+    fTolerance  : LREAL;
+    uiAxisIndex : UINT;
+END_VAR
+
+VAR_IN_OUT
+    ioIssued : BOOL;
+    ioAxis   : ST_AxisInterface;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_MoveAxisAbsolute := FALSE;
+
+// 本FB已经进入故障后，不再接受后续轴命令。
+IF eStep = E_MachinePreparationStep.Error THEN
+    RETURN;
+END_IF;
+
+// 轴报警。
+IF ioAxis.Alarm.bError THEN
+    bError := TRUE;
+    bErrorPulse := TRUE;
+    uiErrorAxis := uiAxisIndex;
+
+    IF ioAxis.Alarm.nErrorID <> 0 THEN
+        udiErrorCode := ioAxis.Alarm.nErrorID;
+    ELSE
+        udiErrorCode :=
+            16#C200 + UINT_TO_UDINT(uiAxisIndex);
+    END_IF;
+
+    eStep := E_MachinePreparationStep.Error;
+    RETURN;
+END_IF;
+
+// 已经进入目标公差并且轴停止，直接认为本轴完成。
+// 因此轴原本就在目标位置时不会重复运动。
+IF ioAxis.State.bReady
+    AND NOT ioAxis.State.bBusy
+    AND
+    (
+        ABS(ioAxis.Data.fActPosition - fTarget)
+        <= fTolerance
+    )
+THEN
+    ioIssued := FALSE;
+    M_MoveAxisAbsolute := TRUE;
+    RETURN;
+END_IF;
+
+// 已发出命令后等待位置反馈。
+IF ioIssued THEN
+    IF ioAxis.State.bCmdRejected
+        OR ioAxis.State.bCommandAborted
+    THEN
+        bError := TRUE;
+        bErrorPulse := TRUE;
+        uiErrorAxis := uiAxisIndex;
+        udiErrorCode :=
+            16#C300 + UINT_TO_UDINT(uiAxisIndex);
+        eStep := E_MachinePreparationStep.Error;
+    END_IF;
+
+    RETURN;
+END_IF;
+
+// 只有Ready且当前不在执行其他运动时才发送新命令。
+IF NOT ioAxis.State.bReady
+    OR ioAxis.State.bBusy
+    OR ioAxis.State.bActive
+THEN
+    RETURN;
+END_IF;
+
+ioAxis.PreparationSet.Position.fAbsolutePosition := fTarget;
+ioAxis.PreparationSet.Position.fVelocity := fVelocity;
+
+// 0表示使用当前NC默认加减速度。
+ioAxis.PreparationSet.Position.fAcceleration := 0.0;
+ioAxis.PreparationSet.Position.fDeceleration := 0.0;
+
+// 只保持一个扫描周期。
+ioAxis.PreparationCmd.bMoveAbs := TRUE;
+ioIssued := TRUE;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ResetProgress" Id="{c29fe135-6b79-4ad5-9d47-96d5f3728157}">
+      <Declaration><![CDATA[METHOD PRIVATE M_ResetProgress
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[bTrayXIssued := FALSE;
+bTrayZIssued := FALSE;
+bDamperXIssued := FALSE;
+bDamperYIssued := FALSE;
+bDamperZIssued := FALSE;
+bRotationIssued := FALSE;
+bClampIssued := FALSE;
+bTurntableIssued := FALSE;
+bScrewYIssued := FALSE;
+bScrewZIssued := FALSE;
+
+bTrayXDone := FALSE;
+bTrayZDone := FALSE;
+bDamperXDone := FALSE;
+bDamperYDone := FALSE;
+bDamperZDone := FALSE;
+bRotationDone := FALSE;
+bClampDone := FALSE;
+bTurntableDone := FALSE;
+bScrewYDone := FALSE;
+bScrewZDone := FALSE;]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
   <POU Name="FB_AxisCommandArbiter" Id="{7619af51-d5c4-4e45-8437-e43ed894b844}" SpecialFunc="None">
     <Declaration><![CDATA[//==============================================================
@@ -42,7 +42,17 @@ ELSE
         E_MachineMode.Fault:
             // 停止已经完成但整机故障仍锁存时，只开放MC_Reset。
             eRequestedOwner := E_AxisControlOwner.Recovery;
-
+			
+		E_MachineMode.Preparing:
+			// 当前整机准备轴与AutoProcessAxes共用十轴清单。
+			// AdjustmentX/Y/Z等未加入清单的轴保持None，不被准备流程接管。
+			IF bAxisUsedByAuto THEN
+				eRequestedOwner :=
+					E_AxisControlOwner.Preparation;
+			ELSE
+				eRequestedOwner :=
+					E_AxisControlOwner.None;
+			END_IF;
         E_MachineMode.Homing:
             eRequestedOwner := E_AxisControlOwner.Homing;
 
@@ -88,6 +98,7 @@ bAutoCommandRejected :=
 CASE eRequestedOwner OF
     E_AxisControlOwner.Manual:
         M_ClearCommand(ioCmd := stAxis.AutoCmd);
+		M_ClearCommand(ioCmd := stAxis.PreparationCmd);
         M_ClearCommand(ioCmd := stAxis.HomingCmd);
         M_ClearCommand(ioCmd := stAxis.StopCmd);
         stAxis.ActiveCmd := stAxis.Cmd;
@@ -95,6 +106,7 @@ CASE eRequestedOwner OF
 
     E_AxisControlOwner.Auto:
         M_ClearCommand(ioCmd := stAxis.Cmd);
+		M_ClearCommand(ioCmd := stAxis.PreparationCmd);
         M_ClearCommand(ioCmd := stAxis.HomingCmd);
         M_ClearCommand(ioCmd := stAxis.StopCmd);
         stAxis.ActiveCmd := stAxis.AutoCmd;
@@ -102,6 +114,7 @@ CASE eRequestedOwner OF
 
     E_AxisControlOwner.Homing:
         M_ClearCommand(ioCmd := stAxis.Cmd);
+		M_ClearCommand(ioCmd := stAxis.PreparationCmd);
         M_ClearCommand(ioCmd := stAxis.AutoCmd);
         M_ClearCommand(ioCmd := stAxis.StopCmd);
         stAxis.ActiveCmd := stAxis.HomingCmd;
@@ -111,6 +124,7 @@ CASE eRequestedOwner OF
         // 先保存复位请求，再清除所有可能产生运动的手动命令。
         bRecoveryResetRequest := stAxis.Cmd.bReset;
         M_ClearCommand(ioCmd := stAxis.Cmd);
+		M_ClearCommand(ioCmd := stAxis.PreparationCmd);
         M_ClearCommand(ioCmd := stAxis.AutoCmd);
         M_ClearCommand(ioCmd := stAxis.HomingCmd);
         M_ClearCommand(ioCmd := stAxis.StopCmd);
@@ -120,13 +134,23 @@ CASE eRequestedOwner OF
 
     E_AxisControlOwner.Stop:
         M_ClearCommand(ioCmd := stAxis.Cmd);
+		M_ClearCommand(ioCmd := stAxis.PreparationCmd);
         M_ClearCommand(ioCmd := stAxis.AutoCmd);
         M_ClearCommand(ioCmd := stAxis.HomingCmd);
         stAxis.ActiveCmd := stAxis.StopCmd;
         stAxis.ActiveSet := stAxis.StopSet;
-
+		
+	E_AxisControlOwner.Preparation:
+		M_ClearCommand(ioCmd := stAxis.Cmd);
+		M_ClearCommand(ioCmd := stAxis.AutoCmd);
+		M_ClearCommand(ioCmd := stAxis.HomingCmd);
+		M_ClearCommand(ioCmd := stAxis.StopCmd);
+	
+		stAxis.ActiveCmd := stAxis.PreparationCmd;
+		stAxis.ActiveSet := stAxis.PreparationSet;
     ELSE
         M_ClearCommand(ioCmd := stAxis.Cmd);
+		M_ClearCommand(ioCmd := stAxis.PreparationCmd);
         M_ClearCommand(ioCmd := stAxis.AutoCmd);
         M_ClearCommand(ioCmd := stAxis.HomingCmd);
         M_ClearCommand(ioCmd := stAxis.StopCmd);

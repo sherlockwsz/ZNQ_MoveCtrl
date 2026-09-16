@@ -1,0 +1,44 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_MachinePreparationConfig" Id="{5a7a8a07-dcd0-48bc-ae3c-f9a00a4914a8}">
+    <Declaration><![CDATA[TYPE ST_MachinePreparationConfig :
+STRUCT
+    //==========================================================
+    // 整机准备位置
+    //==========================================================
+    fTrayXStandby       : LREAL;
+    fTrayZStandby       : LREAL;
+
+    fDamperXStandby     : LREAL;
+    fDamperYStandby     : LREAL;
+    fDamperZStandby     : LREAL;
+    fDamperRotationZero : LREAL;
+
+    fClampOpenPosition  : LREAL;
+    fTurntableZero      : LREAL;
+
+    fScrewdriverYZero   : LREAL;
+    fScrewdriverZSafe   : LREAL;
+
+    //==========================================================
+    // 速度
+    //==========================================================
+    fTrayVelocity           : LREAL;
+    fDamperVelocity         : LREAL;
+    fDamperRotationVelocity : LREAL;
+    fClampVelocity          : LREAL;
+    fTurntableVelocity      : LREAL;
+    fScrewdriverVelocity    : LREAL;
+
+    //==========================================================
+    // 到位公差与超时
+    //==========================================================
+    fLinearTolerance   : LREAL;
+    fRotationTolerance : LREAL;
+
+    tReadyTimeout      : TIME;
+    tMotionTimeout     : TIME;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

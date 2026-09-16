@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_MachinePreparationStep" Id="{46206e1c-fc35-4ed5-8a9b-ada4255c7985}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_MachinePreparationStep :
+(
+    Idle             := 0,   // 等待整机准备请求
+    WaitAxesReady    := 10,  // 请求十根轴使能并等待Ready
+    MoveToStandby    := 20,  // 按机械互锁关系运动至准备位置
+    Done             := 30,  // 十根轴全部到位
+    Error            := 40   // 准备过程发生故障
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

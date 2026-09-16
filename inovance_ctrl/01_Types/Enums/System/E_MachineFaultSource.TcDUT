@@ -9,6 +9,7 @@ TYPE E_MachineFaultSource :
     None                := 0,   // 当前没有整机锁存故障
     HmiWatchdog         := 10,  // WPF心跳超时
     AutoStart           := 20,  // 自动启动/轴就绪阶段失败
+	MachinePreparation 	:= 25,
     Axis                := 30,  // 整机任一已配置NC轴报警
     DamperGripper       := 40,  // COM3通信、设备或动作失败
     TurntableProcess    := 50,  // 转台/夹紧协调流程失败

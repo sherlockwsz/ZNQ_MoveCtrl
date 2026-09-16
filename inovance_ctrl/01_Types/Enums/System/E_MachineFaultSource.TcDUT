@@ -12,6 +12,7 @@ TYPE E_MachineFaultSource :
     Axis                := 30,  // 整机任一已配置NC轴报警
     DamperGripper       := 40,  // COM3通信、设备或动作失败
     TurntableProcess    := 50,  // 转台/夹紧协调流程失败
+	ScrewdriverProcess  := 55,  // 螺丝刀双轴定位或流程失败
     AutoStop            := 60   // 受控停止、释放Stop或掉使能失败
 );
 END_TYPE]]></Declaration>

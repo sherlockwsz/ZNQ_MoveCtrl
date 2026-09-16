@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
   <POU Name="FB_TurntableProcess" Id="{e1cd4f36-8de1-47fb-8826-32ee654f2542}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_TurntableProcess
 
@@ -26,8 +26,11 @@ VAR
     // 当前均为模拟临时参数，实机调试前必须重新确认。
     //==========================================================
     stConfig : ST_DamperTurntableConfig := (
-        bSimulationMode := TRUE,
-        bRequireHomed := FALSE,
+		bSimulationMode := FALSE,
+		// 关闭“转台内部3秒后直接判合格”和“无需受理信号直接通过请求”。
+		// 夹紧轴现有500ms位置模式模拟仍然保留；
+		// 三段动作模拟改由FB_ScrewdriverProcess执行。        
+		bRequireHomed := FALSE,
         bUseVisionValidation := FALSE,
 
         fTurntablePosition0 := 10.5,
@@ -62,16 +65,13 @@ VAR
             tModeSwitchTimeout := T#2S
         ),
 
-        tSimulatedClampAction := T#500MS,
-        tSimulatedAdjustment := T#3S
-		
+        tSimulatedClampAction := T#500MS
     );
 	
 	//==========================================================
     // 位置模式模拟内部状态
     //==========================================================
     fbSimulatedClampAction : TON;
-    fbSimulatedAdjustment  : TON;
 
     trigReset : R_TRIG;
 
@@ -111,18 +111,6 @@ fbSimulatedClampAction(
 	PT := stConfig.tSimulatedClampAction
 );
 
-	// 调整定时器独立于转台主CASE运行，允许机械手并行装下一件。
-	fbSimulatedAdjustment(
-		IN :=
-			stInput.bEnable
-			AND stConfig.bSimulationMode
-			AND
-			(
-				eAdjustmentPositionState
-				= E_DamperSlotState.Adjusting
-			),
-		PT := stConfig.tSimulatedAdjustment
-	);
 
 //==============================================================
 // 2. 默认清除一次性轴命令
@@ -175,17 +163,13 @@ END_IF;
 //==============================================================
 // 3. 模拟或实际调整完成处理
 //==============================================================
-IF
-    stConfig.bSimulationMode
-    AND fbSimulatedAdjustment.Q
-    AND
-    (
-        eAdjustmentPositionState
-        = E_DamperSlotState.Adjusting
-    )
-THEN
-    // 当前模拟版本默认调整结果合格。
-    eAdjustmentPositionState := E_DamperSlotState.Qualified;
+// 预拧紧已结束且螺丝刀确实撤离后，才显示/进入调整中。
+IF stInput.bEnable
+   AND stInput.bAdjustmentStarted
+   AND
+   (eAdjustmentPositionState
+    = E_DamperSlotState.PendingAdjustment) THEN
+    eAdjustmentPositionState := E_DamperSlotState.Adjusting;
 END_IF;
 
 // 实机调整流程预留：根据外部结果更新调整位状态。
@@ -864,20 +848,10 @@ ELSE
                 // 先让请求至少保持一个完整扫描周期。
                 bAdjustmentRequestIssued := TRUE;
 
-            ELSIF
-                stConfig.bSimulationMode
-                OR stInput.bAdjustmentAccepted
-            THEN
+            ELSIF stInput.bAdjustmentAccepted THEN
+            
                 stStatus.bAdjustmentRequest := FALSE;
                 bAdjustmentRequestIssued := FALSE;
-
-                IF
-                    eAdjustmentPositionState
-                    = E_DamperSlotState.PendingAdjustment
-                THEN
-                    eAdjustmentPositionState :=
-                        E_DamperSlotState.Adjusting;
-                END_IF;
 
                 // 转台已到位且夹紧完成，此时才确认本轮交换完成。
                 stStatus.bExchangeDone := TRUE;

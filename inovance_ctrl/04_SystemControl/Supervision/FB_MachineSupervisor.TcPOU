@@ -30,11 +30,16 @@ VAR_INPUT
 
     bTurntableFault          : BOOL;
     udiTurntableError        : UDINT;
+	
+	bScrewdriverFault        : BOOL;
+	uiScrewdriverErrorAxis   : UINT;
+	udiScrewdriverError      : UDINT;
 
     bAutoStopFault           : BOOL;
     bAutoStopTimeout         : BOOL;
     uiAutoStopErrorAxis      : UINT;
     udiAutoStopError         : UDINT;
+	
 END_VAR
 
 VAR_IN_OUT
@@ -104,6 +109,7 @@ bActiveCondition :=
     OR bGripperHealthFault
     OR bDamperGripperFault
     OR bTurntableFault
+	OR bScrewdriverFault
     OR bAutoStopFault;
 
 bStopRequestPulse := FALSE;
@@ -168,6 +174,18 @@ IF NOT stFault.bActive THEN
         END_IF;
         bStopRequestPulse := TRUE;
 
+	ELSIF bScrewdriverFault THEN
+		stFault.bActive := TRUE;
+		stFault.eSource := E_MachineFaultSource.ScrewdriverProcess;
+		stFault.uiAxisIndex := uiScrewdriverErrorAxis;
+	
+		IF udiScrewdriverError = 0 THEN
+			stFault.udiErrorCode := 16#B600;
+		ELSE
+			stFault.udiErrorCode := udiScrewdriverError;
+		END_IF;
+	
+		bStopRequestPulse := TRUE;
     ELSIF bAutoStartErrorPulse THEN
         stFault.bActive := TRUE;
         stFault.eSource := E_MachineFaultSource.AutoStart;

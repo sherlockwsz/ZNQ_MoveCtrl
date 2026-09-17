@@ -24,6 +24,10 @@ VAR
     fbJog     : MC_Jog;
     fbMoveAbs : MC_MoveAbsolute;
     fbMoveRel : MC_MoveRelative;
+    fbTorqueControl : MC_TorqueControl;
+
+    // 实际转矩达到阈值后的稳定确认。
+    fbTorqueReached : TON;
 
     //==========================================================
     // 跨Method共享的内部运行状态
@@ -119,6 +123,12 @@ M_ExecuteJog(
 
 // 执行绝对运动和相对运动
 M_ExecutePositioning(
+    ioAxisRef := AxisRef,
+    ioAxis    := stAxis
+);
+
+// 执行并保持转矩控制；撤销请求时由Stop恢复位置模式
+M_ExecuteTorqueControl(
     ioAxisRef := AxisRef,
     ioAxis    := stAxis
 );
@@ -463,6 +473,7 @@ bPositionDynamicsValid :=
 bPositionAllowed :=
     bControlAllowed
     AND fbPower.Status
+    AND ioAxis.State.bPositionModeReady
     AND NOT ioAxis.Alarm.bError
     AND NOT stInternal.bStopExecute
     AND NOT fbStop.Busy
@@ -620,6 +631,7 @@ END_IF;
 IF stInternal.bStopExecute THEN
     stInternal.bMoveAbsExecute := FALSE;
     stInternal.bMoveRelExecute := FALSE;
+    stInternal.bTorqueExecute := FALSE;
 END_IF;
 
 
@@ -694,6 +706,137 @@ ELSIF fbMoveRel.Error THEN
 
     stInternal.bMoveRelExecute := FALSE;
 
+END_IF;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ExecuteTorqueControl" Id="{8f59c356-6219-4eab-b050-e71d0c124f35}">
+      <Declaration><![CDATA[//==============================================================
+// 执行持续型转矩控制。
+// 撤销bTorqueControl后，命令仲裁会请求MC_Stop，
+// 由NC将轴从CST恢复到位置相关模式。
+//==============================================================
+METHOD PRIVATE M_ExecuteTorqueControl
+VAR_IN_OUT
+    ioAxisRef : AXIS_REF;
+    ioAxis    : ST_AxisInterface;
+END_VAR
+
+VAR
+    bTorqueParametersValid : BOOL;
+    bTorqueAllowed         : BOOL;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[//==============================================================
+// 1. 参数和执行许可
+//==============================================================
+bTorqueParametersValid :=
+    ioAxis.ActiveSet.Torque.fMaxAbsTorquePercent > 0.0
+    AND ABS(ioAxis.ActiveSet.Torque.fTargetTorquePercent)
+        <= ioAxis.ActiveSet.Torque.fMaxAbsTorquePercent
+    AND ioAxis.ActiveSet.Torque.fTorqueRampPercentPerSecond > 0.0
+    AND ioAxis.ActiveSet.Torque.fVelocityLimitHigh > 0.0
+    AND ioAxis.ActiveSet.Torque.fVelocityLimitLow < 0.0
+    AND ioAxis.ActiveSet.Torque.fVelocityLimitHigh
+        > ioAxis.ActiveSet.Torque.fVelocityLimitLow;
+
+bTorqueAllowed :=
+    bControlAllowed
+    AND fbPower.Status
+    AND NOT ioAxis.Alarm.bError
+    AND NOT stInternal.bStopExecute
+    AND NOT fbStop.Busy
+    AND NOT fbReset.Busy
+    AND NOT fbJog.Busy
+    AND NOT fbMoveAbs.Busy
+    AND NOT fbMoveRel.Busy
+    AND NOT stInternal.bMoveAbsExecute
+    AND NOT stInternal.bMoveRelExecute;
+
+//==============================================================
+// 2. 接受、保持或撤销转矩命令
+//==============================================================
+IF
+    NOT ioAxis.ActiveCmd.bTorqueControl
+    OR
+    (stInternal.eRequestedCommand <> E_AxisCommand.TorqueControl)
+THEN
+    stInternal.bTorqueExecute := FALSE;
+
+ELSIF NOT stInternal.bTorqueExecute THEN
+    IF NOT bTorqueAllowed THEN
+        ioAxis.State.bCmdRejected := TRUE;
+        ioAxis.Alarm.eRejectReason :=
+            E_AxisRejectReason.AxisNotReady;
+
+    ELSIF NOT bTorqueParametersValid THEN
+        ioAxis.State.bCmdRejected := TRUE;
+        ioAxis.Alarm.eRejectReason :=
+            E_AxisRejectReason.InvalidDynamics;
+
+    ELSE
+        stInternal.bTorqueExecute := TRUE;
+    END_IF;
+END_IF;
+
+//==============================================================
+// 3. 周期调用MC_TorqueControl
+//==============================================================
+fbTorqueControl(
+    Axis              := ioAxisRef,
+    Execute           := stInternal.bTorqueExecute,
+    ContinuousUpdate  := TRUE,
+    Relative          := FALSE,
+    Torque            := ioAxis.ActiveSet.Torque.fTargetTorquePercent,
+    TorqueRamp        := ioAxis.ActiveSet.Torque.fTorqueRampPercentPerSecond,
+    VelocityLimitHigh := ioAxis.ActiveSet.Torque.fVelocityLimitHigh,
+    VelocityLimitLow  := ioAxis.ActiveSet.Torque.fVelocityLimitLow,
+    BufferMode        := MC_Aborting
+);
+
+//==============================================================
+// 4. 实际转矩稳定确认
+//==============================================================
+fbTorqueReached(
+    IN :=
+        fbTorqueControl.Active
+        AND
+        (
+            ABS(ioAxis.Data.fActTorque)
+            >= ioAxis.ActiveSet.Torque.fReachedMinAbsTorquePercent
+        ),
+    PT := ioAxis.ActiveSet.Torque.tReachedStableTime
+);
+
+ioAxis.State.bTorqueReached := fbTorqueReached.Q;
+ioAxis.State.bTorqueControlActive := fbTorqueControl.Active;
+ioAxis.State.bTorqueModeReady := fbTorqueControl.Active;
+
+//==============================================================
+// 5. 发布当前控制模式
+//==============================================================
+IF fbTorqueControl.Active OR fbTorqueControl.Busy THEN
+    ioAxis.State.eControlMode := E_AxisControlMode.Torque;
+ELSIF
+    fbPower.Status
+    AND NOT stInternal.bStopExecute
+    AND NOT fbStop.Busy
+THEN
+    ioAxis.State.eControlMode := E_AxisControlMode.Position;
+ELSE
+    ioAxis.State.eControlMode := E_AxisControlMode.Undefined;
+END_IF;
+
+ioAxis.State.bPositionModeReady :=
+    ioAxis.State.eControlMode = E_AxisControlMode.Position;
+
+//==============================================================
+// 6. 功能块结果
+//==============================================================
+IF fbTorqueControl.CommandAborted THEN
+    stInternal.bTorqueExecute := FALSE;
+    ioAxis.State.bCommandAborted := TRUE;
+ELSIF fbTorqueControl.Error THEN
+    stInternal.bTorqueExecute := FALSE;
 END_IF;]]></ST>
       </Implementation>
     </Method>
@@ -814,11 +957,12 @@ END_VAR
 ]]></Declaration>
       <Implementation>
         <ST><![CDATA[//==============================================================
-// 1. Stop开始后撤销定位Execute
+// 1. Stop开始后撤销定位和转矩Execute
 //==============================================================
 IF stInternal.bStopExecute THEN
     stInternal.bMoveAbsExecute := FALSE;
     stInternal.bMoveRelExecute := FALSE;
+    stInternal.bTorqueExecute := FALSE;
 END_IF;
 
 
@@ -917,6 +1061,8 @@ VAR_INPUT
     bStopRequest  : BOOL; // 停止请求，最高优先级
     bResetPulse   : BOOL; // 复位命令上升沿
 
+    bTorqueControl : BOOL; // 持续型转矩控制请求
+
     bJogPositive  : BOOL; // 正向点动保持信号
     bJogNegative  : BOOL; // 负向点动保持信号
 
@@ -953,7 +1099,16 @@ ELSIF bResetPulse THEN
 
 
 //==============================================================
-// 3. 点动方向冲突
+// 3. 转矩控制
+//==============================================================
+
+ELSIF bTorqueControl THEN
+
+    M_SelectCommand := E_AxisCommand.TorqueControl;
+
+
+//==============================================================
+// 4. 点动方向冲突
 //
 // 正向点动和负向点动同时成立时不选择任何方向。
 // 具体拒绝原因由M_ExecuteJog写入状态和报警接口。
@@ -965,7 +1120,7 @@ ELSIF bJogPositive AND bJogNegative THEN
 
 
 //==============================================================
-// 4. 正向和负向点动
+// 5. 正向和负向点动
 //
 // 点动是保持型命令：
 // 按钮保持TRUE时，每周期持续返回对应点动命令；
@@ -982,7 +1137,7 @@ ELSIF bJogNegative THEN
 
 
 //==============================================================
-// 5. 定位命令冲突
+// 6. 定位命令冲突
 //
 // 绝对运动和相对运动在同一扫描周期同时触发时，
 // 不选择任何定位命令。
@@ -995,7 +1150,7 @@ ELSIF bMoveAbsPulse AND bMoveRelPulse THEN
 
 
 //==============================================================
-// 6. 绝对运动和相对运动
+// 7. 绝对运动和相对运动
 //==============================================================
 
 ELSIF bMoveAbsPulse THEN
@@ -1144,8 +1299,10 @@ stInternal.bAnyBusy :=
     OR fbJog.Busy
     OR fbMoveAbs.Busy
     OR fbMoveRel.Busy
+    OR fbTorqueControl.Busy
     OR stInternal.bMoveAbsExecute
-    OR stInternal.bMoveRelExecute;
+    OR stInternal.bMoveRelExecute
+    OR stInternal.bTorqueExecute;
 
 
 //==============================================================
@@ -1179,6 +1336,7 @@ ioAxis.State.bActive :=
     fbJog.Busy
     OR fbMoveAbs.Busy
     OR fbMoveRel.Busy
+    OR fbTorqueControl.Active
     OR fbStop.Busy;
 
 
@@ -1223,13 +1381,21 @@ stInternal.bMotionActive :=
     fbJog.Busy
     OR fbMoveAbs.Busy
     OR fbMoveRel.Busy
+    OR fbTorqueControl.Active
+    OR fbTorqueControl.Busy
     OR stInternal.bMoveAbsExecute
-    OR stInternal.bMoveRelExecute;
+    OR stInternal.bMoveRelExecute
+    OR stInternal.bTorqueExecute;
 
 
 // 外部Stop、运动中撤销控制许可或撤销使能均请求停止。
 stInternal.bStopRequest :=
     ioAxis.ActiveCmd.bStop
+    OR
+    (
+        (fbTorqueControl.Active OR fbTorqueControl.Busy)
+        AND NOT ioAxis.ActiveCmd.bTorqueControl
+    )
     OR
     (
         NOT bControlAllowed
@@ -1242,10 +1408,11 @@ stInternal.bStopRequest :=
     );
 
 
-// 优先级：Stop > Reset > Jog > MoveAbsolute/MoveRelative。
+// 优先级：Stop > Reset > Torque > Jog > MoveAbsolute/MoveRelative。
 stInternal.eRequestedCommand := M_SelectCommand(
     bStopRequest := stInternal.bStopRequest,
     bResetPulse := trigReset.Q,
+    bTorqueControl := ioAxis.ActiveCmd.bTorqueControl,
     bJogPositive := ioAxis.ActiveCmd.bJogPos,
     bJogNegative := ioAxis.ActiveCmd.bJogNeg,
     bMoveAbsPulse := trigMoveAbs.Q,
@@ -1416,7 +1583,21 @@ ELSIF fbReset.Error THEN
 
 
 //==============================================================
-// 5. MC_Jog错误
+// 5. MC_TorqueControl错误
+//==============================================================
+
+ELSIF fbTorqueControl.Error THEN
+
+    ioAxis.Alarm.bError := TRUE;
+    ioAxis.Alarm.nErrorID :=
+        fbTorqueControl.ErrorID;
+
+    ioAxis.Alarm.eErrorSource :=
+        E_AxisErrorSource.TorqueControl;
+
+
+//==============================================================
+// 6. MC_Jog错误
 //==============================================================
 
 ELSIF fbJog.Error THEN
@@ -1430,7 +1611,7 @@ ELSIF fbJog.Error THEN
 
 
 //==============================================================
-// 6. MC_MoveAbsolute错误
+// 7. MC_MoveAbsolute错误
 //==============================================================
 
 ELSIF fbMoveAbs.Error THEN
@@ -1444,7 +1625,7 @@ ELSIF fbMoveAbs.Error THEN
 
 
 //==============================================================
-// 7. MC_MoveRelative错误
+// 8. MC_MoveRelative错误
 //==============================================================
 
 ELSIF fbMoveRel.Error THEN
@@ -1519,6 +1700,8 @@ IF
     (ioAxis.State.eMotionState = E_AxisMotionState.Moving)
     OR
     (ioAxis.State.eMotionState = E_AxisMotionState.Jogging)
+    OR
+    (ioAxis.State.eMotionState = E_AxisMotionState.TorqueRunning)
 THEN
 
     //==========================================================
@@ -1650,7 +1833,21 @@ ELSIF fbReset.Busy THEN
 
 
 //==============================================================
-// 4. 点动状态
+// 4. 转矩控制状态
+//==============================================================
+
+ELSIF
+    fbTorqueControl.Active
+    OR fbTorqueControl.Busy
+    OR stInternal.bTorqueExecute
+THEN
+
+    ioAxis.State.eMotionState :=
+        E_AxisMotionState.TorqueRunning;
+
+
+//==============================================================
+// 5. 点动状态
 //==============================================================
 
 ELSIF fbJog.Busy THEN
@@ -1660,7 +1857,7 @@ ELSIF fbJog.Busy THEN
 
 
 //==============================================================
-// 5. 定位运动状态
+// 6. 定位运动状态
 //
 // Execute锁存可以覆盖命令已接受但Busy尚未建立的周期。
 //==============================================================
@@ -1677,7 +1874,7 @@ THEN
 
 
 //==============================================================
-// 6. 未使能状态
+// 7. 未使能状态
 //==============================================================
 
 ELSIF NOT fbPower.Status THEN
@@ -1687,7 +1884,7 @@ ELSIF NOT fbPower.Status THEN
 
 
 //==============================================================
-// 7. 控制未许可状态
+// 8. 控制未许可状态
 //
 // 轴已经使能，但外部控制许可无效。
 //==============================================================
@@ -1699,7 +1896,7 @@ ELSIF NOT bControlAllowed THEN
 
 
 //==============================================================
-// 8. 静止状态
+// 9. 静止状态
 //
 // 轴已使能、控制许可有效、无错误且没有执行命令。
 //==============================================================

@@ -15,8 +15,6 @@ VAR_INPUT
     // 原 MAIN 中保留的在线坐标重初始化请求。
     bReinitializeCoordinates : BOOL;
 	
-	bSkipCom3ForSimulation : BOOL;
-	
 	bMachinePrepared : BOOL;
 END_VAR
 
@@ -89,7 +87,7 @@ ioTrayProcess(
 // Damper 本周期提出的新请求，将在下一扫描由此处受理。
 // ------------------------------------------------------------
 ioGripperAction(
-    bExecute := ioDamperProcess.bGripperActionExecute AND NOT bSkipCom3ForSimulation,
+    bExecute := ioDamperProcess.bGripperActionExecute,
     eCommand := ioDamperProcess.eGripperActionCommand,
     bCancel := bStopRequest OR bAbort,
     tAcceptTimeout := T#3S,
@@ -101,7 +99,6 @@ ioGripperAction(
 // 将 COM3 动作失败升级为整机流程中止。
 IF ioGripperAction.bError
     AND ioDamperProcess.bBusy
-	AND NOT bSkipCom3ForSimulation
     AND NOT bAbort THEN
 
     bGripperActionFault := TRUE;
@@ -119,21 +116,10 @@ ioDamperProcess(
     bAbort := bEffectiveAbort,
 	bMachinePrepared := bMachinePrepared,
 	// 使用上一扫描保持的请求：第一次提出请求后，下一扫描返回Done。
-	// 不写假的COM3位置、电流或在线反馈。
-	bGripperActionDone :=
-		(
-			bSkipCom3ForSimulation
-			AND ioDamperProcess.bGripperActionExecute
-		)
-		OR
-		(
-			NOT bSkipCom3ForSimulation
-			AND ioGripperAction.bDone
-		),
-	
-	bGripperActionError :=
-		NOT bSkipCom3ForSimulation
-		AND ioGripperAction.bError,
+	// 仿真由FB_GripperManager统一完成Accepted/Completed握手；
+	// 本协调器始终执行同一条自动动作链。
+	bGripperActionDone := ioGripperAction.bDone,
+	bGripperActionError := ioGripperAction.bError,
 		
     bReinitializeCoordinates :=
         bReinitializeCoordinates,

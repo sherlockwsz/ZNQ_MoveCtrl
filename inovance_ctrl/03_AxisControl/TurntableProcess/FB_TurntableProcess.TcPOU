@@ -29,7 +29,7 @@ VAR
     stConfig : ST_DamperTurntableConfig := (
 		bSimulationMode := FALSE,
 		// 关闭“转台内部3秒后直接判合格”和“无需受理信号直接通过请求”。
-		// 夹紧轴现有500ms位置模式模拟仍然保留；
+		// 夹紧轴使用实际位置及实际转矩反馈，不使用延时模拟；
 		// 三段动作模拟改由FB_ScrewdriverProcess执行。        
 		bRequireHomed := FALSE,
         bUseVisionValidation := FALSE,
@@ -43,9 +43,10 @@ VAR
         fTurntablePositionTolerance := 0.1,
         tTurntableMoveTimeout := T#10S,
 
-        // 仅用于TwinCAT模拟，不能直接用于真实夹紧机构。
+        // 当前夹紧轴测试参数，实机调试后按测量结果修正。
         fClampOpenPosition := 93.0,
         fClampApproachPosition := 40.0,
+        fClampMinimumPosition := 38.0,
         fClampPositionVelocity := 15.0,
         fClampPositionAcceleration := 20.0,
         fClampPositionDeceleration := 20.0,
@@ -54,34 +55,36 @@ VAR
         tClampPositionTimeout := T#5S,
 
         ClampTorque := (
-            // 正负方向尚未确认，临时按正方向定义。
-            fTargetTorquePercent := 10.0,
+            // 夹紧方向为负向，初始测试使用额定转矩的10%。
+            fTargetTorquePercent := -10.0,
             fMaxAbsTorquePercent := 20.0,
-            fTorqueRampPercentPerSecond := 20.0,
-            fVelocityLimitHigh := 5.0,
-            fVelocityLimitLow := -5.0,
+            fTorqueRampPercentPerSecond := 10.0,
+            fVelocityLimitHigh := 2.0,
+            fVelocityLimitLow := -2.0,
             fReachedMinAbsTorquePercent := 8.0,
             tReachedStableTime := T#300MS,
             tTorqueBuildTimeout := T#3S,
             tModeSwitchTimeout := T#2S
-        ),
-
-        tSimulatedClampAction := T#500MS
+        )
     );
 	
-	//==========================================================
-    // 位置模式模拟内部状态
-    //==========================================================
-    fbSimulatedClampAction : TON;
-
-    trigReset : R_TRIG;
+	// 转矩建立超时监控。
+    fbClampTorqueBuildTimeout : TON;
+	// 等待MC_MoveAbsolute完全结束、轴重新Ready的超时。
+	fbClampPositionReleaseTimeout : TON;
+	
+	// 等待MC_TorqueControl进入Active状态的超时。
+	fbClampModeSwitchTimeout : TON;
+	// 从CST退出、恢复CSP并运动到38 mm保持位置的总超时。
+	fbClampPositionHoldTimeout : TON;
+	
+	trigReset : R_TRIG;
 
     bInitialized : BOOL;
     bFinalExchange : BOOL;
 	bOwnsAxes : BOOL;
     bTurntableCommandIssued : BOOL;
     bClampCommandIssued     : BOOL;
-    bClampDelayEnable       : BOOL;
 
     // RequestAdjustment步骤使用，确保模拟模式下请求至少保持一个扫描周期。
     bAdjustmentRequestIssued : BOOL;
@@ -107,9 +110,82 @@ trigDisable(
     CLK := stInput.bEnable
 );
 
-fbSimulatedClampAction(
-	IN := bClampDelayEnable,
-	PT := stConfig.tSimulatedClampAction
+//==============================================================
+// 等待位置运动完全释放
+//
+// 到达40 mm只代表进入位置公差，不代表MC_MoveAbsolute.Busy
+// 已经变为FALSE。因此必须等待轴重新Ready。
+//==============================================================
+fbClampPositionReleaseTimeout(
+    IN :=
+        (stStatus.eStep = E_DamperTurntableStep.WaitClampHolding)
+        AND
+        (
+            stStatus.eClampStep
+            = E_DamperClampStep.WaitPositionReleased
+        ),
+    PT := stConfig.ClampTorque.tModeSwitchTimeout
+);
+
+//==============================================================
+// 位置保持转换超时
+//
+// 当位置先到达38 mm时：
+// 1. 退出CST；
+// 2. 等待恢复CSP；
+// 3. 使用位置模式保持38 mm。
+// 从退出CST开始，到CSP重新定位38 mm完成的总超时。
+//==============================================================
+fbClampPositionHoldTimeout(
+    IN :=
+        (stStatus.eStep = E_DamperTurntableStep.WaitClampHolding)
+        AND
+        (
+            (
+                stStatus.eClampStep
+                = E_DamperClampStep.ExitTorqueForPosition
+            )
+            OR
+            (
+                stStatus.eClampStep
+                = E_DamperClampStep.RestorePositionForHold
+            )
+            OR
+            (
+                stStatus.eClampStep
+                = E_DamperClampStep.WaitPositionHold
+            )
+        ),
+    PT := stConfig.tClampPositionTimeout
+);
+
+//==============================================================
+// 等待转矩模式切换完成
+//==============================================================
+fbClampModeSwitchTimeout(
+    IN :=
+        (stStatus.eStep = E_DamperTurntableStep.WaitClampHolding)
+        AND
+        (
+            stStatus.eClampStep
+            = E_DamperClampStep.SwitchToTorque
+        ),
+    PT := stConfig.ClampTorque.tModeSwitchTimeout
+);
+
+
+//==============================================================
+// 等待夹紧转矩或最深允许位置
+//==============================================================
+fbClampTorqueBuildTimeout(
+    IN :=
+        (stStatus.eStep = E_DamperTurntableStep.WaitClampHolding)
+        AND
+        (
+            stStatus.eClampStep
+            = E_DamperClampStep.BuildTorque
+        ),
+    PT := stConfig.ClampTorque.tTorqueBuildTimeout
 );
 
 
@@ -137,7 +213,8 @@ IF bOwnsAxes THEN
 	stTurntableAxis.AutoCmd.bMoveAbs := FALSE;
 	stClampingAxis.AutoCmd.bMoveAbs := FALSE;
 
-	// 当前版本只使用位置模式。
+	// 每周期默认撤销转矩请求；
+	// 只有SwitchToTorque、BuildTorque或HoldTorque步骤重新置位。
 	stClampingAxis.AutoCmd.bTorqueControl := FALSE;
 END_IF;
 
@@ -209,7 +286,6 @@ IF (NOT stInput.bEnable) OR trigReset.Q THEN
 
     bTurntableCommandIssued := FALSE;
     bClampCommandIssued := FALSE;
-    bClampDelayEnable := FALSE;
     bAdjustmentRequestIssued := FALSE;
 
     stStatus.bReady := FALSE;
@@ -291,10 +367,10 @@ ELSE
 				THEN
 					// 轴已Ready，并且已经位于松开位置。
 					bClampCommandIssued := FALSE;
-					bClampDelayEnable := TRUE;
-		
+					stStatus.bClampOpen := TRUE;
+					stStatus.eClampStep := E_DamperClampStep.Complete;
 					stStatus.eStep :=
-						E_DamperTurntableStep.WaitInitialClampOpen;
+						E_DamperTurntableStep.InitializeTurntable;
 		
 				ELSE
 					// 轴已Ready，但尚未到达松开位置。
@@ -312,7 +388,6 @@ ELSE
 		
 					stClampingAxis.AutoCmd.bMoveAbs := TRUE;
 					bClampCommandIssued := TRUE;
-					bClampDelayEnable := FALSE;
 		
 					stStatus.eStep :=
 						E_DamperTurntableStep.WaitInitialClampOpen;
@@ -328,7 +403,6 @@ ELSE
 				OR stClampingAxis.State.bCommandAborted
 			THEN
 				bClampCommandIssued := FALSE;
-				bClampDelayEnable := FALSE;
 			
 				// 等轴重新Ready后再次发送初始化松开命令。
 				stStatus.eStep :=
@@ -350,17 +424,12 @@ ELSE
 				)
 			THEN
 				bClampCommandIssued := FALSE;
-				bClampDelayEnable := TRUE;
+				stStatus.bClampOpen := TRUE;
+				stStatus.bClampHolding := FALSE;
+				stStatus.eClampStep := E_DamperClampStep.Complete;
+				stStatus.eStep :=
+					E_DamperTurntableStep.InitializeTurntable;
 			END_IF;
-
-            IF fbSimulatedClampAction.Q THEN
-                bClampDelayEnable := FALSE;
-                stStatus.bClampOpen := TRUE;
-                stStatus.bClampHolding := FALSE;
-                stStatus.eClampStep := E_DamperClampStep.Complete;
-                stStatus.eStep :=
-                    E_DamperTurntableStep.InitializeTurntable;
-            END_IF;
 
 
         //======================================================
@@ -575,12 +644,23 @@ ELSE
 				// 已经确认松开，不重复发送运动命令。
 				stStatus.eStep :=
 					E_DamperTurntableStep.RotateExchange;
+
+			ELSIF
+				stStatus.bClampHolding
+				OR stClampingAxis.State.bTorqueControlActive
+			THEN
+				// 先撤销转矩请求。FB_AxisControl执行受控停止并恢复位置模式。
+				stStatus.bClampHolding := FALSE;
+				stClampingAxis.AutoCmd.bTorqueControl := FALSE;
+				stStatus.eClampStep := E_DamperClampStep.ExitTorque;
+
+			ELSIF NOT stClampingAxis.State.bPositionModeReady THEN
+				stStatus.eClampStep :=
+					E_DamperClampStep.RestorePositionMode;
 		
 			ELSIF stClampingAxis.State.bReady THEN
 				stStatus.eClampStep :=
 					E_DamperClampStep.MoveToOpen;
-		
-				bClampDelayEnable := FALSE;
 		
 				stClampingAxis.AutoSet.Position.fAbsolutePosition :=
 					stConfig.fClampOpenPosition;
@@ -611,7 +691,6 @@ ELSE
 				OR stClampingAxis.State.bCommandAborted
 			THEN
 				bClampCommandIssued := FALSE;
-				bClampDelayEnable := FALSE;
 		
 				// 等夹紧轴重新Ready后再次发送松开命令。
 				stStatus.eStep :=
@@ -633,17 +712,6 @@ ELSE
 				)
 			THEN
 				bClampCommandIssued := FALSE;
-		
-				// 位置到达后，再延时模拟松开动作稳定。
-				bClampDelayEnable := TRUE;
-			END_IF;
-		
-			IF
-				(stStatus.eStep = E_DamperTurntableStep.WaitClampOpen)
-				AND fbSimulatedClampAction.Q
-			THEN
-				bClampDelayEnable := FALSE;
-		
 				stStatus.bClampOpen := TRUE;
 				stStatus.bClampHolding := FALSE;
 				stStatus.eClampStep :=
@@ -777,8 +845,6 @@ ELSE
 			stStatus.eClampStep :=
 				E_DamperClampStep.MoveToApproach;
 		
-			bClampDelayEnable := FALSE;
-		
 			IF stClampingAxis.State.bReady THEN
 				stClampingAxis.AutoSet.Position.fAbsolutePosition :=
 					stConfig.fClampApproachPosition;
@@ -794,6 +860,8 @@ ELSE
 		
 				stClampingAxis.AutoCmd.bMoveAbs := TRUE;
 				bClampCommandIssued := TRUE;
+				stStatus.eClampStep :=
+					E_DamperClampStep.WaitApproach;
 		
 				stStatus.eStep :=
 					E_DamperTurntableStep.WaitClampHolding;
@@ -801,60 +869,359 @@ ELSE
 		
 		
 		E_DamperTurntableStep.WaitClampHolding:
-			stStatus.eClampStep :=
-				E_DamperClampStep.WaitApproach;
-		
-			IF
-				stClampingAxis.State.bCmdRejected
-				OR stClampingAxis.State.bCommandAborted
-			THEN
-				bClampCommandIssued := FALSE;
-				bClampDelayEnable := FALSE;
-		
-				// 等轴重新Ready后再次发送接近位置命令。
-				stStatus.eStep :=
-					E_DamperTurntableStep.ClampAdjustmentPart;
-		
-			ELSIF
-				bClampCommandIssued
-				AND
-				(
-					stClampingAxis.State.bDone
-					OR
+			CASE stStatus.eClampStep OF
+				E_DamperClampStep.WaitApproach:
+				//==========================================================
+				// 等待夹紧轴到达40 mm接近位置
+				//==========================================================
+			
+				IF
+					stClampingAxis.State.bCmdRejected
+					OR stClampingAxis.State.bCommandAborted
+				THEN
+					// 接近位置运动没有正常执行。
+					bClampCommandIssued := FALSE;
+			
+					// 返回发令步骤，等待轴重新Ready后再次发送MoveAbsolute。
+					stStatus.eStep :=
+						E_DamperTurntableStep.ClampAdjustmentPart;
+			
+				ELSIF
+					bClampCommandIssued
+					AND
 					(
-						ABS(
-							stClampingAxis.Data.fActPosition
-							- stConfig.fClampApproachPosition
+						stClampingAxis.State.bDone
+						OR
+						(
+							ABS(
+								stClampingAxis.Data.fActPosition
+								- stConfig.fClampApproachPosition
+							)
+							<= stConfig.fClampPositionTolerance
 						)
-						<= stConfig.fClampPositionTolerance
 					)
-				)
-			THEN
-				bClampCommandIssued := FALSE;
-		
-				// 接近位置到位后，延时500ms模拟夹紧力建立。
-				bClampDelayEnable := TRUE;
-			END_IF;
-		
-			IF
-				(stStatus.eStep = E_DamperTurntableStep.WaitClampHolding)
-				AND fbSimulatedClampAction.Q
-			THEN
-				bClampDelayEnable := FALSE;
-		
-				stStatus.bClampOpen := FALSE;
-				stStatus.bClampHolding := TRUE;
-		
-				// 当前虽然使用位置模式模拟，但保持该枚举，
-				// 以后接入CST时主状态机不需要变化。
-				stStatus.eClampStep :=
-					E_DamperClampStep.HoldTorque;
-		
-				bAdjustmentRequestIssued := FALSE;
-		
-				stStatus.eStep :=
-					E_DamperTurntableStep.RequestAdjustment;
-			END_IF;
+				THEN
+					// 已经进入40 mm位置公差。
+					//
+					// 注意：
+					// 位置进入公差不代表MC_MoveAbsolute.Busy已经为FALSE，
+					// 因此这里只结束接近位置阶段，不立即请求转矩控制。
+					bClampCommandIssued := FALSE;
+			
+					// 转入等待位置功能块完全释放的步骤。
+					stStatus.eClampStep :=
+						E_DamperClampStep.WaitPositionReleased;
+				END_IF;
+					
+				E_DamperClampStep.WaitPositionReleased:
+					// 本步骤不下发MoveAbs，也不下发TorqueControl。
+					// 等待上一条定位命令完全结束。
+				
+					IF stClampingAxis.Alarm.bError THEN
+						// 等待期间轴本身产生错误。
+						stStatus.bError := TRUE;
+						stStatus.nErrorID := 16#7206;
+						stStatus.eClampStep := E_DamperClampStep.Error;
+						stStatus.eStep := E_DamperTurntableStep.Error;
+				
+					ELSIF fbClampPositionReleaseTimeout.Q THEN
+						// 到达40 mm后，定位功能块在规定时间内没有释放。
+						stStatus.bError := TRUE;
+						stStatus.nErrorID := 16#7206;
+						stStatus.eClampStep := E_DamperClampStep.Error;
+						stStatus.eStep := E_DamperTurntableStep.Error;
+				
+					ELSIF
+						// bReady内部已经包含：
+						// 1. 轴已使能；
+						// 2. 没有轴报警；
+						// 3. MC_MoveAbsolute不再Busy；
+						// 4. 定位Execute锁存已经撤销。
+						stClampingAxis.State.bReady
+				
+						// 确认轴仍然处于位置模式。
+						AND stClampingAxis.State.bPositionModeReady
+				
+						// 避免轴仍有残余速度时直接切换CST。
+						AND
+						(
+							ABS(stClampingAxis.Data.fActVelocity)
+							<= 0.01
+						)
+					THEN
+						// 只有位置运动完全释放后才下发转矩参数。
+						stClampingAxis.AutoSet.Torque :=
+							stConfig.ClampTorque;
+				
+						stClampingAxis.AutoCmd.bTorqueControl :=
+							TRUE;
+				
+						stStatus.eClampStep :=
+							E_DamperClampStep.SwitchToTorque;
+					END_IF;	
+
+				E_DamperClampStep.SwitchToTorque:
+					// 转矩控制属于持续型命令，在整个切换阶段必须保持TRUE。
+					stClampingAxis.AutoSet.Torque :=
+						stConfig.ClampTorque;
+				
+					stClampingAxis.AutoCmd.bTorqueControl :=
+						TRUE;
+				
+					IF
+						stClampingAxis.State.bCmdRejected
+						OR stClampingAxis.State.bCommandAborted
+						OR stClampingAxis.Alarm.bError
+					THEN
+						// 已经等待位置运动完全释放后仍被拒绝，
+						// 此时需要检查转矩参数、NC配置或驱动器映射。
+						stStatus.bError := TRUE;
+						stStatus.nErrorID := 16#7201;
+						stStatus.eClampStep := E_DamperClampStep.Error;
+						stStatus.eStep := E_DamperTurntableStep.Error;
+				
+					ELSIF stClampingAxis.State.bTorqueControlActive THEN
+						// MC_TorqueControl已经取得轴控制权。
+						stStatus.eClampStep :=
+							E_DamperClampStep.BuildTorque;
+				
+					ELSIF fbClampModeSwitchTimeout.Q THEN
+						// 在规定时间内没有进入转矩模式。
+						// 仿真轴不支持CST时预计会进入此分支。
+						stStatus.bError := TRUE;
+						stStatus.nErrorID := 16#7202;
+						stStatus.eClampStep := E_DamperClampStep.Error;
+						stStatus.eStep := E_DamperTurntableStep.Error;
+					END_IF;
+
+				E_DamperClampStep.BuildTorque:
+					//==========================================================
+					// CST模式下建立夹紧转矩
+					//==========================================================
+					stClampingAxis.AutoSet.Torque :=
+						stConfig.ClampTorque;
+				
+					// 在BuildTorque期间持续保持转矩控制请求。
+					stClampingAxis.AutoCmd.bTorqueControl :=
+						TRUE;
+				
+					IF stClampingAxis.Alarm.bError THEN
+						// 夹紧轴在转矩建立过程中发生错误。
+						stStatus.bError := TRUE;
+						stStatus.nErrorID := 16#7203;
+						stStatus.eClampStep :=
+							E_DamperClampStep.Error;
+						stStatus.eStep :=
+							E_DamperTurntableStep.Error;
+				
+					ELSIF stClampingAxis.State.bTorqueReached THEN
+						//======================================================
+						// 分支1：实际转矩先达到夹紧阈值
+						//
+						// 保持CST以及-10%目标转矩，并进入下一步。
+						//======================================================
+						stStatus.bClampOpen := FALSE;
+						stStatus.bClampHolding := TRUE;
+				
+						stStatus.eClampStep :=
+							E_DamperClampStep.HoldTorque;
+				
+						bAdjustmentRequestIssued := FALSE;
+				
+						stStatus.eStep :=
+							E_DamperTurntableStep.RequestAdjustment;
+				
+					ELSIF
+						stClampingAxis.Data.fActPosition
+						<=
+						(
+							stConfig.fClampMinimumPosition
+							+ stConfig.fClampPositionTolerance
+						)
+					THEN
+						//======================================================
+						// 分支2：位置先到达38 mm
+						//
+						// 此时不能继续保持负转矩，否则无工件或仿真时
+						// 夹紧轴会继续向负方向运动。
+						//
+						// 先撤销CST请求，FB_AxisControl将通过MC_Stop
+						// 受控退出转矩模式。
+						//======================================================
+						stClampingAxis.AutoCmd.bTorqueControl :=
+							FALSE;
+				
+						bClampCommandIssued := FALSE;
+				
+						stStatus.eClampStep :=
+							E_DamperClampStep.ExitTorqueForPosition;
+				
+					ELSIF fbClampTorqueBuildTimeout.Q THEN
+						// 规定时间内既没有达到转矩，也没有到达38 mm。
+						stStatus.bError := TRUE;
+						stStatus.nErrorID := 16#7204;
+						stStatus.eClampStep :=
+							E_DamperClampStep.Error;
+						stStatus.eStep :=
+							E_DamperTurntableStep.Error;
+					END_IF;
+				E_DamperClampStep.ExitTorqueForPosition:
+					//==========================================================
+					// 位置先到达38 mm后，等待MC_TorqueControl退出
+					//==========================================================
+				
+					// 明确保持转矩请求为FALSE。
+					stClampingAxis.AutoCmd.bTorqueControl :=
+						FALSE;
+				
+					IF stClampingAxis.Alarm.bError THEN
+						stStatus.bError := TRUE;
+						stStatus.nErrorID := 16#7207;
+						stStatus.eClampStep :=
+							E_DamperClampStep.Error;
+						stStatus.eStep :=
+							E_DamperTurntableStep.Error;
+				
+					ELSIF NOT stClampingAxis.State.bTorqueControlActive THEN
+						// MC_TorqueControl已经不再控制轴。
+						// 下一步等待MC_Stop释放并确认恢复CSP。
+						stStatus.eClampStep :=
+							E_DamperClampStep.RestorePositionForHold;
+				
+					ELSIF fbClampPositionHoldTimeout.Q THEN
+						// 转矩控制没有在规定时间内退出。
+						stStatus.bError := TRUE;
+						stStatus.nErrorID := 16#7208;
+						stStatus.eClampStep :=
+							E_DamperClampStep.Error;
+						stStatus.eStep :=
+							E_DamperTurntableStep.Error;
+					END_IF;
+					
+				E_DamperClampStep.RestorePositionForHold:
+					//==========================================================
+					// 等待轴恢复位置模式
+					//
+					// bPositionModeReady表示已经退出CST；
+					// bReady表示MC_Stop、MC_TorqueControl及其他运动功能块
+					// 均已释放，可以接受新的定位命令。
+					//==========================================================
+				
+					stClampingAxis.AutoCmd.bTorqueControl :=
+						FALSE;
+				
+					IF stClampingAxis.Alarm.bError THEN
+						stStatus.bError := TRUE;
+						stStatus.nErrorID := 16#7207;
+						stStatus.eClampStep :=
+							E_DamperClampStep.Error;
+						stStatus.eStep :=
+							E_DamperTurntableStep.Error;
+				
+					ELSIF
+						stClampingAxis.State.bPositionModeReady
+						AND stClampingAxis.State.bReady
+					THEN
+						// 使用CSP绝对定位到38 mm。
+						// 即使退出转矩时产生了少量位置偏移，也会重新回到38 mm。
+						stClampingAxis.AutoSet.Position.fAbsolutePosition :=
+							stConfig.fClampMinimumPosition;
+				
+						stClampingAxis.AutoSet.Position.fVelocity :=
+							stConfig.fClampPositionVelocity;
+				
+						stClampingAxis.AutoSet.Position.fAcceleration :=
+							stConfig.fClampPositionAcceleration;
+				
+						stClampingAxis.AutoSet.Position.fDeceleration :=
+							stConfig.fClampPositionDeceleration;
+				
+						stClampingAxis.AutoCmd.bMoveAbs :=
+							TRUE;
+				
+						bClampCommandIssued := TRUE;
+				
+						stStatus.eClampStep :=
+							E_DamperClampStep.WaitPositionHold;
+				
+					ELSIF fbClampPositionHoldTimeout.Q THEN
+						// 规定时间内没有恢复位置模式。
+						stStatus.bError := TRUE;
+						stStatus.nErrorID := 16#7208;
+						stStatus.eClampStep :=
+							E_DamperClampStep.Error;
+						stStatus.eStep :=
+							E_DamperTurntableStep.Error;
+					END_IF;
+				E_DamperClampStep.WaitPositionHold:
+					//==========================================================
+					// 等待CSP重新定位到38 mm
+					//==========================================================
+				
+					IF
+						stClampingAxis.State.bCmdRejected
+						OR stClampingAxis.State.bCommandAborted
+						OR stClampingAxis.Alarm.bError
+					THEN
+						bClampCommandIssued := FALSE;
+				
+						stStatus.bError := TRUE;
+						stStatus.nErrorID := 16#7209;
+						stStatus.eClampStep :=
+							E_DamperClampStep.Error;
+						stStatus.eStep :=
+							E_DamperTurntableStep.Error;
+				
+					ELSIF
+						bClampCommandIssued
+						AND
+						(
+							stClampingAxis.State.bDone
+							OR
+							(
+								ABS(
+									stClampingAxis.Data.fActPosition
+									- stConfig.fClampMinimumPosition
+								)
+								<= stConfig.fClampPositionTolerance
+							)
+						)
+					THEN
+						//======================================================
+						// 38 mm位置保持建立完成
+						//
+						// MC_MoveAbsolute完成后，NC轴继续在CSP中保持目标位置，
+						// 不需要持续保持bMoveAbs为TRUE。
+						//======================================================
+						bClampCommandIssued := FALSE;
+				
+						stStatus.bClampOpen := FALSE;
+						stStatus.bClampHolding := TRUE;
+				
+						stStatus.eClampStep :=
+							E_DamperClampStep.HoldPosition;
+				
+						bAdjustmentRequestIssued := FALSE;
+				
+						stStatus.eStep :=
+							E_DamperTurntableStep.RequestAdjustment;
+				
+					ELSIF fbClampPositionHoldTimeout.Q THEN
+						bClampCommandIssued := FALSE;
+				
+						stStatus.bError := TRUE;
+						stStatus.nErrorID := 16#7208;
+						stStatus.eClampStep :=
+							E_DamperClampStep.Error;
+						stStatus.eStep :=
+							E_DamperTurntableStep.Error;
+					END_IF;
+			ELSE
+				stStatus.bError := TRUE;
+				stStatus.nErrorID := 16#7205;
+				stStatus.eClampStep := E_DamperClampStep.Error;
+				stStatus.eStep := E_DamperTurntableStep.Error;
+			END_CASE;
 
 
         //======================================================
@@ -943,6 +1310,25 @@ ELSE
         stStatus.nErrorID := 16#71FF;
         stStatus.eStep := E_DamperTurntableStep.Error;
     END_CASE;
+
+//==============================================================
+// 两种夹紧保持方式
+//
+// HoldTorque：
+// 持续保持MC_TorqueControl请求。
+//
+// HoldPosition：
+// 不再发送转矩请求；NC轴保持在CSP，并保持最后一次
+// MC_MoveAbsolute的38 mm目标位置。
+//==============================================================
+    IF
+        stStatus.bClampHolding
+        AND
+        (stStatus.eClampStep = E_DamperClampStep.HoldTorque)
+    THEN
+        stClampingAxis.AutoSet.Torque := stConfig.ClampTorque;
+        stClampingAxis.AutoCmd.bTorqueControl := TRUE;
+    END_IF;
 
 
     //==========================================================

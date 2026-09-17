@@ -1,28 +1,310 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
   <POU Name="FB_GripperManager" Id="{604d8b30-294c-4983-864c-d7b539e9942c}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_GripperManager
-
 VAR_INPUT
-    bEnableComm : BOOL; // 是否打开并轮询本台电机的COM口
-	bStopRequested : BOOL;
+    bEnableComm     : BOOL;
+    bSimulationMode : BOOL;
+    bStopRequested  : BOOL;
+    bControlAllowed : BOOL;
+    eMachineMode    : E_MachineMode;
 END_VAR
-
 VAR_IN_OUT
-    ioGripper : ST_GripperInterface; // 由MAIN传入当前要管理的电机
+    ioGripper : ST_GripperInterface;
 END_VAR
-
 VAR
     fbGripperControl : FB_GripperControl;
+    bInitialized : BOOL;
+    udiLastManualId : UDINT;
+    udiLastAutoId : UDINT;
+    udiDeviceRequestId : UDINT;
+    udiActiveDeviceId : UDINT;
+    udiActiveSourceId : UDINT;
+    eActiveOwner : E_GripperControlOwner := E_GripperControlOwner.None;
+    eActiveCommand : E_GripperCommand := E_GripperCommand.None;
+    bNewManual : BOOL;
+    bNewAuto : BOOL;
+    bIssueCommand : BOOL;
+    eIssueOwner : E_GripperControlOwner;
+    eIssueCommand : E_GripperCommand;
+    udiIssueSourceId : UDINT;
+    bCommunicationReady : BOOL;
+    bHealthy : BOOL;
+    bAutoParametersValid : BOOL;
 END_VAR]]></Declaration>
     <Implementation>
-      <ST><![CDATA[// 当前阶段：管理器只负责调用本台夹爪的通信控制功能块。
-// 手动/自动命令仲裁和HMI保护，等运动命令接入时再增加。
+      <ST><![CDATA[// 本FB是夹爪唯一命令所有者：WPF写ManualCmd，自动流程写AutoCmd，
+// 只有本FB可以写底层Cmd。Stop始终具有最高优先级。
+IF NOT bInitialized THEN
+    udiLastManualId := ioGripper.ManualCmd.udiRequestId;
+    udiLastAutoId := ioGripper.AutoCmd.udiRequestId;
+    udiDeviceRequestId := ioGripper.Cmd.udiRequestId;
+    bInitialized := TRUE;
+END_IF;
+
+bNewManual := ioGripper.ManualCmd.udiRequestId <> udiLastManualId;
+bNewAuto := ioGripper.AutoCmd.udiRequestId <> udiLastAutoId;
+IF bNewManual THEN udiLastManualId := ioGripper.ManualCmd.udiRequestId; END_IF;
+IF bNewAuto THEN udiLastAutoId := ioGripper.AutoCmd.udiRequestId; END_IF;
+
+bCommunicationReady :=
+    bSimulationMode
+    OR (ioGripper.Feedback.bOnline AND NOT ioGripper.Feedback.bCommFault);
+bHealthy :=
+    bSimulationMode
+    OR (bCommunicationReady
+        AND ioGripper.Feedback.bFaultCodeValid
+        AND NOT ioGripper.Feedback.bFault);
+bAutoParametersValid :=
+    ioGripper.Set.bParametersVerified
+    AND (ioGripper.Set.diPositionTolerance >= 0)
+    AND (ioGripper.Set.uiCloseCurrentMin > 0)
+    AND (ioGripper.Set.tMoveTimeout > T#0MS);
+
+// Stop到来时，当前来源动作立即以“被停止中断”结束。
+IF bStopRequested AND (eActiveOwner <> E_GripperControlOwner.None) THEN
+    CASE eActiveOwner OF
+        E_GripperControlOwner.Manual:
+            ioGripper.ManualFeedback.bBusy := FALSE;
+            ioGripper.ManualFeedback.udiFailedId := udiActiveSourceId;
+            ioGripper.ManualFeedback.udErrorCode := 16#2004;
+        E_GripperControlOwner.Auto:
+            ioGripper.AutoFeedback.bBusy := FALSE;
+            ioGripper.AutoFeedback.udiFailedId := udiActiveSourceId;
+            ioGripper.AutoFeedback.udErrorCode := 16#2004;
+    END_CASE;
+    eActiveOwner := E_GripperControlOwner.None;
+    eActiveCommand := E_GripperCommand.None;
+END_IF;
+
+bIssueCommand := FALSE;
+eIssueOwner := E_GripperControlOwner.None;
+eIssueCommand := E_GripperCommand.None;
+udiIssueSourceId := 0;
+
+// 先拒绝当前模式无权使用的通道，再从有权通道选择一条新命令。
+IF bStopRequested THEN
+    IF bNewManual THEN
+        ioGripper.ManualFeedback.bBusy := FALSE;
+        ioGripper.ManualFeedback.udiRejectedId := ioGripper.ManualCmd.udiRequestId;
+        ioGripper.ManualFeedback.udErrorCode := 6;
+    END_IF;
+    IF bNewAuto THEN
+        ioGripper.AutoFeedback.bBusy := FALSE;
+        ioGripper.AutoFeedback.udiRejectedId := ioGripper.AutoCmd.udiRequestId;
+        ioGripper.AutoFeedback.udErrorCode := 6;
+    END_IF;
+
+ELSIF (eMachineMode = E_MachineMode.Automatic)
+    OR (eMachineMode = E_MachineMode.AutoStarting) THEN
+
+    IF bNewManual THEN
+        ioGripper.ManualFeedback.udiRejectedId := ioGripper.ManualCmd.udiRequestId;
+        ioGripper.ManualFeedback.udErrorCode := 16#4001; // 自动模式禁止手动命令
+    END_IF;
+    IF bNewAuto THEN
+        IF (eActiveOwner <> E_GripperControlOwner.None)
+            OR ioGripper.Feedback.bBusy THEN
+            ioGripper.AutoFeedback.udiRejectedId := ioGripper.AutoCmd.udiRequestId;
+            ioGripper.AutoFeedback.udErrorCode := 3;
+        ELSIF (ioGripper.AutoCmd.eCommand <> E_GripperCommand.Open)
+            AND (ioGripper.AutoCmd.eCommand <> E_GripperCommand.Close) THEN
+            ioGripper.AutoFeedback.udiRejectedId := ioGripper.AutoCmd.udiRequestId;
+            ioGripper.AutoFeedback.udErrorCode := 4;
+        ELSIF NOT bSimulationMode
+            AND (NOT bHealthy OR NOT bAutoParametersValid) THEN
+            ioGripper.AutoFeedback.udiRejectedId := ioGripper.AutoCmd.udiRequestId;
+            ioGripper.AutoFeedback.udErrorCode := 2;
+        ELSE
+            bIssueCommand := TRUE;
+            eIssueOwner := E_GripperControlOwner.Auto;
+            eIssueCommand := ioGripper.AutoCmd.eCommand;
+            udiIssueSourceId := ioGripper.AutoCmd.udiRequestId;
+        END_IF;
+    END_IF;
+
+ELSIF (eMachineMode = E_MachineMode.Manual)
+    OR (eMachineMode = E_MachineMode.Fault) THEN
+
+    IF bNewAuto THEN
+        ioGripper.AutoFeedback.udiRejectedId := ioGripper.AutoCmd.udiRequestId;
+        ioGripper.AutoFeedback.udErrorCode := 16#4002; // 当前模式禁止自动命令
+    END_IF;
+    IF bNewManual THEN
+        IF (eActiveOwner <> E_GripperControlOwner.None)
+            OR ioGripper.Feedback.bBusy THEN
+            ioGripper.ManualFeedback.udiRejectedId := ioGripper.ManualCmd.udiRequestId;
+            ioGripper.ManualFeedback.udErrorCode := 3;
+        ELSIF (eMachineMode = E_MachineMode.Fault)
+            AND (ioGripper.ManualCmd.eCommand <> E_GripperCommand.ResetFault)
+            AND (ioGripper.ManualCmd.eCommand <> E_GripperCommand.Stop) THEN
+            ioGripper.ManualFeedback.udiRejectedId := ioGripper.ManualCmd.udiRequestId;
+            ioGripper.ManualFeedback.udErrorCode := 16#4003;
+        ELSIF (ioGripper.ManualCmd.eCommand = E_GripperCommand.None) THEN
+            ioGripper.ManualFeedback.udiRejectedId := ioGripper.ManualCmd.udiRequestId;
+            ioGripper.ManualFeedback.udErrorCode := 4;
+        ELSIF NOT bSimulationMode AND NOT bCommunicationReady THEN
+            ioGripper.ManualFeedback.udiRejectedId := ioGripper.ManualCmd.udiRequestId;
+            ioGripper.ManualFeedback.udErrorCode := 2;
+        ELSE
+            bIssueCommand := TRUE;
+            eIssueOwner := E_GripperControlOwner.Manual;
+            eIssueCommand := ioGripper.ManualCmd.eCommand;
+            udiIssueSourceId := ioGripper.ManualCmd.udiRequestId;
+        END_IF;
+    END_IF;
+
+ELSE
+    IF bNewManual THEN
+        ioGripper.ManualFeedback.udiRejectedId := ioGripper.ManualCmd.udiRequestId;
+        ioGripper.ManualFeedback.udErrorCode := 16#4004;
+    END_IF;
+    IF bNewAuto THEN
+        ioGripper.AutoFeedback.udiRejectedId := ioGripper.AutoCmd.udiRequestId;
+        ioGripper.AutoFeedback.udErrorCode := 16#4004;
+    END_IF;
+END_IF;
+
+IF bIssueCommand THEN
+    IF bSimulationMode THEN
+        // 仿真只完成管理通道握手，不伪造物理位置、电流或在线反馈。
+        CASE eIssueOwner OF
+            E_GripperControlOwner.Manual:
+                ioGripper.ManualFeedback.udiAcceptedId := udiIssueSourceId;
+                ioGripper.ManualFeedback.udiCompletedId := udiIssueSourceId;
+                ioGripper.ManualFeedback.udErrorCode := 0;
+            E_GripperControlOwner.Auto:
+                ioGripper.AutoFeedback.udiAcceptedId := udiIssueSourceId;
+                ioGripper.AutoFeedback.udiCompletedId := udiIssueSourceId;
+                ioGripper.AutoFeedback.udErrorCode := 0;
+        END_CASE;
+    ELSE
+        IF udiDeviceRequestId = 16#FFFFFFFF THEN
+            udiDeviceRequestId := 1;
+        ELSE
+            udiDeviceRequestId := udiDeviceRequestId + 1;
+        END_IF;
+        ioGripper.Cmd.eCommand := eIssueCommand;
+        ioGripper.Cmd.udiRequestId := udiDeviceRequestId;
+        udiActiveDeviceId := udiDeviceRequestId;
+        udiActiveSourceId := udiIssueSourceId;
+        eActiveOwner := eIssueOwner;
+        eActiveCommand := eIssueCommand;
+        CASE eActiveOwner OF
+            E_GripperControlOwner.Manual:
+                ioGripper.ManualFeedback.bBusy := TRUE;
+                ioGripper.ManualFeedback.udErrorCode := 0;
+            E_GripperControlOwner.Auto:
+                ioGripper.AutoFeedback.bBusy := TRUE;
+                ioGripper.AutoFeedback.udErrorCode := 0;
+        END_CASE;
+    END_IF;
+END_IF;
+
+// 仿真与实机只在这一层分流，上层启动、流程和Supervisor无需再判断。
 fbGripperControl(
-    bEnableComm    := bEnableComm,
-    bStopRequested := bStopRequested,
-    ioGripper      := ioGripper
-);]]></ST>
+    bEnableComm := bEnableComm AND NOT bSimulationMode,
+    bStopRequested := bStopRequested AND NOT bSimulationMode,
+    ioGripper := ioGripper
+);
+
+// 将底层设备编号的结果映射回各自来源编号。
+IF NOT bSimulationMode AND (eActiveOwner <> E_GripperControlOwner.None) THEN
+    CASE eActiveOwner OF
+        E_GripperControlOwner.Manual:
+            IF ioGripper.Feedback.udiAcceptedId = udiActiveDeviceId THEN
+                ioGripper.ManualFeedback.udiAcceptedId := udiActiveSourceId;
+            END_IF;
+            IF ioGripper.Feedback.udiRejectedId = udiActiveDeviceId THEN
+                ioGripper.ManualFeedback.bBusy := FALSE;
+                ioGripper.ManualFeedback.udiRejectedId := udiActiveSourceId;
+                ioGripper.ManualFeedback.udErrorCode := ioGripper.Feedback.udCommandErrorCode;
+                eActiveOwner := E_GripperControlOwner.None;
+            ELSIF (ioGripper.Feedback.udiCompletedId = udiActiveDeviceId)
+                AND (ioGripper.Feedback.udCommandErrorCode = 0) THEN
+                ioGripper.ManualFeedback.bBusy := FALSE;
+                ioGripper.ManualFeedback.udiCompletedId := udiActiveSourceId;
+                ioGripper.ManualFeedback.udErrorCode := 0;
+                eActiveOwner := E_GripperControlOwner.None;
+            ELSIF (ioGripper.Feedback.udiAcceptedId = udiActiveDeviceId)
+                AND NOT ioGripper.Feedback.bBusy
+                AND (ioGripper.Feedback.udCommandErrorCode <> 0) THEN
+                ioGripper.ManualFeedback.bBusy := FALSE;
+                ioGripper.ManualFeedback.udiFailedId := udiActiveSourceId;
+                ioGripper.ManualFeedback.udErrorCode := ioGripper.Feedback.udCommandErrorCode;
+                eActiveOwner := E_GripperControlOwner.None;
+            END_IF;
+
+        E_GripperControlOwner.Auto:
+            IF ioGripper.Feedback.udiAcceptedId = udiActiveDeviceId THEN
+                ioGripper.AutoFeedback.udiAcceptedId := udiActiveSourceId;
+            END_IF;
+            IF ioGripper.Feedback.udiRejectedId = udiActiveDeviceId THEN
+                ioGripper.AutoFeedback.bBusy := FALSE;
+                ioGripper.AutoFeedback.udiRejectedId := udiActiveSourceId;
+                ioGripper.AutoFeedback.udErrorCode := ioGripper.Feedback.udCommandErrorCode;
+                eActiveOwner := E_GripperControlOwner.None;
+            ELSIF (ioGripper.Feedback.udiCompletedId = udiActiveDeviceId)
+                AND (ioGripper.Feedback.udCommandErrorCode = 0) THEN
+                ioGripper.AutoFeedback.bBusy := FALSE;
+                ioGripper.AutoFeedback.udiCompletedId := udiActiveSourceId;
+                ioGripper.AutoFeedback.udErrorCode := 0;
+                eActiveOwner := E_GripperControlOwner.None;
+            ELSIF (ioGripper.Feedback.udiAcceptedId = udiActiveDeviceId)
+                AND NOT ioGripper.Feedback.bBusy
+                AND (ioGripper.Feedback.udCommandErrorCode <> 0) THEN
+                ioGripper.AutoFeedback.bBusy := FALSE;
+                ioGripper.AutoFeedback.udiFailedId := udiActiveSourceId;
+                ioGripper.AutoFeedback.udErrorCode := ioGripper.Feedback.udCommandErrorCode;
+                eActiveOwner := E_GripperControlOwner.None;
+            END_IF;
+    END_CASE;
+END_IF;
+
+IF eActiveOwner = E_GripperControlOwner.None THEN
+    eActiveCommand := E_GripperCommand.None;
+END_IF;
+
+// 统一发布上层只读状态。
+ioGripper.State.bSimulationActive := bSimulationMode;
+ioGripper.State.bCommunicationReady :=
+    bSimulationMode
+    OR (ioGripper.Feedback.bOnline AND NOT ioGripper.Feedback.bCommFault);
+ioGripper.State.bHealthy :=
+    bSimulationMode
+    OR (ioGripper.State.bCommunicationReady
+        AND ioGripper.Feedback.bFaultCodeValid
+        AND NOT ioGripper.Feedback.bFault);
+ioGripper.State.bBusy :=
+    (eActiveOwner <> E_GripperControlOwner.None)
+    OR ioGripper.Feedback.bBusy;
+ioGripper.State.bManualReady :=
+    bControlAllowed
+    AND (eMachineMode = E_MachineMode.Manual)
+    AND ioGripper.State.bHealthy
+    AND NOT ioGripper.State.bBusy
+    AND NOT bStopRequested;
+ioGripper.State.bAutoReady :=
+    bSimulationMode
+    OR (bAutoParametersValid
+        AND ioGripper.State.bHealthy
+        AND ioGripper.Feedback.bPositionValid
+        AND ioGripper.Feedback.bCurrentValid
+        AND NOT ioGripper.State.bBusy
+        AND NOT bStopRequested);
+ioGripper.State.bStopAcknowledged :=
+    bSimulationMode OR ioGripper.Feedback.bStopAcknowledged;
+ioGripper.State.bStopError :=
+    NOT bSimulationMode AND ioGripper.Feedback.bStopError;
+ioGripper.State.udStopErrorCode := ioGripper.Feedback.udStopErrorCode;
+
+IF bStopRequested THEN
+    ioGripper.State.eOwner := E_GripperControlOwner.Stop;
+    ioGripper.State.eActiveCommand := E_GripperCommand.Stop;
+ELSE
+    ioGripper.State.eOwner := eActiveOwner;
+    ioGripper.State.eActiveCommand := eActiveCommand;
+END_IF;]]></ST>
     </Implementation>
   </POU>
 </TcPlcObject>

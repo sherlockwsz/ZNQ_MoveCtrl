@@ -109,6 +109,7 @@ VAR
 	bDamperGripperActionFault : BOOL; // 锁存供在线诊断；人工确认后再复位
 	udDamperGripperActionError : UDINT;	
 	bDamperGripperAutoReady     : BOOL;
+	bDamperGripperRequired      : BOOL; // COM3正在参与启动、流程或动作
 	bDamperGripperStartRejected : BOOL; // 供在线诊断；人工确认后清除
 	
 	fbMachinePreparation : FB_MachinePreparation;
@@ -194,23 +195,9 @@ THEN
 	bControlPrepare := FALSE;
 END_IF;
 
-// 只检查新一轮自动启动，不在运动中持续用三项Valid作启动检查：
-// 位置写入后，底层会暂时将这些Valid置FALSE，等待新轮询反馈。
+// 启动条件由夹爪管理层统一发布，MAIN不再重复读取底层有效位。
 bDamperGripperAutoReady :=
-    GVL_DamperGripper.stDamperGripper.Set.bParametersVerified
-    AND (GVL_DamperGripper.stDamperGripper.Set.uiCloseCurrentMin > 0)
-    AND (GVL_DamperGripper.stDamperGripper.Set.diPositionTolerance >= 0)
-    AND (GVL_DamperGripper.stDamperGripper.Set.tMoveTimeout > T#0MS)
-    AND GVL_DamperGripper.stDamperGripper.Feedback.bOnline
-    AND NOT GVL_DamperGripper.stDamperGripper.Feedback.bCommFault
-    AND GVL_DamperGripper.stDamperGripper.Feedback.bPositionValid
-    AND GVL_DamperGripper.stDamperGripper.Feedback.bCurrentValid
-    AND GVL_DamperGripper.stDamperGripper.Feedback.bFaultCodeValid
-    AND NOT GVL_DamperGripper.stDamperGripper.Feedback.bFault;
-	
-	IF GVL_System.bSkipCom3ForSimulation THEN
-		bDamperGripperAutoReady := TRUE;
-	END_IF;
+    GVL_DamperGripper.stDamperGripper.State.bAutoReady;
 	// 必须放在 Stop 请求处理、COM3 就绪计算之后，
 	// 且必须放在 Tray/Damper/Turntable 流程调用之前。
 	fbAutoStart(
@@ -228,7 +215,7 @@ bDamperGripperAutoReady :=
 		bHmiOnline := fbHmiWatchdog.bOnline,
 		bControlAllowed := GVL_HMI.Comm.bControlAllowed,
 		bGripperReady := bDamperGripperAutoReady,
-		bGripperActionFault := bDamperGripperActionFault AND NOT GVL_System.bSkipCom3ForSimulation,
+		bGripperActionFault := bDamperGripperActionFault,
 		bProcessDone := bAutoProcessDone,
 		tEnableTimeout := T#15S,
 		aAxes := GVL_AxisRuntime.Axes
@@ -392,9 +379,7 @@ fbAutoProcessCoordinator(
 
     ioGripper := GVL_DamperGripper.stDamperGripper,
 	ioScrewdriverProcess := fbScrewdriverProcess,
-    aAxes := GVL_AxisRuntime.Axes,
-	bSkipCom3ForSimulation :=
-		GVL_System.bSkipCom3ForSimulation
+    aAxes := GVL_AxisRuntime.Axes
 );
 
 // 启动准备阶段由启动协调器负责；运行阶段由流程协调器负责。
@@ -405,6 +390,14 @@ bAutoProcessBusy :=
 bAutoProcessDone :=
     fbAutoProcessCoordinator.bDone
     AND NOT fbAutoStart.bEnabling;
+
+// 启动请求不满足条件时由FB_AutoStartCoordinator执行“拒绝”，
+// 只有进入启动/运行/动作阶段后，COM3健康才升级为整机运行条件。
+bDamperGripperRequired :=
+    fbAutoStart.bEnabling
+    OR fbAutoStart.bProcessStart
+    OR fbAutoProcessCoordinator.bBusy
+    OR fbDamperGripperAction.bBusy;
 
 // ============================================================
 // 整机自动运行故障监控与第一故障汇总
@@ -442,13 +435,8 @@ fbMachineSupervisor(
     uiAutoStartErrorCode := fbAutoStart.uiErrorCode,
 
     bDamperGripperHealthOK :=
-		GVL_System.bSkipCom3ForSimulation
-		OR
-		(
-			GVL_DamperGripper.stDamperGripper.Feedback.bOnline
-			AND NOT GVL_DamperGripper.stDamperGripper.Feedback.bCommFault
-			AND NOT GVL_DamperGripper.stDamperGripper.Feedback.bFault
-		),
+		GVL_DamperGripper.stDamperGripper.State.bHealthy,
+    bDamperGripperRequired := bDamperGripperRequired,
     bDamperGripperFault :=
         fbAutoProcessCoordinator.bGripperActionFault,
     udiDamperGripperError :=
@@ -530,6 +518,13 @@ END_IF;
 fbAutoStopManager(
 	bExecute := bAbortProcesses,
 	tStopTimeout := T#10S,
+	bExternalStopRequired := NOT GVL_System.bSkipCom3ForSimulation,
+	bExternalStopDone :=
+		GVL_DamperGripper.stDamperGripper.State.bStopAcknowledged,
+	bExternalStopError :=
+		GVL_DamperGripper.stDamperGripper.State.bStopError,
+	udiExternalStopError :=
+		GVL_DamperGripper.stDamperGripper.State.udStopErrorCode,
 	aAxes := GVL_AxisRuntime.Axes
 );
 
@@ -566,23 +561,6 @@ END_IF;
 IF bControlAuto THEN
 	bAutoStopDone := FALSE;
 END_IF;
-
-//==============================================================
-//管理两个RS485夹爪
-//==============================================================
-// 此处bAbortProcesses尚未被清除，本扫描周期不会漏掉停止请求。
-fbDamperGripperManager(
-    bEnableComm    := NOT GVL_System.bSkipCom3ForSimulation,
-    bStopRequested := bStopRequestRaw OR bAbortProcesses,
-    ioGripper      := GVL_DamperGripper.stDamperGripper
-);
-
-// 第二台目前未启用；启用通信时再接入相同的停止请求。
-fbAdjustGripperManager(
-    bEnableComm    := FALSE,
-    bStopRequested := FALSE,
-    ioGripper      := GVL_DamperGripper.stAdjustGripper
-);
 
 //==============================================================
 // 整机唯一运行模式
@@ -622,6 +600,30 @@ bHomingModeActive := fbMachineModeManager.bHomingAllowed;
 bStopOwnerActive := fbMachineModeManager.bStopOwnerActive;
 bRecoveryModeActive := fbMachineModeManager.bRecoveryModeActive;
 bPreparationModeActive := fbMachineModeManager.bPreparationAllowed;
+
+//==============================================================
+// 两个RS485夹爪的统一管理层
+// 必须位于模式管理器之后，使用本周期最新的命令所有权。
+//==============================================================
+// COM3：阻尼器上下料夹爪，参与当前自动流程和整机Stop。
+fbDamperGripperManager(
+    bEnableComm := NOT GVL_System.bSkipCom3ForSimulation,
+    bSimulationMode := GVL_System.bSkipCom3ForSimulation,
+    bStopRequested := bStopRequestRaw OR bAbortProcesses,
+    bControlAllowed := GVL_HMI.Comm.bControlAllowed,
+    eMachineMode := eMachineMode,
+    ioGripper := GVL_DamperGripper.stDamperGripper
+);
+
+// COM4：调整流程夹爪预留；接口和管理逻辑已复用，当前不打开通信。
+fbAdjustGripperManager(
+    bEnableComm := FALSE,
+    bSimulationMode := FALSE,
+    bStopRequested := bStopRequestRaw OR bAbortProcesses,
+    bControlAllowed := GVL_HMI.Comm.bControlAllowed,
+    eMachineMode := eMachineMode,
+    ioGripper := GVL_DamperGripper.stAdjustGripper
+);
 //==============================================================
 // 停止管理器完成后解除流程Abort
 //

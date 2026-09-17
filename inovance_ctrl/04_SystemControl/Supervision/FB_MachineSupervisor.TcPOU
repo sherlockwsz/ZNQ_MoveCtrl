@@ -25,6 +25,7 @@ VAR_INPUT
     uiAutoStartErrorCode     : UINT;
 
     bDamperGripperHealthOK   : BOOL;  // 只使用稳定在线/通信/设备故障反馈
+    bDamperGripperRequired   : BOOL;  // COM3正在参与启动、流程或动作
     bDamperGripperFault      : BOOL;
     udiDamperGripperError    : UDINT;
 
@@ -96,7 +97,7 @@ END_IF;
 // 这里只监控稳定的在线、通信和设备故障组合结果。
 bGripperHealthFault :=
     (
-        bAutoActive
+        bDamperGripperRequired
         OR
         (
             stFault.bActive

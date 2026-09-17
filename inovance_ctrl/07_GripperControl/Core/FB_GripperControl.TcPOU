@@ -45,12 +45,14 @@ VAR
 	nErrorKind       : INT;
 	
 	fbMoveTimeout  : TON;
+	fbResetTimeout : TON;
 
 	nTxLength      : UINT; // 当前请求实际长度：读取/06写=8；10写=13
 	bWriteActive   : BOOL; // 当前等待的是写入回执，而非读取回执
 	bInternalStop  : BOOL; // 运动超时/故障后的尽力停止，不对应新Cmd编号
 	bStopPending   : BOOL;
 	bMoveActive    : BOOL; // 写入回执已确认，正在等待实际到位
+	bResetActive   : BOOL; // 复位写回执已确认，等待0x603F实际清零
 	
 	bCmdInitialized : BOOL;
 	bStopSignalSeen : BOOL; // 用于识别本次停止请求的上升沿
@@ -97,6 +99,11 @@ fbMoveTimeout(
     PT := ioGripper.Set.tMoveTimeout
 );
 
+fbResetTimeout(
+    IN := bResetActive,
+    PT := ioGripper.Set.tMoveTimeout
+);
+
 // 第一次扫描仅记住已有编号，防止PLC重启后重发旧命令。
 IF NOT bCmdInitialized THEN
     udiLastSeenId := ioGripper.Cmd.udiRequestId;
@@ -107,13 +114,18 @@ END_IF;
 // Stop报文仍由bStopPending排队，在当前串口事务结束后发送。
 IF bStopRequested AND NOT bStopSignalSeen THEN
     bStopPending := TRUE;
+    ioGripper.Feedback.bStopAcknowledged := FALSE;
+    ioGripper.Feedback.bStopError := FALSE;
+    ioGripper.Feedback.udStopErrorCode := 0;
 
-    IF bMoveActive
+    IF bMoveActive OR bResetActive
         OR (bWriteActive
             AND ((eActiveCommand = E_GripperCommand.Open)
-              OR (eActiveCommand = E_GripperCommand.Close))) THEN
+              OR (eActiveCommand = E_GripperCommand.Close)
+              OR (eActiveCommand = E_GripperCommand.ResetFault))) THEN
 
         bMoveActive := FALSE;
+        bResetActive := FALSE;
         ioGripper.Feedback.bBusy := FALSE;
         ioGripper.Feedback.bOpen := FALSE;
         ioGripper.Feedback.bClosed := FALSE;
@@ -154,6 +166,7 @@ IF NOT bEnableComm OR NOT bPortConfigOk OR NOT fbSerial.PortOpened THEN
 	ioGripper.Feedback.bBusy := FALSE;
 	bWriteActive := FALSE;
 	bMoveActive := FALSE;
+	bResetActive := FALSE;
 	bInternalStop := FALSE;
 	
 	// 命令不能静默消失；动作FB需要知道本次编号未受理。
@@ -259,12 +272,12 @@ CASE eStep OF
                 ELSIF NOT ioGripper.Feedback.bOnline
                     OR ioGripper.Feedback.bCommFault
                     OR NOT ioGripper.Feedback.bPositionValid
-                    OR NOT ioGripper.Feedback.bCurrentValid
                     OR NOT ioGripper.Feedback.bFaultCodeValid
                     OR ioGripper.Feedback.bFault THEN
                     udRejectCode := 2;
                 ELSIF (ioGripper.Cmd.eCommand = E_GripperCommand.Close)
-                    AND (ioGripper.Set.uiCloseCurrentMin = 0) THEN
+                    AND ((ioGripper.Set.uiCloseCurrentMin = 0)
+                         OR NOT ioGripper.Feedback.bCurrentValid) THEN
                     udRejectCode := 5;
                 END_IF;
 
@@ -453,6 +466,9 @@ CASE eStep OF
 				IF NOT bInternalStop THEN
 					ioGripper.Feedback.udCommandErrorCode := 16#2003;
 					ioGripper.Feedback.bBusy := FALSE;
+				ELSE
+					ioGripper.Feedback.bStopError := TRUE;
+					ioGripper.Feedback.udStopErrorCode := 16#2003;
 				END_IF;
 		
 				bMoveActive := FALSE;
@@ -504,7 +520,12 @@ CASE eStep OF
 						END_IF;
 		
 					E_GripperCommand.Stop:
-						IF NOT bInternalStop THEN
+						IF bInternalStop THEN
+							// 整机停止链路只接受有效Stop回执作为确认。
+							ioGripper.Feedback.bStopAcknowledged := TRUE;
+							ioGripper.Feedback.bStopError := FALSE;
+							ioGripper.Feedback.udStopErrorCode := 0;
+						ELSE
 							// 仅表示停止写命令已得到回执；
 							// 没有速度反馈，不能证明机械已完全停止。
 							ioGripper.Feedback.bBusy := FALSE;
@@ -512,11 +533,10 @@ CASE eStep OF
 						END_IF;
 		
 					E_GripperCommand.ResetFault:
-						// 回执仅表示复位写入成功；是否真的复位
-						// 仍须看随后0x603F的有效反馈。
+						// 回执仅表示复位写入成功；继续保持Busy，
+						// 直到随后0x603F有效读回且故障码真正清零。
 						ioGripper.Feedback.bFaultCodeValid := FALSE;
-						ioGripper.Feedback.bBusy := FALSE;
-						ioGripper.Feedback.udiCompletedId := udiActiveId;
+						bResetActive := TRUE;
 				END_CASE;
 		
 				bWriteActive := FALSE;
@@ -634,7 +654,12 @@ CASE eStep OF
 			bStopPending := TRUE;
 		END_IF;
 		// 已受理的写命令或运行中的动作因通信错误而失败。
-		IF bWriteActive OR bMoveActive THEN
+		IF bInternalStop THEN
+			ioGripper.Feedback.bStopError := TRUE;
+			ioGripper.Feedback.udStopErrorCode := 16#2003;
+		END_IF;
+
+		IF bWriteActive OR bMoveActive OR bResetActive THEN
 			IF bWriteActive AND NOT bInternalStop
 				AND ((eActiveCommand = E_GripperCommand.Open)
 				  OR (eActiveCommand = E_GripperCommand.Close)) THEN
@@ -649,6 +674,7 @@ CASE eStep OF
 		
 		bWriteActive := FALSE;
 		bMoveActive := FALSE;
+		bResetActive := FALSE;
 		bInternalStop := FALSE;
         eStep := E_GripperCommStep.SelectRequest;
 END_CASE;
@@ -720,6 +746,26 @@ IF bMoveActive THEN
                     END_IF;
             END_CASE;
         END_IF;
+    END_IF;
+END_IF;
+
+// 故障复位必须由0x603F的有效反馈确认，不能把写回执当作复位完成。
+IF bResetActive THEN
+    IF NOT ioGripper.Feedback.bOnline
+        OR ioGripper.Feedback.bCommFault THEN
+        bResetActive := FALSE;
+        ioGripper.Feedback.bBusy := FALSE;
+        ioGripper.Feedback.udCommandErrorCode := 16#2003;
+    ELSIF fbResetTimeout.Q THEN
+        bResetActive := FALSE;
+        ioGripper.Feedback.bBusy := FALSE;
+        ioGripper.Feedback.udCommandErrorCode := 16#2002;
+    ELSIF ioGripper.Feedback.bFaultCodeValid
+        AND NOT ioGripper.Feedback.bFault THEN
+        bResetActive := FALSE;
+        ioGripper.Feedback.bBusy := FALSE;
+        ioGripper.Feedback.udCommandErrorCode := 0;
+        ioGripper.Feedback.udiCompletedId := udiActiveId;
     END_IF;
 END_IF;]]></ST>
     </Implementation>

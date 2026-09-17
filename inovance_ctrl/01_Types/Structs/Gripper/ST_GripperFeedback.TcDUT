@@ -1,35 +1,30 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
   <DUT Name="ST_GripperFeedback" Id="{adabb868-89bd-44c0-afd4-a15e1c6d1094}">
     <Declaration><![CDATA[TYPE ST_GripperFeedback :
 STRUCT
-    bOnline             : BOOL;   // 已收到有效应答，且通信未超时
-    bPositionValid      : BOOL;   // 实际位置是本次通信获得的有效数据
-    bCurrentValid       : BOOL;   // 实际电流是本次通信获得的有效数据
-	bFaultCodeValid     : BOOL;   // TRUE：0x603F 曾成功读取；FALSE：当前不能信任 udFaultCode 和 bFault	
-	
-    diActualPosition    : DINT;   // 0x6064反馈，单位：脉冲
-    iActualCurrent      : INT;    // 0x6078反馈，单位：0.01 A，保留原始正负号
-    udFaultCode         : UDINT;  // 0x603F故障代码
-
-    bBusy               : BOOL;   // 当前请求正在处理
-    bOpen               : BOOL;   // 已验证张开到位
-    bClosed             : BOOL;   // 已验证夹紧完成
-    bPositionReached    : BOOL;   // 夹紧位置条件满足
-    bCurrentReached     : BOOL;   // 夹紧电流条件满足
-    bFault              : BOOL;   // 电机故障或动作故障
-    bCommFault          : BOOL;   // 串口、超时、CRC或应答异常
-
-    udiAcceptedId       : UDINT;  // 已受理的请求编号
-	udiRejectedId 		: UDINT;  // 最近一次明确拒绝、或串口不可用时未受理的请求编号
-    udiCompletedId      : UDINT;  // 已完成的请求编号
-    udCommErrorCode     : UDINT;  // 通信层错误码，与电机故障码区分
-	udCommandErrorCode : UDINT; // 0=无错误；1=参数未确认；
-								// 2=反馈/通信不满足；3=正在执行其他命令；
-								// 4=命令不支持；5=夹紧电流阈值未标定,6=整机停止中拒绝新命令；
-								// 16#2001=运动超时；16#2002=运动中故障；
-								// 16#2003=命令通信失败
-								// 16#2004=动作被整机停止中断
+    bOnline             : BOOL;
+    bPositionValid      : BOOL;
+    bCurrentValid       : BOOL;
+    bFaultCodeValid     : BOOL;
+    diActualPosition    : DINT;
+    iActualCurrent      : INT;
+    udFaultCode         : UDINT;
+    bBusy               : BOOL;
+    bOpen               : BOOL;
+    bClosed             : BOOL;
+    bPositionReached    : BOOL;
+    bCurrentReached     : BOOL;
+    bFault              : BOOL;
+    bCommFault          : BOOL;
+    bStopAcknowledged   : BOOL;   // 整机Stop写命令已收到有效回执
+    bStopError          : BOOL;   // 整机Stop发送或应答失败
+    udiAcceptedId       : UDINT;
+    udiRejectedId       : UDINT;
+    udiCompletedId      : UDINT;
+    udCommErrorCode     : UDINT;
+    udCommandErrorCode  : UDINT;
+    udStopErrorCode     : UDINT;  // Stop错误与普通动作错误分离
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

@@ -1,12 +1,17 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
   <DUT Name="ST_GripperInterface" Id="{afd9d177-881e-495d-b69b-5724f6545672}">
     <Declaration><![CDATA[TYPE ST_GripperInterface :
 STRUCT
-    Port     : ComSerialConfig;     // 本台电机使用的COM口和串口参数
-    Set      : ST_GripperConfig;    // 站号、开合位置、电流阈值、超时等
-    Cmd      : ST_GripperRequest;   // 上层写入的动作请求
-    Feedback : ST_GripperFeedback;  // PLC写入的位置、电流、状态和故障
+    Port       : ComSerialConfig;       // 固定串口配置
+    Set        : ST_GripperConfig;      // 标定和动作参数
+    ManualCmd  : ST_GripperRequest;     // WPF手动命令通道
+    AutoCmd    : ST_GripperRequest;     // 自动流程命令通道
+    Cmd        : ST_GripperRequest;     // Manager选择后的底层命令，外部不得直接写
+    ManualFeedback : ST_GripperChannelFeedback;
+    AutoFeedback   : ST_GripperChannelFeedback;
+    State      : ST_GripperManagerState;
+    Feedback   : ST_GripperFeedback;    // 底层真实位置、电流和故障反馈
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

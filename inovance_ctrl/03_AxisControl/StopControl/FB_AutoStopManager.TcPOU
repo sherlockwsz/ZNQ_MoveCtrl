@@ -21,6 +21,12 @@ VAR_INPUT
 
     // 全轴停止最大等待时间。
     tStopTimeout : TIME := T#10S;
+
+    // 非NC设备停止确认；当前用于COM3夹爪。
+    bExternalStopRequired : BOOL := FALSE;
+    bExternalStopDone     : BOOL := TRUE;
+    bExternalStopError    : BOOL := FALSE;
+    udiExternalStopError  : UDINT := 0;
 END_VAR
 
 VAR_IN_OUT
@@ -61,6 +67,9 @@ VAR
     bAllAxesReleased : BOOL;
     bAllAxesDisabled : BOOL;
     bStopConfirmed : BOOL;
+    // 防止沿用上一轮仍保持的外部设备Stop确认：每轮必须先见到FALSE，
+    // 再接受本轮由FALSE变为TRUE的确认。
+    bExternalStopSeenLow : BOOL;
     bEnableWithdrawalStarted : BOOL;
     aWasEnabled : ARRAY[1..GVL_Constants.cMaxAxisCount] OF BOOL;
 
@@ -108,6 +117,7 @@ CASE eStep OF
             uiErrorAxisIndex := 0;
             nErrorID := 0;
             bStopConfirmed := FALSE;
+            bExternalStopSeenLow := NOT bExternalStopDone;
             bEnableWithdrawalStarted := FALSE;
 
             // 只要求本次停止开始时实际使能的轴报告Stop完成。
@@ -192,16 +202,40 @@ CASE eStep OF
             END_IF;
         END_FOR;
 
+		IF bExternalStopRequired AND bExternalStopError THEN
+			bError := TRUE;
+			uiErrorAxisIndex := GVL_AxisIndex.DamperGripper;
+			IF udiExternalStopError = 0 THEN
+				nErrorID := 16#E505;
+			ELSE
+				nErrorID := udiExternalStopError;
+			END_IF;
+		END_IF;
+
+		IF bExternalStopRequired AND NOT bExternalStopDone THEN
+			bExternalStopSeenLow := TRUE;
+		END_IF;
 
         IF bError THEN
             eStep := E_AutoStopStep.Fault;
-        ELSIF bAllAxesStopped THEN
+        ELSIF bAllAxesStopped
+			AND
+			(
+				NOT bExternalStopRequired
+				OR (bExternalStopSeenLow AND bExternalStopDone)
+			) THEN
             bStopConfirmed := TRUE;
             eStep := E_AutoStopStep.ReleaseStop;
         ELSIF fbStopTimeout.Q THEN
             bError := TRUE;
             bTimeout := TRUE;
-            nErrorID := 16#E502;
+			IF bAllAxesStopped AND bExternalStopRequired
+				AND NOT (bExternalStopSeenLow AND bExternalStopDone) THEN
+				uiErrorAxisIndex := GVL_AxisIndex.DamperGripper;
+				nErrorID := 16#E506;
+			ELSE
+				nErrorID := 16#E502;
+			END_IF;
             eStep := E_AutoStopStep.Fault;
         END_IF;
 

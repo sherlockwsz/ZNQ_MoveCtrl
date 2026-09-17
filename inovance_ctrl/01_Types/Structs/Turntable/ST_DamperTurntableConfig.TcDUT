@@ -54,6 +54,10 @@ STRUCT
     // 接近阻尼器但尚未产生明显夹紧力的位置。
     fClampApproachPosition : LREAL;
 
+    // 转矩模式下允许到达的最深夹紧位置。
+    // 夹紧方向为位置减小方向，到达该位置即可判定夹紧完成。
+    fClampMinimumPosition : LREAL;
+
     fClampPositionVelocity     : LREAL;
     fClampPositionAcceleration : LREAL;
     fClampPositionDeceleration : LREAL;
@@ -70,9 +74,6 @@ STRUCT
     //==========================================================
     // 模拟时间
     //==========================================================
-
-    // 模拟夹紧轴夹紧或松开。
-    tSimulatedClampAction : TIME;
 
     // 模拟同轴度调整。
     tSimulatedAdjustment : TIME;

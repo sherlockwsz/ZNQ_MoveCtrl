@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_GripperChannelFeedback" Id="{f90dc80c-ec6d-40fd-a3a7-a3cf88f36ea1}">
+    <Declaration><![CDATA[TYPE ST_GripperChannelFeedback :
+STRUCT
+    bBusy          : BOOL;
+    udiAcceptedId  : UDINT;
+    udiCompletedId : UDINT;
+    udiRejectedId  : UDINT;
+    udiFailedId    : UDINT;
+    udErrorCode    : UDINT;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

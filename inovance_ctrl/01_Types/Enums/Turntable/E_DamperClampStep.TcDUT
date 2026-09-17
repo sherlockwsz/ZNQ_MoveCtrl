@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
   <DUT Name="E_DamperClampStep" Id="{a4b29667-5bca-439d-9c81-c3d0bfc8cd27}">
     <Declaration><![CDATA[{attribute 'qualified_only'}
 {attribute 'strict'}
@@ -19,9 +19,18 @@ TYPE E_DamperClampStep :
     Idle                := 0,   // 无夹紧动作
     MoveToApproach      := 10,  // 位置模式运动到接近位置
     WaitApproach        := 20,  // 等待接近位置到位
+    // 已经进入40 mm位置公差，但MC_MoveAbsolute可能仍处于Busy。
+    // 在这里等待定位功能块完全释放、轴重新Ready。
+    WaitPositionReleased := 25,
+
     SwitchToTorque      := 30,  // 请求切换到CST模式
     BuildTorque         := 40,  // 建立夹紧转矩
+	// 转矩未达到，但位置先到达38 mm时使用。
+    ExitTorqueForPosition    := 42,
+    RestorePositionForHold   := 44,
+    WaitPositionHold         := 46,
     HoldTorque          := 50,  // 达到设定转矩并保持夹紧
+	HoldPosition        := 55,
     ExitTorque          := 60,  // 撤销转矩控制
     RestorePositionMode := 70,  // 等待恢复位置模式
     MoveToOpen          := 80,  // 返回松开位置

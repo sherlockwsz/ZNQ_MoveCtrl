@@ -19,6 +19,12 @@ END_VAR
 VAR_IN_OUT
     aAxes : ARRAY[1..GVL_Constants.cMaxAxisCount]
             OF ST_AxisInterface;
+	// 复用MAIN中COM3唯一的自动动作实例。
+    // 禁止在准备流程中重新创建FB_GripperAction实例。
+    ioGripperAction : FB_GripperAction;
+
+    // COM3夹爪统一接口。
+    ioGripper : ST_GripperInterface;
 END_VAR
 
 VAR_OUTPUT
@@ -41,7 +47,7 @@ VAR
     fbReadyTimeout  : TON;
     fbMotionTimeout : TON;
 
-    uiItem : UINT;
+    uiItem : DINT;
     uiAxis : UINT;
     bAllAxesReady : BOOL;
 
@@ -54,6 +60,9 @@ VAR
     bRotationIssued    : BOOL;
     bClampIssued       : BOOL;
     bTurntableIssued   : BOOL;
+	bAdjustmentXIssued : BOOL;
+	bAdjustmentYIssued : BOOL;
+	bAdjustmentZIssued : BOOL;
     bScrewYIssued      : BOOL;
     bScrewZIssued      : BOOL;
 
@@ -66,8 +75,18 @@ VAR
     bRotationDone    : BOOL;
     bClampDone       : BOOL;
     bTurntableDone   : BOOL;
+	bAdjustmentXDone : BOOL;
+	bAdjustmentYDone : BOOL;
+	bAdjustmentZDone : BOOL;
     bScrewYDone      : BOOL;
     bScrewZDone      : BOOL;
+	
+	// 机构准备阶段的COM3张开请求。
+    // 在MoveToStandby期间保持TRUE，完成后恢复FALSE。
+    bGripperOpenExecute : BOOL;
+
+    // COM3夹爪已经张开完成的锁存状态。
+    bGripperOpenDone : BOOL;
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[//==============================================================
@@ -88,13 +107,15 @@ fbMotionTimeout(
 );
 
 bErrorPulse := FALSE;
-
+// 默认不请求夹爪动作。
+// 只有MoveToStandby步骤尚未完成张开时才置TRUE。
+bGripperOpenExecute := FALSE;
 
 //==============================================================
 // 2. Preparation命令脉冲默认清除
 // 只处理当前十根已明确准备位置的自动流程轴。
 //==============================================================
-FOR uiItem := 1 TO GVL_AxisIndex.AutoProcessAxisCount DO
+FOR uiItem := LOWER_BOUND(GVL_AxisIndex.AutoProcessAxes, 1) TO UPPER_BOUND(GVL_AxisIndex.AutoProcessAxes, 1) DO
     uiAxis := GVL_AxisIndex.AutoProcessAxes[uiItem];
 
     aAxes[uiAxis].PreparationCmd.bMoveAbs := FALSE;
@@ -117,7 +138,7 @@ IF bReset THEN
     bTimeout := FALSE;
 
     uiErrorAxis := 0;
-    udiErrorCode := 0;
+    udiErrorCode := TO_UDINT(E_MachinePreparationErrorCode.None);
 
     M_ResetProgress();
 
@@ -151,13 +172,13 @@ ELSE
                 bError := FALSE;
                 bTimeout := FALSE;
                 uiErrorAxis := 0;
-                udiErrorCode := 0;
+                udiErrorCode := TO_UDINT(E_MachinePreparationErrorCode.None);
 
                 M_ResetProgress();
 
                 // 确认十根准备轴均已配置。
                 FOR uiItem := 1 TO
-                    GVL_AxisIndex.AutoProcessAxisCount
+                    UPPER_BOUND(GVL_AxisIndex.AutoProcessAxes, 1)
                 DO
                     uiAxis :=
                         GVL_AxisIndex.AutoProcessAxes[uiItem];
@@ -168,7 +189,7 @@ ELSE
                         bError := TRUE;
                         bErrorPulse := TRUE;
                         uiErrorAxis := uiAxis;
-                        udiErrorCode := 16#C101;
+                        udiErrorCode := TO_UDINT(E_MachinePreparationErrorCode.AxisNotConfigured);
                         eStep :=
                             E_MachinePreparationStep.Error;
                         EXIT;
@@ -191,7 +212,7 @@ ELSE
             bAllAxesReady := TRUE;
 
             FOR uiItem := 1 TO
-                GVL_AxisIndex.AutoProcessAxisCount
+                UPPER_BOUND(GVL_AxisIndex.AutoProcessAxes, 1)
             DO
                 uiAxis :=
                     GVL_AxisIndex.AutoProcessAxes[uiItem];
@@ -205,7 +226,7 @@ ELSE
                         udiErrorCode :=
                             aAxes[uiAxis].Alarm.nErrorID;
                     ELSE
-                        udiErrorCode := 16#C200
+                        udiErrorCode := TO_UDINT(E_MachinePreparationErrorCode.AxisAlarmBase)
                             + UINT_TO_UDINT(uiAxis);
                     END_IF;
 
@@ -233,7 +254,7 @@ ELSE
                     bError := TRUE;
                     bTimeout := TRUE;
                     bErrorPulse := TRUE;
-                    udiErrorCode := 16#C102;
+                    udiErrorCode := TO_UDINT(E_MachinePreparationErrorCode.AxisReadyTimeout);
                     eStep :=
                         E_MachinePreparationStep.Error;
                 END_IF;
@@ -251,7 +272,40 @@ ELSE
         //======================================================
         E_MachinePreparationStep.MoveToStandby:
             bBusy := TRUE;
-
+			
+			//======================================================
+			// COM3夹爪准备动作
+			//
+			// 与DamperZ抬升同时启动，不需要等待DamperZ到位。
+			// bExecute保持TRUE，直到FB_GripperAction返回Done。
+			//======================================================
+			IF NOT bGripperOpenDone THEN
+				bGripperOpenExecute := TRUE;
+			
+				// FB_GripperAction在MAIN中的调用结果会跨扫描周期更新。
+				IF ioGripperAction.bError THEN
+					// COM3张开失败，机构准备失败。
+					bGripperOpenExecute := FALSE;
+			
+					bError := TRUE;
+					bErrorPulse := TRUE;
+					uiErrorAxis := 0; // 夹爪不是NC轴，所以轴号为0。
+			
+					// 优先保留下层夹爪错误码，便于追踪具体动作失败原因。
+					IF ioGripperAction.udErrorCode <> TO_UDINT(E_GripperErrorCode.None) THEN
+						udiErrorCode := ioGripperAction.udErrorCode;
+					ELSE
+						udiErrorCode := TO_UDINT(E_MachinePreparationErrorCode.GripperOpenFailed);
+					END_IF;
+			
+					eStep := E_MachinePreparationStep.Error;
+			
+				ELSIF ioGripperAction.bDone THEN
+					// 张开完成后锁存，避免重复下发Open。
+					bGripperOpenDone := TRUE;
+					bGripperOpenExecute := FALSE;
+				END_IF;
+			END_IF;
             // 第一组保护轴并行运动。
             IF NOT bTrayXDone THEN
                 bTrayXDone := M_MoveAxisAbsolute(
@@ -341,6 +395,45 @@ ELSE
                 END_IF;
             END_IF;
 
+			//==============================================================
+			// 调整机构准备：
+			// AdjustmentZ先回到100 mm，确认安全后，
+			// AdjustmentX/Y再同时回到0/10 mm。
+			//==============================================================
+			IF NOT bAdjustmentZDone THEN
+				bAdjustmentZDone := M_MoveAxisAbsolute(
+					fTarget := stConfig.fAdjustmentZStandby,
+					fVelocity := stConfig.fAdjustmentVelocity,
+					fTolerance := stConfig.fLinearTolerance,
+					uiAxisIndex := GVL_AxisIndex.AdjustmentZ,
+					ioIssued := bAdjustmentZIssued,
+					ioAxis := aAxes[GVL_AxisIndex.AdjustmentZ]
+				);
+			END_IF;
+			
+			IF bAdjustmentZDone THEN
+				IF NOT bAdjustmentXDone THEN
+					bAdjustmentXDone := M_MoveAxisAbsolute(
+						fTarget := stConfig.fAdjustmentXStandby,
+						fVelocity := stConfig.fAdjustmentVelocity,
+						fTolerance := stConfig.fLinearTolerance,
+						uiAxisIndex := GVL_AxisIndex.AdjustmentX,
+						ioIssued := bAdjustmentXIssued,
+						ioAxis := aAxes[GVL_AxisIndex.AdjustmentX]
+					);
+				END_IF;
+			
+				IF NOT bAdjustmentYDone THEN
+					bAdjustmentYDone := M_MoveAxisAbsolute(
+						fTarget := stConfig.fAdjustmentYStandby,
+						fVelocity := stConfig.fAdjustmentVelocity,
+						fTolerance := stConfig.fLinearTolerance,
+						uiAxisIndex := GVL_AxisIndex.AdjustmentY,
+						ioIssued := bAdjustmentYIssued,
+						ioAxis := aAxes[GVL_AxisIndex.AdjustmentY]
+					);
+				END_IF;
+			END_IF;
 
             // ScrewdriverZ到安全高度后：
             // 夹紧轴松开和ScrewdriverY回零并行。
@@ -391,9 +484,13 @@ ELSE
                 AND bDamperXDone
                 AND bDamperYDone
                 AND bDamperZDone
+				AND bGripperOpenDone
                 AND bRotationDone
                 AND bClampDone
                 AND bTurntableDone
+				AND bAdjustmentXDone
+				AND bAdjustmentYDone
+				AND bAdjustmentZDone
                 AND bScrewYDone
                 AND bScrewZDone
             THEN
@@ -405,10 +502,14 @@ ELSE
                 bError := TRUE;
                 bTimeout := TRUE;
                 bErrorPulse := TRUE;
-                udiErrorCode := 16#C103;
+                udiErrorCode := TO_UDINT(E_MachinePreparationErrorCode.StandbyMotionTimeout);
 
                 // 保存第一根尚未到位的轴。
-                IF NOT bTrayXDone THEN
+				    // COM3没有完成张开。
+				IF NOT bGripperOpenDone THEN
+					uiErrorAxis := 0;
+					udiErrorCode := TO_UDINT(E_MachinePreparationErrorCode.GripperOpenFailed);
+                ELSIF NOT bTrayXDone THEN
                     uiErrorAxis := GVL_AxisIndex.TrayX;
                 ELSIF NOT bTrayZDone THEN
                     uiErrorAxis := GVL_AxisIndex.TrayZ;
@@ -424,6 +525,12 @@ ELSE
                     uiErrorAxis := GVL_AxisIndex.ScrewdriverZ;
                 ELSIF NOT bClampDone THEN
                     uiErrorAxis := GVL_AxisIndex.Clamping;
+				ELSIF NOT bAdjustmentZDone THEN
+					uiErrorAxis := GVL_AxisIndex.AdjustmentZ;
+				ELSIF NOT bAdjustmentXDone THEN
+					uiErrorAxis := GVL_AxisIndex.AdjustmentX;
+				ELSIF NOT bAdjustmentYDone THEN
+					uiErrorAxis := GVL_AxisIndex.AdjustmentY;
                 ELSIF NOT bScrewYDone THEN
                     uiErrorAxis := GVL_AxisIndex.ScrewdriverY;
                 ELSIF NOT bTurntableDone THEN
@@ -448,14 +555,47 @@ ELSE
         ELSE
             bError := TRUE;
             bErrorPulse := TRUE;
-            udiErrorCode := 16#C1FF;
+            udiErrorCode := TO_UDINT(E_MachinePreparationErrorCode.InvalidProcessStep);
             eStep := E_MachinePreparationStep.Error;
     END_CASE;
 END_IF;
+//==============================================================
+// 4. COM3机构准备动作
+//
+// WaitAxesReady阶段使用FALSE调用一次，使动作FB完成初始化。
+// MoveToStandby阶段根据bGripperOpenExecute执行Open。
+// Error或Abort时撤销动作。
+// Done阶段不再调用，命令权交还给自动流程协调器。
+//==============================================================
 
+// 如果其他准备轴在本周期报错，必须同时撤销夹爪动作。
+IF bAbort
+    OR (eStep = E_MachinePreparationStep.Error)
+THEN
+    bGripperOpenExecute := FALSE;
+END_IF;
+
+IF bAbort
+    OR (eStep = E_MachinePreparationStep.WaitAxesReady)
+    OR (eStep = E_MachinePreparationStep.MoveToStandby)
+    OR (eStep = E_MachinePreparationStep.Error)
+THEN
+    ioGripperAction(
+        bExecute := bGripperOpenExecute,
+        eCommand := E_GripperCommand.Open,
+
+        // 整机Stop或准备Abort时立即取消夹爪动作。
+        bCancel := bAbort,
+
+        tAcceptTimeout := GVL_ProcessConfig.stGripper.tAcceptTimeout,
+        tResultTimeout := GVL_ProcessConfig.stGripper.tResultTimeout,
+
+        ioGripper := ioGripper
+    );
+END_IF;
 
 //==============================================================
-// 4. 准备状态机拥有命令权时保持十根轴使能
+// 5. 准备状态机拥有命令权时保持十根轴使能
 //
 // Done后只要请求尚未撤销，继续保持使能，防止自动启动
 // 切换到Automatic前出现一个扫描周期的掉使能。
@@ -468,7 +608,7 @@ IF bBusy
     )
 THEN
     FOR uiItem := 1 TO
-        GVL_AxisIndex.AutoProcessAxisCount
+        UPPER_BOUND(GVL_AxisIndex.AutoProcessAxes, 1)
     DO
         uiAxis :=
             GVL_AxisIndex.AutoProcessAxes[uiItem];
@@ -508,7 +648,7 @@ IF ioAxis.Alarm.bError THEN
         udiErrorCode := ioAxis.Alarm.nErrorID;
     ELSE
         udiErrorCode :=
-            16#C200 + UINT_TO_UDINT(uiAxisIndex);
+            TO_UDINT(E_MachinePreparationErrorCode.AxisAlarmBase) + UINT_TO_UDINT(uiAxisIndex);
     END_IF;
 
     eStep := E_MachinePreparationStep.Error;
@@ -539,7 +679,7 @@ IF ioIssued THEN
         bErrorPulse := TRUE;
         uiErrorAxis := uiAxisIndex;
         udiErrorCode :=
-            16#C300 + UINT_TO_UDINT(uiAxisIndex);
+            TO_UDINT(E_MachinePreparationErrorCode.AxisCommandFailureBase) + UINT_TO_UDINT(uiAxisIndex);
         eStep := E_MachinePreparationStep.Error;
     END_IF;
 
@@ -582,6 +722,9 @@ bClampIssued := FALSE;
 bTurntableIssued := FALSE;
 bScrewYIssued := FALSE;
 bScrewZIssued := FALSE;
+bAdjustmentXIssued := FALSE;
+bAdjustmentYIssued := FALSE;
+bAdjustmentZIssued := FALSE;
 
 bTrayXDone := FALSE;
 bTrayZDone := FALSE;
@@ -592,7 +735,14 @@ bRotationDone := FALSE;
 bClampDone := FALSE;
 bTurntableDone := FALSE;
 bScrewYDone := FALSE;
-bScrewZDone := FALSE;]]></ST>
+bScrewZDone := FALSE;
+bAdjustmentXDone := FALSE;
+bAdjustmentYDone := FALSE;
+bAdjustmentZDone := FALSE;
+
+// 清除机构准备阶段的COM3状态。
+bGripperOpenExecute := FALSE;
+bGripperOpenDone := FALSE;]]></ST>
       </Implementation>
     </Method>
   </POU>

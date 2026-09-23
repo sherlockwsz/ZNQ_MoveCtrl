@@ -43,7 +43,11 @@ VAR_INPUT
 
 	bMachinePreparationFault : BOOL;
 	uiMachinePreparationErrorAxis : UINT;
-	udiMachinePreparationError : UDINT;	
+	udiMachinePreparationError : UDINT;
+
+    bAxisHomingFault          : BOOL;
+    uiAxisHomingErrorAxis     : UINT;
+    udiAxisHomingError        : UDINT;
 END_VAR
 
 VAR_IN_OUT
@@ -111,6 +115,7 @@ bActiveCondition :=
     bHmiWatchdogTimeout
     OR bAxisFaultFound
 	OR bMachinePreparationFault
+    OR bAxisHomingFault
     OR bGripperHealthFault
     OR bDamperGripperFault
     OR bTurntableFault
@@ -128,7 +133,7 @@ IF bReset AND NOT bActiveCondition THEN
     stFault.bActive := FALSE;
     stFault.eSource := E_MachineFaultSource.None;
     stFault.uiAxisIndex := 0;
-    stFault.udiErrorCode := 0;
+    stFault.udiErrorCode := TO_UDINT(E_MachineErrorCode.None);
 END_IF;
 
 //==============================================================
@@ -141,7 +146,7 @@ IF NOT stFault.bActive THEN
         stFault.bActive := TRUE;
         stFault.eSource := E_MachineFaultSource.HmiWatchdog;
         stFault.uiAxisIndex := 0;
-        stFault.udiErrorCode := 16#A001;
+        stFault.udiErrorCode := TO_UDINT(E_MachineErrorCode.HmiWatchdogTimeout);
         bStopRequestPulse := TRUE;
 	ELSIF bMachinePreparationFault THEN
 		stFault.bActive := TRUE;
@@ -152,12 +157,22 @@ IF NOT stFault.bActive THEN
 		stFault.udiErrorCode :=
 			udiMachinePreparationError;
 		bStopRequestPulse := TRUE;
+    ELSIF bAxisHomingFault THEN
+        stFault.bActive := TRUE;
+        stFault.eSource := E_MachineFaultSource.AxisHoming;
+        stFault.uiAxisIndex := uiAxisHomingErrorAxis;
+        IF udiAxisHomingError = 0 THEN
+            stFault.udiErrorCode := TO_UDINT(E_AxisHomingErrorCode.FaultWithoutDetail);
+        ELSE
+            stFault.udiErrorCode := udiAxisHomingError;
+        END_IF;
+        bStopRequestPulse := TRUE;
     ELSIF bAxisFaultFound THEN
         stFault.bActive := TRUE;
         stFault.eSource := E_MachineFaultSource.Axis;
         stFault.uiAxisIndex := uiFaultAxis;
         IF udiAxisError = 0 THEN
-            stFault.udiErrorCode := 16#A201;
+            stFault.udiErrorCode := TO_UDINT(E_MachineErrorCode.AxisFaultWithoutDetail);
         ELSE
             stFault.udiErrorCode := udiAxisError;
         END_IF;
@@ -170,9 +185,9 @@ IF NOT stFault.bActive THEN
         IF bDamperGripperFault AND (udiDamperGripperError <> 0) THEN
             stFault.udiErrorCode := udiDamperGripperError;
         ELSIF bDamperGripperFault THEN
-            stFault.udiErrorCode := 16#A301;
+            stFault.udiErrorCode := TO_UDINT(E_MachineErrorCode.GripperActionWithoutDetail);
         ELSE
-            stFault.udiErrorCode := 16#A302;
+            stFault.udiErrorCode := TO_UDINT(E_MachineErrorCode.GripperHealthFault);
         END_IF;
         bStopRequestPulse := TRUE;
 
@@ -181,7 +196,7 @@ IF NOT stFault.bActive THEN
         stFault.eSource := E_MachineFaultSource.TurntableProcess;
         stFault.uiAxisIndex := GVL_AxisIndex.Turntable;
         IF udiTurntableError = 0 THEN
-            stFault.udiErrorCode := 16#A401;
+            stFault.udiErrorCode := TO_UDINT(E_MachineErrorCode.TurntableFaultWithoutDetail);
         ELSE
             stFault.udiErrorCode := udiTurntableError;
         END_IF;
@@ -193,7 +208,7 @@ IF NOT stFault.bActive THEN
 		stFault.uiAxisIndex := uiScrewdriverErrorAxis;
 	
 		IF udiScrewdriverError = 0 THEN
-			stFault.udiErrorCode := 16#B600;
+			stFault.udiErrorCode := TO_UDINT(E_ScrewdriverErrorCode.ProcessFaultWithoutDetail);
 		ELSE
 			stFault.udiErrorCode := udiScrewdriverError;
 		END_IF;
@@ -204,7 +219,7 @@ IF NOT stFault.bActive THEN
         stFault.eSource := E_MachineFaultSource.AutoStart;
         stFault.uiAxisIndex := uiAutoStartErrorAxis;
         IF bAutoStartTimeout THEN
-            stFault.udiErrorCode := 16#A107;
+            stFault.udiErrorCode := TO_UDINT(E_AutoStartErrorCode.SupervisorStartTimeout);
         ELSE
             stFault.udiErrorCode := UINT_TO_UDINT(uiAutoStartErrorCode);
         END_IF;
@@ -217,9 +232,9 @@ IF NOT stFault.bActive THEN
         stFault.uiAxisIndex := uiAutoStopErrorAxis;
         IF udiAutoStopError = 0 THEN
             IF bAutoStopTimeout THEN
-                stFault.udiErrorCode := 16#A501;
+                stFault.udiErrorCode := TO_UDINT(E_AutoStopErrorCode.SupervisorStopTimeout);
             ELSE
-                stFault.udiErrorCode := 16#A502;
+                stFault.udiErrorCode := TO_UDINT(E_AutoStopErrorCode.SupervisorStopFault);
             END_IF;
         ELSE
             stFault.udiErrorCode := udiAutoStopError;

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_ClampingProcessConfig" Id="{bdb21785-a1e4-46ba-b29f-b1d092cb1257}">
+    <Declaration><![CDATA[TYPE ST_ClampingProcessConfig :
+STRUCT
+    stTorque : ST_ClampTorqueConfig;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

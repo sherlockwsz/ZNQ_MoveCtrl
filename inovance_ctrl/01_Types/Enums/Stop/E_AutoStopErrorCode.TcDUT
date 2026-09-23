@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_AutoStopErrorCode" Id="{21b962c5-58d3-4e57-bd9d-84290411689d}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_AutoStopErrorCode :
+(
+    None                       := 16#0000,
+    SupervisorStopTimeout      := 16#A501,
+    SupervisorStopFault        := 16#A502,
+    AxisLostPowerBeforeStop    := 16#E501,
+    ControlledStopTimeout      := 16#E502,
+    StopReleaseTimeout         := 16#E503,
+    DisableAxesTimeout         := 16#E504,
+    ExternalDeviceStopFailed   := 16#E505,
+    ExternalDeviceStopTimeout  := 16#E506
+) UDINT;
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

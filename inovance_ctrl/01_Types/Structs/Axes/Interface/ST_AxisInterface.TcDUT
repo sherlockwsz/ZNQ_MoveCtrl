@@ -16,7 +16,7 @@ STRUCT
 	PreparationCmd : ST_AxisCmd;
 	PreparationSet : ST_AxisSet;
 
-    // 回零流程预留命令源。
+    // 选中单轴回零流程命令源。
     HomingCmd : ST_AxisCmd;
     HomingSet : ST_AxisSet;
 

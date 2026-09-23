@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_MachineErrorCode" Id="{d49906d2-c26c-4c2b-b3e5-6cfdf6b7f1a1}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_MachineErrorCode :
+(
+    None                       := 16#0000,
+    HmiWatchdogTimeout         := 16#A001,
+    AxisFaultWithoutDetail     := 16#A201,
+    GripperActionWithoutDetail := 16#A301,
+    GripperHealthFault         := 16#A302,
+    TurntableFaultWithoutDetail := 16#A401
+) UDINT;
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

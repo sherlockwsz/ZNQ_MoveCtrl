@@ -1,0 +1,17 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <GVL Name="GVL_MotionConfig" Id="{763e2319-5fbe-4cc2-a570-4d1ab91a01a2}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+VAR_GLOBAL CONSTANT
+    stPreparation : ST_PreparationMotionConfig := (stTray := (fVelocity := 50.0), stDamperLinear := (fVelocity := 50.0), stDamperRotation := (fVelocity := 30.0), stClamping := (fVelocity := 15.0), stTurntable := (fVelocity := 60.0), stAdjustment := (fVelocity := 10.0), stScrewdriver := (fVelocity := 10.0), fLinearPositionTolerance := 0.01, fRotationPositionTolerance := 0.1, tReadyTimeout := T#15S, tMoveTimeout := T#60S);
+    stDamper : ST_DamperMotionConfig := (stX := (fVelocity := 50.0), stY := (fVelocity := 50.0), stZ := (fVelocity := 50.0), fPositionTolerance := 0.01, stRotation := (fVelocity := 30.0, fAcceleration := 100.0, fDeceleration := 100.0, fPositionTolerance := 0.01));
+    stDamperRotation : ST_DamperRotationQrMotionConfig := (stQrScan := (fVelocity := 60.0, fAcceleration := 100.0, fDeceleration := 100.0));
+    stTray : ST_TrayMotionConfig := (stX := (fVelocity := 50.0), stZ := (fVelocity := 50.0));
+    stTurntable : ST_TurntableMotionConfig := (fVelocity := 60.0, fAcceleration := 100.0, fDeceleration := 100.0, fPositionTolerance := 0.1, tMoveTimeout := T#10S);
+    stClamping : ST_ClampingMotionConfig := (fVelocity := 15.0, fAcceleration := 20.0, fDeceleration := 20.0, fPositionTolerance := 0.01, tMoveTimeout := T#5S);
+    stScrewdriver : ST_ScrewdriverMotionConfig := (stY := (fVelocity := 10.0), stZ := (fVelocity := 10.0), fPositionTolerance := 0.1, tMoveTimeout := T#15S);
+    stAdjustment : ST_AdjustmentMotionConfig := (stX := (fVelocity := 10.0), stY := (fVelocity := 10.0), stZ := (fVelocity := 10.0), fPositionTolerance := 0.1, tMoveTimeout := T#15S);
+    fAxisDirectionVelocityDeadband : LREAL := 0.01;
+END_VAR]]></Declaration>
+  </GVL>
+</TcPlcObject>

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
   <GVL Name="GVL_AxisIndex" Id="{42d84556-58db-4567-ab95-46810cabb804}">
     <Declaration><![CDATA[{attribute 'qualified_only'}
@@ -33,8 +33,8 @@ VAR_GLOBAL CONSTANT
     // 启动检查、自动使能和运行故障监控共用这一份清单，
     // 避免多个功能块分别维护轴号而产生遗漏。
     //==========================================================
-	AutoProcessAxisCount : UINT := 10;
-	AutoProcessAxes : ARRAY[1..10] OF UINT := [
+
+	AutoProcessAxes : ARRAY[1..13] OF UINT := [
 		TrayX,
 		TrayZ,
 		DamperX,
@@ -43,6 +43,10 @@ VAR_GLOBAL CONSTANT
 		DamperRotation,
 		Turntable,
 		Clamping,
+		// 同轴度调整机构
+		AdjustmentX,
+		AdjustmentY,
+		AdjustmentZ,
 		ScrewdriverY,
 		ScrewdriverZ
 	];

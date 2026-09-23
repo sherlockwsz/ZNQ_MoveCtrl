@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_AxisHomeCommandMode" Id="{39e63c3e-d792-45bb-a83f-2d44e7df31d7}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+// FB_AxisControl内部对MC_Home.HomingMode的类型安全封装。
+TYPE E_AxisHomeCommandMode :
+(
+    DefaultHoming   := 0,  // MC_DefaultHoming：执行NC轴已配置的标准回零
+    Direct          := 10, // MC_Direct：不运动，直接建立临时参考坐标
+    ForceCalibration:= 20  // MC_ForceCalibration：绝对编码器轴只建立Homed状态
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

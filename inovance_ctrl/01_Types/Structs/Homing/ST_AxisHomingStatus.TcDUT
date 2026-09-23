@@ -1,0 +1,23 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_AxisHomingStatus" Id="{86beac75-8390-41bd-b7e4-369c4a74b3a2}">
+    <Declaration><![CDATA[TYPE ST_AxisHomingStatus :
+STRUCT
+    bBusy          : BOOL;
+    bDone          : BOOL;
+    bError         : BOOL;
+    bTimeout       : BOOL;
+    bRequestRejected : BOOL;
+    bAborted       : BOOL;
+    bSimulationActive : BOOL;
+
+    uiRequestedAxis : UINT;
+    uiActiveAxis    : UINT;
+    eStep           : E_AxisHomingStep;
+    eStrategy       : E_AxisHomingStrategy;
+    eDirection      : E_AxisHomingDirection;
+    udiErrorCode    : UDINT;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

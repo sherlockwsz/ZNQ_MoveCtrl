@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_TrayErrorCode" Id="{03683152-6a0b-4c7f-986c-0e6b9ba04ab6}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+// 料盘流程错误码。
+// 当前流程尚未产生本地错误码，仅预留16#6200～16#62FF。
+TYPE E_TrayErrorCode :
+(
+    None         := 16#0000,
+    ReservedBase := 16#6200,
+    ReservedEnd  := 16#62FF
+) UDINT;
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

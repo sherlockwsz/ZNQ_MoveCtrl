@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
   <POU Name="FB_GripperAction" Id="{c2ce23f6-bc7d-437a-91da-351ba974928b}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_GripperAction
@@ -6,8 +6,8 @@ VAR_INPUT
     bExecute       : BOOL;
     eCommand       : E_GripperCommand;
     bCancel        : BOOL;
-    tAcceptTimeout : TIME := T#3S;
-    tResultTimeout : TIME := T#8S;
+    tAcceptTimeout : TIME := GVL_ProcessConfig.stGripper.tAcceptTimeout;
+    tResultTimeout : TIME := GVL_ProcessConfig.stGripper.tResultTimeout;
 END_VAR
 VAR_IN_OUT
     ioGripper : ST_GripperInterface;
@@ -28,7 +28,7 @@ VAR
     fbResultTimeout  : TON;
 END_VAR]]></Declaration>
     <Implementation>
-      <ST><![CDATA[// 自动动作只写AutoCmd；底层Cmd由FB_GripperManager唯一生成。
+      <ST>// 自动动作只写AutoCmd；底层Cmd由FB_GripperManager唯一生成。
 IF NOT bInitialized THEN
     bExecutePrevious := bExecute;
     bInitialized := TRUE;
@@ -49,7 +49,7 @@ IF ((eStep = E_GripperActionStep.WaitAccepted)
     bBusy := FALSE;
     bDone := FALSE;
     bError := TRUE;
-    udErrorCode := 16#3005;
+    udErrorCode := TO_UDINT(E_GripperErrorCode.ActionCancelled);
     eStep := E_GripperActionStep.Error;
     bExecutePrevious := bExecute;
     RETURN;
@@ -60,13 +60,13 @@ CASE eStep OF
         bBusy := FALSE;
         bDone := FALSE;
         bError := FALSE;
-        udErrorCode := 0;
+        udErrorCode := TO_UDINT(E_GripperErrorCode.None);
 
         IF bExecute AND NOT bExecutePrevious AND NOT bCancel THEN
-            IF (eCommand <> E_GripperCommand.Close)
-                AND (eCommand <> E_GripperCommand.Open) THEN
+            IF (eCommand &lt;&gt; E_GripperCommand.Close)
+                AND (eCommand &lt;&gt; E_GripperCommand.Open) THEN
                 bError := TRUE;
-                udErrorCode := 16#3001;
+                udErrorCode := TO_UDINT(E_GripperErrorCode.ActionInvalidCommand);
                 eStep := E_GripperActionStep.Error;
             ELSE
                 eActiveCommand := eCommand;
@@ -88,20 +88,24 @@ CASE eStep OF
             bBusy := FALSE;
             bError := TRUE;
             udErrorCode := ioGripper.AutoFeedback.udErrorCode;
-            IF udErrorCode = 0 THEN udErrorCode := 16#3006; END_IF;
+            IF udErrorCode = TO_UDINT(E_GripperErrorCode.None) THEN
+                udErrorCode := TO_UDINT(E_GripperErrorCode.ActionResultInvalid);
+            END_IF;
             eStep := E_GripperActionStep.Error;
         ELSIF ioGripper.AutoFeedback.udiFailedId = udiActionId THEN
             bBusy := FALSE;
             bError := TRUE;
             udErrorCode := ioGripper.AutoFeedback.udErrorCode;
-            IF udErrorCode = 0 THEN udErrorCode := 16#3006; END_IF;
+            IF udErrorCode = TO_UDINT(E_GripperErrorCode.None) THEN
+                udErrorCode := TO_UDINT(E_GripperErrorCode.ActionResultInvalid);
+            END_IF;
             eStep := E_GripperActionStep.Error;
         ELSIF ioGripper.AutoFeedback.udiAcceptedId = udiActionId THEN
             eStep := E_GripperActionStep.WaitCompleted;
         ELSIF fbAcceptTimeout.Q THEN
             bBusy := FALSE;
             bError := TRUE;
-            udErrorCode := 16#3002;
+            udErrorCode := TO_UDINT(E_GripperErrorCode.ActionAcceptTimeout);
             eStep := E_GripperActionStep.Error;
         END_IF;
 
@@ -110,7 +114,9 @@ CASE eStep OF
             bBusy := FALSE;
             bError := TRUE;
             udErrorCode := ioGripper.AutoFeedback.udErrorCode;
-            IF udErrorCode = 0 THEN udErrorCode := 16#3006; END_IF;
+            IF udErrorCode = TO_UDINT(E_GripperErrorCode.None) THEN
+                udErrorCode := TO_UDINT(E_GripperErrorCode.ActionResultInvalid);
+            END_IF;
             eStep := E_GripperActionStep.Error;
         ELSIF ioGripper.AutoFeedback.udiCompletedId = udiActionId THEN
             IF ioGripper.State.bHealthy THEN
@@ -120,13 +126,13 @@ CASE eStep OF
             ELSE
                 bBusy := FALSE;
                 bError := TRUE;
-                udErrorCode := 16#3006;
+                udErrorCode := TO_UDINT(E_GripperErrorCode.ActionResultInvalid);
                 eStep := E_GripperActionStep.Error;
             END_IF;
         ELSIF fbResultTimeout.Q THEN
             bBusy := FALSE;
             bError := TRUE;
-            udErrorCode := 16#3003;
+            udErrorCode := TO_UDINT(E_GripperErrorCode.ActionResultTimeout);
             eStep := E_GripperActionStep.Error;
         END_IF;
 
@@ -136,10 +142,10 @@ CASE eStep OF
             bDone := FALSE;
             eStep := E_GripperActionStep.Idle;
         ELSIF NOT ioGripper.State.bHealthy
-            OR (ioGripper.AutoFeedback.udiCompletedId <> udiActionId) THEN
+            OR (ioGripper.AutoFeedback.udiCompletedId &lt;&gt; udiActionId) THEN
             bDone := FALSE;
             bError := TRUE;
-            udErrorCode := 16#3006;
+            udErrorCode := TO_UDINT(E_GripperErrorCode.ActionResultInvalid);
             eStep := E_GripperActionStep.Error;
         END_IF;
 
@@ -152,7 +158,7 @@ CASE eStep OF
         END_IF;
 END_CASE;
 
-bExecutePrevious := bExecute;]]></ST>
+bExecutePrevious := bExecute;</ST>
     </Implementation>
   </POU>
 </TcPlcObject>

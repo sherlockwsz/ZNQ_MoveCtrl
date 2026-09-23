@@ -18,13 +18,14 @@ VAR_GLOBAL
         Set := (
             nStationId           := 2,
             diOpenPosition       := 0,
-            diClosePosition      := 1000,   // 暂定，标定后修改
+            diClosePosition      := 35000,   // 暂定，标定后修改
             bPositivePulseCloses := TRUE,
             diPositionTolerance  := 20,     // 暂定
-            uiCloseCurrentMin    := 0,      // 尚未标定
-            tReplyTimeout        := T#500MS,
+            uiCloseCurrentMin    := 1,      // 尚未标定
+            tReplyTimeout        := T#1S,
+            tFeedbackTimeout     := T#3S,   // 3秒无任何有效反馈才判通信故障
             tMoveTimeout         := T#5S,
-            bParametersVerified  := FALSE
+            bParametersVerified  := TRUE
         )
     );
 
@@ -44,8 +45,9 @@ VAR_GLOBAL
         Set := (
             nStationId          := 2,       
             tReplyTimeout       := T#500MS,
+            tFeedbackTimeout    := T#3S,
             tMoveTimeout        := T#5S,
-            bParametersVerified := FALSE
+            bParametersVerified := TRUE
         )
     );
 END_VAR]]></Declaration>

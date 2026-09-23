@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_GripperCommErrorReason" Id="{af858e60-8c2a-40ba-a9a0-9d48993018c0}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_GripperCommErrorReason :
+(
+    None                   := 0,
+    ReplyTimeout           := 1,
+    BadFrameOrReceiveError := 2,
+    StationMismatch        := 3,
+    CrcMismatch            := 4,
+    WriteReplyMismatch     := 5,
+    UnexpectedFunctionCode := 6,
+    InvalidByteCount       := 7,
+    SendError              := 8,
+    SerialBlockError       := 9
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

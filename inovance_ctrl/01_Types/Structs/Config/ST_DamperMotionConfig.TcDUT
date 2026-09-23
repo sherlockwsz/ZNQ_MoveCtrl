@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_DamperMotionConfig" Id="{d8745e73-ef26-4ac8-bbea-7b100b470e35}">
+    <Declaration><![CDATA[TYPE ST_DamperMotionConfig :
+STRUCT
+    stX : ST_VelocityConfig;
+    stY : ST_VelocityConfig;
+    stZ : ST_VelocityConfig;
+    fPositionTolerance : LREAL;
+    stRotation : ST_DamperRotationMotionConfig;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

@@ -1,7 +1,7 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
   <POU Name="FB_AxisControl" Id="{cbe667f4-3a4a-4731-acdb-ae88eb96b09a}" SpecialFunc="None">
-    <Declaration><![CDATA[FUNCTION_BLOCK FB_AxisControl
+    <Declaration>FUNCTION_BLOCK FB_AxisControl
 VAR_INPUT
     bControlAllowed : BOOL;// 外部控制许可
 	stLimit : ST_AxisLimit;// 当前轴的限位配置
@@ -20,6 +20,7 @@ VAR
 
     fbPower   : MC_Power;
     fbReset   : MC_Reset;
+    fbHome    : MC_Home;
     fbStop    : MC_Stop;
     fbJog     : MC_Jog;
     fbMoveAbs : MC_MoveAbsolute;
@@ -42,15 +43,16 @@ VAR
     //==========================================================
 
     trigReset   : R_TRIG;
+    trigHome    : R_TRIG;
     trigMoveAbs : R_TRIG;
     trigMoveRel : R_TRIG;
     trigJogPos  : R_TRIG;
     trigJogNeg  : R_TRIG;
 
 
-END_VAR]]></Declaration>
+END_VAR</Declaration>
     <Implementation>
-      <ST><![CDATA[//==============================================================
+      <ST>//==============================================================
 // 0. 刷新NC轴状态
 //
 // AXIS_REF.Status不会自动周期刷新。
@@ -111,6 +113,12 @@ M_UpdateCommandArbitration(
 
 // MC_Power必须每周期调用；同时处理Reset
 M_ExecutePowerReset(
+    ioAxisRef := AxisRef,
+    ioAxis    := stAxis
+);
+
+// 执行MC_Home；只响应仲裁后的HomingCmd.bHome
+M_ExecuteHoming(
     ioAxisRef := AxisRef,
     ioAxis    := stAxis
 );
@@ -200,10 +208,10 @@ M_UpdateAxisData(
 
 M_UpdateMotionDirection(
     ioAxis := stAxis
-);]]></ST>
+);</ST>
     </Implementation>
     <Method Name="M_ClearCycleResults" Id="{b0100f26-6f1e-463a-8206-ad01d5a00796}">
-      <Declaration><![CDATA[//==============================================================
+      <Declaration>//==============================================================
 // 方法名称：M_ClearCycleResults
 // 功能：清除只保持一个PLC扫描周期的结果和提示信息
 //
@@ -218,9 +226,9 @@ METHOD PRIVATE M_ClearCycleResults
 VAR_IN_OUT
     ioAxis : ST_AxisInterface;
     // 当前轴的命令、参数和反馈接口
-END_VAR]]></Declaration>
+END_VAR</Declaration>
       <Implementation>
-        <ST><![CDATA[//==============================================================
+        <ST>//==============================================================
 // 1. 清除单周期命令结果
 //==============================================================
 
@@ -244,11 +252,94 @@ ioAxis.Alarm.eRejectReason :=
 //==============================================================
 
 ioAxis.Alarm.bWarning := FALSE;
-ioAxis.Alarm.nWarningID := 0;]]></ST>
+ioAxis.Alarm.nWarningID := 0;</ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ExecuteHoming" Id="{71335fbe-04e0-4534-b1dc-a74e79e4fd26}">
+      <Declaration>//==============================================================
+// 执行单轴回零命令
+//
+// DefaultHoming使用NC轴中已经完成的参考方式、方向、速度和
+// 原点传感器映射。Direct只用于仿真建立临时参考坐标；
+// ForceCalibration用于绝对编码器轴，不改变当前位置。
+//==============================================================
+METHOD PRIVATE M_ExecuteHoming
+VAR_IN_OUT
+    ioAxisRef : AXIS_REF;
+    ioAxis    : ST_AxisInterface;
+END_VAR
+VAR
+    eMcHomingMode : MC_HomingMode;
+    bHomeAllowed  : BOOL;
+END_VAR</Declaration>
+      <Implementation>
+        <ST>CASE ioAxis.ActiveSet.Homing.eCommandMode OF
+    E_AxisHomeCommandMode.Direct:
+        eMcHomingMode := MC_Direct;
+
+    E_AxisHomeCommandMode.ForceCalibration:
+        eMcHomingMode := MC_ForceCalibration;
+
+    ELSE
+        eMcHomingMode := MC_DefaultHoming;
+END_CASE;
+
+bHomeAllowed :=
+    bControlAllowed
+    AND fbPower.Status
+    AND NOT ioAxis.Alarm.bError
+    AND NOT stInternal.bStopExecute
+    AND NOT fbStop.Busy
+    AND NOT fbReset.Busy
+    AND NOT fbHome.Busy
+    AND NOT stInternal.bHomeExecute
+    AND NOT fbJog.Busy
+    AND NOT fbMoveAbs.Busy
+    AND NOT fbMoveRel.Busy
+    AND NOT fbTorqueControl.Busy
+    AND NOT fbTorqueControl.Active
+    AND NOT stInternal.bMoveAbsExecute
+    AND NOT stInternal.bMoveRelExecute
+    AND NOT stInternal.bTorqueExecute;
+
+IF trigHome.Q THEN
+    IF bHomeAllowed
+        AND (stInternal.eRequestedCommand = E_AxisCommand.Home)
+    THEN
+        stInternal.bHomeExecute := TRUE;
+    ELSE
+        ioAxis.State.bCmdRejected := TRUE;
+        ioAxis.Alarm.eRejectReason :=
+            E_AxisRejectReason.HomeNotAllowed;
+    END_IF;
+END_IF;
+
+IF stInternal.bStopExecute THEN
+    stInternal.bHomeExecute := FALSE;
+END_IF;
+
+fbHome(
+    Axis       := ioAxisRef,
+    Execute    := stInternal.bHomeExecute,
+    Position   := ioAxis.ActiveSet.Homing.fReferencePosition,
+    HomingMode := eMcHomingMode
+);
+
+IF fbHome.Done THEN
+    stInternal.bHomeExecute := FALSE;
+    ioAxis.State.bDone := TRUE;
+
+ELSIF fbHome.CommandAborted THEN
+    stInternal.bHomeExecute := FALSE;
+    ioAxis.State.bCommandAborted := TRUE;
+
+ELSIF fbHome.Error THEN
+    stInternal.bHomeExecute := FALSE;
+END_IF;</ST>
       </Implementation>
     </Method>
     <Method Name="M_ExecuteJog" Id="{a4ee27c3-dd78-49f1-a96d-8089113d52a3}">
-      <Declaration><![CDATA[//正反点动
+      <Declaration>//正反点动
 METHOD PRIVATE M_ExecuteJog
 VAR_IN_OUT
     ioAxisRef : AXIS_REF;
@@ -264,9 +355,9 @@ VAR
     bJogForward       : BOOL;
     bJogBackward      : BOOL;
     bJogCommandEdge   : BOOL;
-END_VAR]]></Declaration>
+END_VAR</Declaration>
       <Implementation>
-        <ST><![CDATA[//==============================================================
+        <ST>//==============================================================
 // 1.根据仲裁结果生成MC_Jog方向
 //
 // 不再直接使用两个原始按钮驱动MC_Jog，
@@ -288,9 +379,9 @@ bJogCommandEdge :=
 //==============================================================
 
 bJogDynamicsValid :=
-    ioAxis.ActiveSet.Jog.fVelocity > 0.0
-    AND ioAxis.ActiveSet.Jog.fAcceleration >= 0.0
-    AND ioAxis.ActiveSet.Jog.fDeceleration >= 0.0;
+    ioAxis.ActiveSet.Jog.fVelocity &gt; 0.0
+    AND ioAxis.ActiveSet.Jog.fAcceleration &gt;= 0.0
+    AND ioAxis.ActiveSet.Jog.fDeceleration &gt;= 0.0;
 
 //==============================================================
 // 4. 生成点动许可
@@ -303,6 +394,8 @@ bJogAllowed :=
     AND NOT stInternal.bStopExecute
     AND NOT fbStop.Busy
     AND NOT fbReset.Busy
+    AND NOT fbHome.Busy
+    AND NOT stInternal.bHomeExecute
     AND NOT fbMoveAbs.Busy
     AND NOT fbMoveRel.Busy
     AND NOT stInternal.bMoveAbsExecute
@@ -433,11 +526,11 @@ fbJog(
 
 IF fbJog.CommandAborted THEN
     ioAxis.State.bCommandAborted := TRUE;
-END_IF;]]></ST>
+END_IF;</ST>
       </Implementation>
     </Method>
     <Method Name="M_ExecutePositioning" Id="{f6694070-471f-441e-a9e8-b34f3a930dbc}">
-      <Declaration><![CDATA[//相对、绝对定位运动
+      <Declaration>//相对、绝对定位运动
 METHOD PRIVATE M_ExecutePositioning
 VAR_IN_OUT
     ioAxisRef : AXIS_REF;
@@ -448,9 +541,9 @@ VAR
     bPositionAllowed       : BOOL;
     bPositionDynamicsValid : BOOL;
 END_VAR
-]]></Declaration>
+</Declaration>
       <Implementation>
-        <ST><![CDATA[//==============================================================
+        <ST>//==============================================================
 // 1. 绝对/相对运动命令上升沿
 //==============================================================
 
@@ -461,9 +554,9 @@ END_VAR
 //==============================================================
 
 bPositionDynamicsValid :=
-    ioAxis.ActiveSet.Position.fVelocity > 0.0
-    AND ioAxis.ActiveSet.Position.fAcceleration >= 0.0
-    AND ioAxis.ActiveSet.Position.fDeceleration >= 0.0;
+    ioAxis.ActiveSet.Position.fVelocity &gt; 0.0
+    AND ioAxis.ActiveSet.Position.fAcceleration &gt;= 0.0
+    AND ioAxis.ActiveSet.Position.fDeceleration &gt;= 0.0;
 
 
 //==============================================================
@@ -478,6 +571,8 @@ bPositionAllowed :=
     AND NOT stInternal.bStopExecute
     AND NOT fbStop.Busy
     AND NOT fbReset.Busy
+    AND NOT fbHome.Busy
+    AND NOT stInternal.bHomeExecute
     AND NOT fbJog.Busy
     AND NOT ioAxis.ActiveCmd.bJogPos
     AND NOT ioAxis.ActiveCmd.bJogNeg
@@ -629,6 +724,7 @@ END_IF;
 //==============================================================
 
 IF stInternal.bStopExecute THEN
+    stInternal.bHomeExecute := FALSE;
     stInternal.bMoveAbsExecute := FALSE;
     stInternal.bMoveRelExecute := FALSE;
     stInternal.bTorqueExecute := FALSE;
@@ -706,11 +802,11 @@ ELSIF fbMoveRel.Error THEN
 
     stInternal.bMoveRelExecute := FALSE;
 
-END_IF;]]></ST>
+END_IF;</ST>
       </Implementation>
     </Method>
     <Method Name="M_ExecuteTorqueControl" Id="{8f59c356-6219-4eab-b050-e71d0c124f35}">
-      <Declaration><![CDATA[//==============================================================
+      <Declaration>//==============================================================
 // 执行持续型转矩控制。
 // 撤销bTorqueControl后，命令仲裁会请求MC_Stop，
 // 由NC将轴从CST恢复到位置相关模式。
@@ -724,20 +820,20 @@ END_VAR
 VAR
     bTorqueParametersValid : BOOL;
     bTorqueAllowed         : BOOL;
-END_VAR]]></Declaration>
+END_VAR</Declaration>
       <Implementation>
-        <ST><![CDATA[//==============================================================
+        <ST>//==============================================================
 // 1. 参数和执行许可
 //==============================================================
 bTorqueParametersValid :=
-    ioAxis.ActiveSet.Torque.fMaxAbsTorquePercent > 0.0
+    ioAxis.ActiveSet.Torque.fMaxAbsTorquePercent &gt; 0.0
     AND ABS(ioAxis.ActiveSet.Torque.fTargetTorquePercent)
-        <= ioAxis.ActiveSet.Torque.fMaxAbsTorquePercent
-    AND ioAxis.ActiveSet.Torque.fTorqueRampPercentPerSecond > 0.0
-    AND ioAxis.ActiveSet.Torque.fVelocityLimitHigh > 0.0
-    AND ioAxis.ActiveSet.Torque.fVelocityLimitLow < 0.0
+        &lt;= ioAxis.ActiveSet.Torque.fMaxAbsTorquePercent
+    AND ioAxis.ActiveSet.Torque.fTorqueRampPercentPerSecond &gt; 0.0
+    AND ioAxis.ActiveSet.Torque.fVelocityLimitHigh &gt; 0.0
+    AND ioAxis.ActiveSet.Torque.fVelocityLimitLow &lt; 0.0
     AND ioAxis.ActiveSet.Torque.fVelocityLimitHigh
-        > ioAxis.ActiveSet.Torque.fVelocityLimitLow;
+        &gt; ioAxis.ActiveSet.Torque.fVelocityLimitLow;
 
 bTorqueAllowed :=
     bControlAllowed
@@ -746,6 +842,8 @@ bTorqueAllowed :=
     AND NOT stInternal.bStopExecute
     AND NOT fbStop.Busy
     AND NOT fbReset.Busy
+    AND NOT fbHome.Busy
+    AND NOT stInternal.bHomeExecute
     AND NOT fbJog.Busy
     AND NOT fbMoveAbs.Busy
     AND NOT fbMoveRel.Busy
@@ -758,7 +856,7 @@ bTorqueAllowed :=
 IF
     NOT ioAxis.ActiveCmd.bTorqueControl
     OR
-    (stInternal.eRequestedCommand <> E_AxisCommand.TorqueControl)
+    (stInternal.eRequestedCommand &lt;&gt; E_AxisCommand.TorqueControl)
 THEN
     stInternal.bTorqueExecute := FALSE;
 
@@ -802,7 +900,7 @@ fbTorqueReached(
         AND
         (
             ABS(ioAxis.Data.fActTorque)
-            >= ioAxis.ActiveSet.Torque.fReachedMinAbsTorquePercent
+            &gt;= ioAxis.ActiveSet.Torque.fReachedMinAbsTorquePercent
         ),
     PT := ioAxis.ActiveSet.Torque.tReachedStableTime
 );
@@ -837,11 +935,11 @@ IF fbTorqueControl.CommandAborted THEN
     ioAxis.State.bCommandAborted := TRUE;
 ELSIF fbTorqueControl.Error THEN
     stInternal.bTorqueExecute := FALSE;
-END_IF;]]></ST>
+END_IF;</ST>
       </Implementation>
     </Method>
     <Method Name="M_ExecutePowerReset" Id="{97d51e5c-08e7-4f36-a4c4-b68d43d17128}">
-      <Declaration><![CDATA[//调用 MC_Power和MC_Reset
+      <Declaration>//调用 MC_Power和MC_Reset
 METHOD PRIVATE M_ExecutePowerReset
 VAR_IN_OUT
     ioAxisRef : AXIS_REF;
@@ -852,9 +950,9 @@ VAR
     bPowerEnable  : BOOL; // 实际送入MC_Power的Enable
     bResetAllowed : BOOL; // 当前是否允许复位	
 END_VAR
-]]></Declaration>
+</Declaration>
       <Implementation>
-        <ST><![CDATA[//==============================================================
+        <ST>//==============================================================
 // 1. 生成MC_Power实际使能信号
 //
 // 外部要求使能时正常保持使能。
@@ -940,11 +1038,11 @@ IF fbReset.Done THEN
 
     ioAxis.State.bDone := TRUE;
 
-END_IF;]]></ST>
+END_IF;</ST>
       </Implementation>
     </Method>
     <Method Name="M_ExecuteStop" Id="{b3e2f5b9-520d-444d-9b18-5c763a9aea1b}">
-      <Declaration><![CDATA[//处理最高优先级停止和 MC_Stop
+      <Declaration>//处理最高优先级停止和 MC_Stop
 METHOD PRIVATE M_ExecuteStop
 VAR_IN_OUT
     ioAxisRef : AXIS_REF;
@@ -954,12 +1052,13 @@ END_VAR
 VAR
     fStopDeceleration : LREAL;//停止声明
 END_VAR
-]]></Declaration>
+</Declaration>
       <Implementation>
-        <ST><![CDATA[//==============================================================
+        <ST>//==============================================================
 // 1. Stop开始后撤销定位和转矩Execute
 //==============================================================
 IF stInternal.bStopExecute THEN
+    stInternal.bHomeExecute := FALSE;
     stInternal.bMoveAbsExecute := FALSE;
     stInternal.bMoveRelExecute := FALSE;
     stInternal.bTorqueExecute := FALSE;
@@ -975,7 +1074,7 @@ END_IF;
 fStopDeceleration :=
     ioAxis.ActiveSet.Position.fDeceleration;
 
-IF fStopDeceleration < 0.0 THEN
+IF fStopDeceleration &lt; 0.0 THEN
     fStopDeceleration := 0.0;
 END_IF;
 
@@ -1030,21 +1129,21 @@ END_IF;
 //==============================================================
 IF fbStop.Error THEN
     stInternal.bStopExecute := FALSE;
-END_IF;]]></ST>
+END_IF;</ST>
       </Implementation>
     </Method>
     <Method Name="M_ReadAxisStatus" Id="{d0e5ee8d-228a-4964-9d8c-da9887885914}">
-      <Declaration><![CDATA[// 刷新NC轴状态。每根轴、每周期只调用一次。
+      <Declaration>// 刷新NC轴状态。每根轴、每周期只调用一次。
 METHOD PRIVATE M_ReadAxisStatus
 VAR_IN_OUT
     ioAxisRef : AXIS_REF;
-END_VAR]]></Declaration>
+END_VAR</Declaration>
       <Implementation>
-        <ST><![CDATA[ioAxisRef.ReadStatus();]]></ST>
+        <ST>ioAxisRef.ReadStatus();</ST>
       </Implementation>
     </Method>
     <Method Name="M_SelectCommand" Id="{3eba9e33-1af3-4d6b-bf6d-4e9299aa666b}">
-      <Declaration><![CDATA[//==============================================================
+      <Declaration>//==============================================================
 // 方法名称：M_SelectCommand
 // 功能：
 // 1. 识别外部BOOL命令；
@@ -1061,6 +1160,8 @@ VAR_INPUT
     bStopRequest  : BOOL; // 停止请求，最高优先级
     bResetPulse   : BOOL; // 复位命令上升沿
 
+    bHomePulse    : BOOL; // 回零命令上升沿
+
     bTorqueControl : BOOL; // 持续型转矩控制请求
 
     bJogPositive  : BOOL; // 正向点动保持信号
@@ -1068,9 +1169,9 @@ VAR_INPUT
 
     bMoveAbsPulse : BOOL; // 绝对运动命令上升沿
     bMoveRelPulse : BOOL; // 相对运动命令上升沿
-END_VAR]]></Declaration>
+END_VAR</Declaration>
       <Implementation>
-        <ST><![CDATA[// 默认本周期没有有效命令
+        <ST>// 默认本周期没有有效命令
 M_SelectCommand := E_AxisCommand.NoCommand;
 
 
@@ -1099,7 +1200,16 @@ ELSIF bResetPulse THEN
 
 
 //==============================================================
-// 3. 转矩控制
+// 3. 回零命令
+//==============================================================
+
+ELSIF bHomePulse THEN
+
+    M_SelectCommand := E_AxisCommand.Home;
+
+
+//==============================================================
+// 4. 转矩控制
 //==============================================================
 
 ELSIF bTorqueControl THEN
@@ -1161,11 +1271,11 @@ ELSIF bMoveRelPulse THEN
 
     M_SelectCommand := E_AxisCommand.MoveRelative;
 
-END_IF;]]></ST>
+END_IF;</ST>
       </Implementation>
     </Method>
     <Method Name="M_UpdateAxisData" Id="{90593075-838c-4824-af74-478ff719ba9d}">
-      <Declaration><![CDATA[//==============================================================
+      <Declaration>//==============================================================
 // 方法名称：M_UpdateAxisData
 // 功能：
 // 1. 从AXIS_REF.NcToPlc读取NC轴实时数据；
@@ -1184,9 +1294,9 @@ VAR_IN_OUT
 
     ioAxis : ST_AxisInterface;
     // 当前单轴数据反馈接口
-END_VAR]]></Declaration>
+END_VAR</Declaration>
       <Implementation>
-        <ST><![CDATA[//==============================================================
+        <ST>//==============================================================
 // 1. 位置数据
 //==============================================================
 
@@ -1260,11 +1370,11 @@ ioAxis.Data.fActTorque :=
 // 因此暂不计算实际rpm。
 //==============================================================
 
-ioAxis.Data.fActRpm := 0.0;]]></ST>
+ioAxis.Data.fActRpm := 0.0;</ST>
       </Implementation>
     </Method>
     <Method Name="M_UpdateBasicState" Id="{5450b6ce-a3d6-4d3c-84ee-f95ee610611d}">
-      <Declaration><![CDATA[//==============================================================
+      <Declaration>//==============================================================
 // 方法名称：M_UpdateBasicState
 // 功能：
 // 1. 汇总各PLCopen功能块的Busy状态；
@@ -1283,9 +1393,9 @@ VAR_IN_OUT
 
     ioAxis : ST_AxisInterface;
     // 当前单轴状态和报警接口
-END_VAR]]></Declaration>
+END_VAR</Declaration>
       <Implementation>
-        <ST><![CDATA[//==============================================================
+        <ST>//==============================================================
 // 1. 汇总轴忙碌状态
 //
 // 除PLCopen功能块的Busy外，还包含三个Execute锁存信号，
@@ -1294,6 +1404,8 @@ END_VAR]]></Declaration>
 
 stInternal.bAnyBusy :=
     fbReset.Busy
+    OR fbHome.Busy
+    OR stInternal.bHomeExecute
     OR fbStop.Busy
     OR stInternal.bStopExecute
     OR fbJog.Busy
@@ -1334,6 +1446,7 @@ ioAxis.State.bBusy :=
 
 ioAxis.State.bActive :=
     fbJog.Busy
+    OR fbHome.Busy
     OR fbMoveAbs.Busy
     OR fbMoveRel.Busy
     OR fbTorqueControl.Active
@@ -1360,31 +1473,33 @@ ioAxis.State.bReady :=
 //==============================================================
 // 6. 更新回零状态
 //
-// 当前程序没有MC_Home，只读取NC轴的Homed状态。
+// MC_Home和NC轴状态共同维护该标志。
 //==============================================================
 
 ioAxis.State.bHomed :=
-    ioAxisRef.Status.Homed;]]></ST>
+    ioAxisRef.Status.Homed;</ST>
       </Implementation>
     </Method>
     <Method Name="M_UpdateCommandArbitration" Id="{d8b16562-dea7-412c-a822-b092e5d2cca8}">
-      <Declaration><![CDATA[//==============================================================
+      <Declaration>//==============================================================
 // 汇总运动状态、生成停止请求、选择唯一命令并锁存停止。
 //==============================================================
 METHOD PRIVATE M_UpdateCommandArbitration
 VAR_IN_OUT
     ioAxis : ST_AxisInterface;
-END_VAR]]></Declaration>
+END_VAR</Declaration>
       <Implementation>
-        <ST><![CDATA[// Execute已锁存但Busy尚未建立时，同样视为运动有效。
+        <ST>// Execute已锁存但Busy尚未建立时，同样视为运动有效。
 stInternal.bMotionActive :=
     fbJog.Busy
+    OR fbHome.Busy
     OR fbMoveAbs.Busy
     OR fbMoveRel.Busy
     OR fbTorqueControl.Active
     OR fbTorqueControl.Busy
     OR stInternal.bMoveAbsExecute
     OR stInternal.bMoveRelExecute
+    OR stInternal.bHomeExecute
     OR stInternal.bTorqueExecute;
 
 
@@ -1408,10 +1523,11 @@ stInternal.bStopRequest :=
     );
 
 
-// 优先级：Stop > Reset > Torque > Jog > MoveAbsolute/MoveRelative。
+// 优先级：Stop &gt; Reset &gt; Torque &gt; Jog &gt; MoveAbsolute/MoveRelative。
 stInternal.eRequestedCommand := M_SelectCommand(
     bStopRequest := stInternal.bStopRequest,
     bResetPulse := trigReset.Q,
+    bHomePulse := trigHome.Q,
     bTorqueControl := ioAxis.ActiveCmd.bTorqueControl,
     bJogPositive := ioAxis.ActiveCmd.bJogPos,
     bJogNegative := ioAxis.ActiveCmd.bJogNeg,
@@ -1426,11 +1542,11 @@ IF
     AND fbPower.Status
 THEN
     stInternal.bStopExecute := TRUE;
-END_IF;]]></ST>
+END_IF;</ST>
       </Implementation>
     </Method>
     <Method Name="M_UpdateCommandEdges" Id="{4c7b1159-4005-4e07-bab0-2bc66c855e7f}">
-      <Declaration><![CDATA[//==============================================================
+      <Declaration>//==============================================================
 // 方法名称：M_UpdateCommandEdges
 // 功能：统一更新单轴命令的上升沿检测结果
 //
@@ -1447,9 +1563,9 @@ VAR_INPUT
     iCmd : ST_AxisCmd;
     // 当前轴的原始命令
     // 结构体较小，使用VAR_INPUT传递不会造成明显开销
-END_VAR]]></Declaration>
+END_VAR</Declaration>
       <Implementation>
-        <ST><![CDATA[//==============================================================
+        <ST>//==============================================================
 // 1. 错误复位命令上升沿
 //==============================================================
 
@@ -1459,7 +1575,16 @@ trigReset(
 
 
 //==============================================================
-// 2. 绝对运动命令上升沿
+// 2. 回零命令上升沿
+//==============================================================
+
+trigHome(
+    CLK := iCmd.bHome
+);
+
+
+//==============================================================
+// 3. 绝对运动命令上升沿
 //==============================================================
 
 trigMoveAbs(
@@ -1494,11 +1619,11 @@ trigJogPos(
 
 trigJogNeg(
     CLK := iCmd.bJogNeg
-);]]></ST>
+);</ST>
       </Implementation>
     </Method>
     <Method Name="M_UpdateError" Id="{dd0c9f2b-f27c-4abb-b438-65065b8f3756}">
-      <Declaration><![CDATA[//==============================================================
+      <Declaration>//==============================================================
 // 方法名称：M_UpdateError
 // 功能：
 // 1. 汇总NC轴和各PLCopen功能块错误；
@@ -1506,7 +1631,7 @@ trigJogNeg(
 // 3. 将错误锁存到单轴报警接口。
 //
 // 错误优先级：
-// NC轴 > Stop > Power > Reset > Jog > 绝对运动 > 相对运动
+// NC轴 &gt; Stop &gt; Power &gt; Reset &gt; Jog &gt; 绝对运动 &gt; 相对运动
 //
 // 注意：
 // 1. 本方法不主动清除错误；
@@ -1522,9 +1647,9 @@ VAR_IN_OUT
 
     ioAxis : ST_AxisInterface;
     // 当前轴的状态和报警接口
-END_VAR]]></Declaration>
+END_VAR</Declaration>
       <Implementation>
-        <ST><![CDATA[//==============================================================
+        <ST>//==============================================================
 // 1. NC轴错误
 //
 // NC轴本体错误优先级最高。
@@ -1583,7 +1708,21 @@ ELSIF fbReset.Error THEN
 
 
 //==============================================================
-// 5. MC_TorqueControl错误
+// 5. MC_Home错误
+//==============================================================
+
+ELSIF fbHome.Error THEN
+
+    ioAxis.Alarm.bError := TRUE;
+    ioAxis.Alarm.nErrorID :=
+        fbHome.ErrorID;
+
+    ioAxis.Alarm.eErrorSource :=
+        E_AxisErrorSource.Home;
+
+
+//==============================================================
+// 6. MC_TorqueControl错误
 //==============================================================
 
 ELSIF fbTorqueControl.Error THEN
@@ -1637,7 +1776,7 @@ ELSIF fbMoveRel.Error THEN
     ioAxis.Alarm.eErrorSource :=
         E_AxisErrorSource.MoveRelative;
 
-END_IF;]]></ST>
+END_IF;</ST>
       </Implementation>
     </Method>
     <Method Name="M_UpdateMotionDirection" Id="{ef82fa8e-8387-4d59-b60a-cdad9b7d7a20}">
@@ -1667,7 +1806,7 @@ VAR CONSTANT
     //
     // 防止轴在零速附近因浮点波动频繁切换正负方向。
     // 当前单位取决于具体业务轴的工程单位，直线轴通常为mm/s。
-    c_fVelocityDeadband : LREAL := 0.01;
+    c_fVelocityDeadband : LREAL := GVL_MotionConfig.fAxisDirectionVelocityDeadband;
 END_VAR
 
 VAR
@@ -1675,7 +1814,7 @@ VAR
     fDirectionVelocity : LREAL;
 END_VAR]]></Declaration>
       <Implementation>
-        <ST><![CDATA[//==============================================================
+        <ST>//==============================================================
 // 1. 每周期默认清除方向
 //
 // 先写None可以保证：
@@ -1698,6 +1837,8 @@ ioAxis.State.eMotionDirection :=
 
 IF
     (ioAxis.State.eMotionState = E_AxisMotionState.Moving)
+    OR
+    (ioAxis.State.eMotionState = E_AxisMotionState.Homing)
     OR
     (ioAxis.State.eMotionState = E_AxisMotionState.Jogging)
     OR
@@ -1727,7 +1868,7 @@ THEN
 
     IF
         ABS(fDirectionVelocity)
-        <= c_fVelocityDeadband
+        &lt;= c_fVelocityDeadband
     THEN
 
         fDirectionVelocity :=
@@ -1742,7 +1883,7 @@ THEN
 
     IF
         fDirectionVelocity
-        > c_fVelocityDeadband
+        &gt; c_fVelocityDeadband
     THEN
 
         ioAxis.State.eMotionDirection :=
@@ -1750,7 +1891,7 @@ THEN
 
     ELSIF
         fDirectionVelocity
-        < -c_fVelocityDeadband
+        &lt; -c_fVelocityDeadband
     THEN
 
         ioAxis.State.eMotionDirection :=
@@ -1765,18 +1906,18 @@ THEN
 
     END_IF;
 
-END_IF;]]></ST>
+END_IF;</ST>
       </Implementation>
     </Method>
     <Method Name="M_UpdateMotionState" Id="{f24094b2-eed5-45d6-807b-d5bb6e886654}">
-      <Declaration><![CDATA[//==============================================================
+      <Declaration>//==============================================================
 // 方法名称：M_UpdateMotionState
 // 功能：根据轴错误、停止、复位、点动、定位和使能状态，
 //       生成唯一的E_AxisMotionState运动状态。
 //
 // 状态优先级：
-// Error > Stopping > Resetting > Jogging > Moving
-// > Disabled > NotReady > Standstill
+// Error &gt; Stopping &gt; Resetting &gt; Jogging &gt; Moving
+// &gt; Disabled &gt; NotReady &gt; Standstill
 //
 // 调用位置：
 // 必须放在执行方法、错误汇总和基础状态更新之后。
@@ -1790,9 +1931,9 @@ VAR_IN_OUT
 
     ioAxis : ST_AxisInterface;
     // 当前单轴状态和报警接口
-END_VAR]]></Declaration>
+END_VAR</Declaration>
       <Implementation>
-        <ST><![CDATA[//==============================================================
+        <ST>//==============================================================
 // 1. 错误状态
 //
 // NC轴错误或PLC锁存错误存在时，统一进入Error。
@@ -1833,7 +1974,20 @@ ELSIF fbReset.Busy THEN
 
 
 //==============================================================
-// 4. 转矩控制状态
+// 4. 回零状态
+//==============================================================
+
+ELSIF
+    fbHome.Busy
+    OR stInternal.bHomeExecute
+THEN
+
+    ioAxis.State.eMotionState :=
+        E_AxisMotionState.Homing;
+
+
+//==============================================================
+// 5. 转矩控制状态
 //==============================================================
 
 ELSIF
@@ -1906,11 +2060,11 @@ ELSE
     ioAxis.State.eMotionState :=
         E_AxisMotionState.Standstill;
 
-END_IF;]]></ST>
+END_IF;</ST>
       </Implementation>
     </Method>
     <Method Name="M_UpdateSoftLimitState" Id="{072cd1fa-f091-44c5-8764-82398ddee6ea}">
-      <Declaration><![CDATA[//==============================================================
+      <Declaration>//==============================================================
 // 方法名称：M_UpdateSoftLimitState
 //
 // 功能：
@@ -1940,9 +2094,9 @@ VAR_IN_OUT
 
     ioAxis : ST_AxisInterface;
     // 当前单轴接口
-END_VAR]]></Declaration>
+END_VAR</Declaration>
       <Implementation>
-        <ST><![CDATA[//==============================================================
+        <ST>//==============================================================
 // 1. 读取是否启用软件限位
 //==============================================================
 
@@ -1961,16 +2115,16 @@ stInternal.stSoftLimitResult.bEnabled :=
 
 stInternal.stSoftLimitResult.bConfigValid :=
     iLimit.fSoftwareLimitNeg
-        < iLimit.fSoftwareLimitPos
+        &lt; iLimit.fSoftwareLimitPos
 
-    AND iLimit.fSoftLimitMargin >= 0.0
+    AND iLimit.fSoftLimitMargin &gt;= 0.0
 
     AND
     (
         iLimit.fSoftwareLimitNeg
         + iLimit.fSoftLimitMargin
     )
-    <
+    &lt;
     (
         iLimit.fSoftwareLimitPos
         - iLimit.fSoftLimitMargin
@@ -2044,7 +2198,7 @@ ELSIF stInternal.stSoftLimitResult.bReady THEN
     // 使用实际位置生成WPF限位指示
     stInternal.stSoftLimitResult.bPositiveActive :=
         ioAxisRef.NcToPlc.ActPos
-        >=
+        &gt;=
         (
             iLimit.fSoftwareLimitPos
             - iLimit.fSoftLimitMargin
@@ -2052,7 +2206,7 @@ ELSIF stInternal.stSoftLimitResult.bReady THEN
 
     stInternal.stSoftLimitResult.bNegativeActive :=
         ioAxisRef.NcToPlc.ActPos
-        <=
+        &lt;=
         (
             iLimit.fSoftwareLimitNeg
             + iLimit.fSoftLimitMargin
@@ -2062,7 +2216,7 @@ ELSIF stInternal.stSoftLimitResult.bReady THEN
     // 正向点动进入正向缓冲区域后停止继续向外运动
     stInternal.stSoftLimitResult.bJogPositiveAllowed :=
         ioAxisRef.NcToPlc.SetPos
-        <
+        &lt;
         (
             iLimit.fSoftwareLimitPos
             - iLimit.fSoftLimitMargin
@@ -2072,7 +2226,7 @@ ELSIF stInternal.stSoftLimitResult.bReady THEN
     // 负向点动进入负向缓冲区域后停止继续向外运动
     stInternal.stSoftLimitResult.bJogNegativeAllowed :=
         ioAxisRef.NcToPlc.SetPos
-        >
+        &gt;
         (
             iLimit.fSoftwareLimitNeg
             + iLimit.fSoftLimitMargin
@@ -2082,19 +2236,19 @@ ELSIF stInternal.stSoftLimitResult.bReady THEN
     // 检查绝对目标
     stInternal.stSoftLimitResult.bAbsoluteTargetValid :=
         ioAxis.ActiveSet.Position.fAbsolutePosition
-            >= iLimit.fSoftwareLimitNeg
+            &gt;= iLimit.fSoftwareLimitNeg
         AND
         ioAxis.ActiveSet.Position.fAbsolutePosition
-            <= iLimit.fSoftwareLimitPos;
+            &lt;= iLimit.fSoftwareLimitPos;
 
 
     // 检查相对运动计算得到的最终目标
     stInternal.stSoftLimitResult.bRelativeTargetValid :=
         stInternal.stSoftLimitResult.fRelativeTargetPosition
-            >= iLimit.fSoftwareLimitNeg
+            &gt;= iLimit.fSoftwareLimitNeg
         AND
         stInternal.stSoftLimitResult.fRelativeTargetPosition
-            <= iLimit.fSoftwareLimitPos;
+            &lt;= iLimit.fSoftwareLimitPos;
 
 
 //==============================================================
@@ -2131,7 +2285,7 @@ ioAxis.State.bSoftLimitPositive :=
     stInternal.stSoftLimitResult.bPositiveActive;
 
 ioAxis.State.bSoftLimitNegative :=
-    stInternal.stSoftLimitResult.bNegativeActive;]]></ST>
+    stInternal.stSoftLimitResult.bNegativeActive;</ST>
       </Implementation>
     </Method>
   </POU>

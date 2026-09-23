@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
   <POU Name="FB_TrayProcess" Id="{47eb50cc-9cfe-4031-a99f-c6dfae995953}" SpecialFunc="None">
     <Declaration><![CDATA[//==============================================================
 // 五层料盘自动取放流程
@@ -81,25 +81,18 @@ VAR
     // 数值沿用原FB_AutoFlow中的调试值。
     // 实机调试前应再次核对机械坐标方向和实际位置。
     //==========================================================
-    fTrayForwardPosition : LREAL := 288.5;//料架位
-    fTrayRearPosition    : LREAL := -95.0; //升降位
-    fDamperPickPosition  : LREAL := 3.0;//阻尼器取料位
+//料架位
+ //升降位
+//阻尼器取料位
 
-    fXAxisVelocity : LREAL := 50.0;
-    fZAxisVelocity : LREAL := 50.0;
+
 
     //==========================================================
     // 五层料盘数据
     // 每层分别保存Z轴高位、低位和料盘状态。
     // 当前测试流程默认五层均有待检料盘。
     //==========================================================
-    aTray : ARRAY[1..5] OF ST_Tray := [
-        (fHighPosition := -705.0, fLowPosition := -734.0, eState := E_Tray.WaitInspect),
-        (fHighPosition := -575.0, fLowPosition := -615.0, eState := E_Tray.WaitInspect),
-        (fHighPosition := -455.0, fLowPosition := -490.0, eState := E_Tray.WaitInspect),
-        (fHighPosition := -330.0, fLowPosition := -365.0, eState := E_Tray.WaitInspect),
-        (fHighPosition := -205.0, fLowPosition := -240.0, eState := E_Tray.WaitInspect)
-    ];
+    aTray : ARRAY[1..5] OF ST_Tray := [5((eState := E_Tray.WaitInspect))];
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[//==============================================================
@@ -238,7 +231,7 @@ CASE eCurrentStep OF
 		// 2. 第1～4盘接受换盘请求
 		//==========================================================
 		ELSIF
-			(nCurrentLayer < 5)
+			(nCurrentLayer < UPPER_BOUND(aTray, 1))
 			AND bTrayChangeRequest
 		THEN
 			bTrayAtDamperPosition := FALSE;
@@ -253,7 +246,7 @@ CASE eCurrentStep OF
 		// 3. 第五盘等待阻尼器完整流程结束
 		//==========================================================
 		ELSIF
-			(nCurrentLayer = 5)
+			(nCurrentLayer = UPPER_BOUND(aTray, 1))
 			AND bDamperProcessDone
 		THEN
 			bTrayAtDamperPosition := FALSE;
@@ -284,7 +277,7 @@ CASE eCurrentStep OF
     E_TrayProcessStep.NextLayer:
 		bCommandIssued := FALSE;
 	
-		IF nCurrentLayer < 5 THEN
+		IF nCurrentLayer < UPPER_BOUND(aTray, 1) THEN
 			nCurrentLayer := nCurrentLayer + 1;
 	
 			eCurrentStep :=
@@ -328,7 +321,7 @@ END_CASE;]]></ST>
       <Declaration><![CDATA[METHOD PRIVATE M_ResetTrayStates
 
 VAR
-    nLayer : INT;
+    nLayer : DINT;
 END_VAR]]></Declaration>
       <Implementation>
         <ST><![CDATA[(*
@@ -336,7 +329,7 @@ END_VAR]]></Declaration>
     将五层料盘状态恢复为待检。
     不修改每层的高位和低位坐标。
 *)
-FOR nLayer := 1 TO 5 DO
+FOR nLayer := 1 TO UPPER_BOUND(aTray, 1) DO
     aTray[nLayer].eState :=
         E_Tray.WaitInspect;
 END_FOR;]]></ST>
@@ -364,8 +357,8 @@ END_VAR]]></Declaration>
     //==========================================================
     E_TrayProcessStep.ReturnEnsureXRear:
         IF NOT bCommandIssued THEN
-            ioAxisX.AutoSet.Position.fAbsolutePosition := fTrayRearPosition;
-            ioAxisX.AutoSet.Position.fVelocity := fXAxisVelocity;
+            ioAxisX.AutoSet.Position.fAbsolutePosition := GVL_PositionConfig.stTray.fLiftStationX;
+            ioAxisX.AutoSet.Position.fVelocity := GVL_MotionConfig.stTray.stX.fVelocity;
             ioAxisX.AutoCmd.bMoveAbs := TRUE;
             bCommandIssued := TRUE;
         END_IF;
@@ -382,8 +375,8 @@ END_VAR]]></Declaration>
     E_TrayProcessStep.ReturnMoveZHigh:
         IF NOT bCommandIssued THEN
             ioAxisZ.AutoSet.Position.fAbsolutePosition :=
-                aTray[nCurrentLayer].fHighPosition;
-            ioAxisZ.AutoSet.Position.fVelocity := fZAxisVelocity;
+                GVL_PositionConfig.stTray.aLayer[nCurrentLayer].fHighPosition;
+            ioAxisZ.AutoSet.Position.fVelocity := GVL_MotionConfig.stTray.stZ.fVelocity;
             ioAxisZ.AutoCmd.bMoveAbs := TRUE;
             bCommandIssued := TRUE;
         END_IF;
@@ -399,8 +392,8 @@ END_VAR]]></Declaration>
     //==========================================================
     E_TrayProcessStep.ReturnMoveXForward:
         IF NOT bCommandIssued THEN
-            ioAxisX.AutoSet.Position.fAbsolutePosition := fTrayForwardPosition;
-            ioAxisX.AutoSet.Position.fVelocity := fXAxisVelocity;
+            ioAxisX.AutoSet.Position.fAbsolutePosition := GVL_PositionConfig.stTray.fRackStationX;
+            ioAxisX.AutoSet.Position.fVelocity := GVL_MotionConfig.stTray.stX.fVelocity;
             ioAxisX.AutoCmd.bMoveAbs := TRUE;
             bCommandIssued := TRUE;
         END_IF;
@@ -417,8 +410,8 @@ END_VAR]]></Declaration>
     E_TrayProcessStep.ReturnMoveZLow:
         IF NOT bCommandIssued THEN
             ioAxisZ.AutoSet.Position.fAbsolutePosition :=
-                aTray[nCurrentLayer].fLowPosition;
-            ioAxisZ.AutoSet.Position.fVelocity := fZAxisVelocity;
+                GVL_PositionConfig.stTray.aLayer[nCurrentLayer].fLowPosition;
+            ioAxisZ.AutoSet.Position.fVelocity := GVL_MotionConfig.stTray.stZ.fVelocity;
             ioAxisZ.AutoCmd.bMoveAbs := TRUE;
             bCommandIssued := TRUE;
         END_IF;
@@ -434,8 +427,8 @@ END_VAR]]></Declaration>
     //==========================================================
     E_TrayProcessStep.ReturnMoveXRear:
         IF NOT bCommandIssued THEN
-            ioAxisX.AutoSet.Position.fAbsolutePosition := fTrayRearPosition;
-            ioAxisX.AutoSet.Position.fVelocity := fXAxisVelocity;
+            ioAxisX.AutoSet.Position.fAbsolutePosition := GVL_PositionConfig.stTray.fLiftStationX;
+            ioAxisX.AutoSet.Position.fVelocity := GVL_MotionConfig.stTray.stX.fVelocity;
             ioAxisX.AutoCmd.bMoveAbs := TRUE;
             bCommandIssued := TRUE;
         END_IF;
@@ -455,10 +448,10 @@ END_VAR]]></Declaration>
 	E_TrayProcessStep.FinalMoveZFirstLayerLow:
 		IF NOT bCommandIssued THEN
 			ioAxisZ.AutoSet.Position.fAbsolutePosition :=
-				aTray[1].fLowPosition;
+				GVL_PositionConfig.stTray.aLayer[1].fLowPosition;
 	
 			ioAxisZ.AutoSet.Position.fVelocity :=
-				fZAxisVelocity;
+				GVL_MotionConfig.stTray.stZ.fVelocity;
 	
 			ioAxisZ.AutoCmd.bMoveAbs := TRUE;
 			bCommandIssued := TRUE;
@@ -495,8 +488,8 @@ END_VAR]]></Declaration>
     //==========================================================
     E_TrayProcessStep.TakeMoveXRear:
         IF NOT bCommandIssued THEN
-            ioAxisX.AutoSet.Position.fAbsolutePosition := fTrayRearPosition;
-            ioAxisX.AutoSet.Position.fVelocity := fXAxisVelocity;
+            ioAxisX.AutoSet.Position.fAbsolutePosition := GVL_PositionConfig.stTray.fLiftStationX;
+            ioAxisX.AutoSet.Position.fVelocity := GVL_MotionConfig.stTray.stX.fVelocity;
             ioAxisX.AutoCmd.bMoveAbs := TRUE;
             bCommandIssued := TRUE;
         END_IF;
@@ -513,8 +506,8 @@ END_VAR]]></Declaration>
     E_TrayProcessStep.TakeMoveZLow:
         IF NOT bCommandIssued THEN
             ioAxisZ.AutoSet.Position.fAbsolutePosition :=
-                aTray[nCurrentLayer].fLowPosition;
-            ioAxisZ.AutoSet.Position.fVelocity := fZAxisVelocity;
+                GVL_PositionConfig.stTray.aLayer[nCurrentLayer].fLowPosition;
+            ioAxisZ.AutoSet.Position.fVelocity := GVL_MotionConfig.stTray.stZ.fVelocity;
             ioAxisZ.AutoCmd.bMoveAbs := TRUE;
             bCommandIssued := TRUE;
         END_IF;
@@ -530,8 +523,8 @@ END_VAR]]></Declaration>
     //==========================================================
     E_TrayProcessStep.TakeMoveXForward:
         IF NOT bCommandIssued THEN
-            ioAxisX.AutoSet.Position.fAbsolutePosition := fTrayForwardPosition;
-            ioAxisX.AutoSet.Position.fVelocity := fXAxisVelocity;
+            ioAxisX.AutoSet.Position.fAbsolutePosition := GVL_PositionConfig.stTray.fRackStationX;
+            ioAxisX.AutoSet.Position.fVelocity := GVL_MotionConfig.stTray.stX.fVelocity;
             ioAxisX.AutoCmd.bMoveAbs := TRUE;
             bCommandIssued := TRUE;
         END_IF;
@@ -548,8 +541,8 @@ END_VAR]]></Declaration>
     E_TrayProcessStep.TakeMoveZHigh:
         IF NOT bCommandIssued THEN
             ioAxisZ.AutoSet.Position.fAbsolutePosition :=
-                aTray[nCurrentLayer].fHighPosition;
-            ioAxisZ.AutoSet.Position.fVelocity := fZAxisVelocity;
+                GVL_PositionConfig.stTray.aLayer[nCurrentLayer].fHighPosition;
+            ioAxisZ.AutoSet.Position.fVelocity := GVL_MotionConfig.stTray.stZ.fVelocity;
             ioAxisZ.AutoCmd.bMoveAbs := TRUE;
             bCommandIssued := TRUE;
         END_IF;
@@ -565,8 +558,8 @@ END_VAR]]></Declaration>
     //==========================================================
     E_TrayProcessStep.TakeMoveXRearWithTray:
         IF NOT bCommandIssued THEN
-            ioAxisX.AutoSet.Position.fAbsolutePosition := fTrayRearPosition;
-            ioAxisX.AutoSet.Position.fVelocity := fXAxisVelocity;
+            ioAxisX.AutoSet.Position.fAbsolutePosition := GVL_PositionConfig.stTray.fLiftStationX;
+            ioAxisX.AutoSet.Position.fVelocity := GVL_MotionConfig.stTray.stX.fVelocity;
             ioAxisX.AutoCmd.bMoveAbs := TRUE;
             bCommandIssued := TRUE;
         END_IF;
@@ -583,10 +576,10 @@ END_VAR]]></Declaration>
 	E_TrayProcessStep.TakeMoveZDamperPosition:
 		IF NOT bCommandIssued THEN
 			ioAxisZ.AutoSet.Position.fAbsolutePosition :=
-				fDamperPickPosition;
+				GVL_PositionConfig.stTray.fPickupLevelZ;
 	
 			ioAxisZ.AutoSet.Position.fVelocity :=
-				fZAxisVelocity;
+				GVL_MotionConfig.stTray.stZ.fVelocity;
 	
 			ioAxisZ.AutoCmd.bMoveAbs := TRUE;
 			bCommandIssued := TRUE;

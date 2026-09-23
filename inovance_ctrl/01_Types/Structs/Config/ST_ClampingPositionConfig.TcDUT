@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_ClampingPositionConfig" Id="{4deac8e7-13c7-4405-ad7b-9dd23e3b8863}">
+    <Declaration><![CDATA[TYPE ST_ClampingPositionConfig :
+STRUCT
+    fReadyPosition : LREAL;
+    fApproachPosition : LREAL;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

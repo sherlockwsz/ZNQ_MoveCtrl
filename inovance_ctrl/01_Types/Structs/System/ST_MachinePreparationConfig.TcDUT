@@ -16,7 +16,11 @@ STRUCT
 
     fClampOpenPosition  : LREAL;
     fTurntableZero      : LREAL;
-
+	// 同轴度调整机构准备位置
+	fAdjustmentXStandby : LREAL;
+	fAdjustmentYStandby : LREAL;
+	fAdjustmentZStandby : LREAL;
+	
     fScrewdriverYZero   : LREAL;
     fScrewdriverZSafe   : LREAL;
 
@@ -28,6 +32,7 @@ STRUCT
     fDamperRotationVelocity : LREAL;
     fClampVelocity          : LREAL;
     fTurntableVelocity      : LREAL;
+	fAdjustmentVelocity 	: LREAL;
     fScrewdriverVelocity    : LREAL;
 
     //==========================================================

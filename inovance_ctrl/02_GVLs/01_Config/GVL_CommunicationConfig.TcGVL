@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <GVL Name="GVL_CommunicationConfig" Id="{caf7f477-9eac-47d3-ac29-a9a22d445281}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+VAR_GLOBAL CONSTANT
+    stHmi : ST_HmiCommunicationConfig := (tWatchdogTimeout := T#2S);
+    stGripper : ST_GripperCommunicationConfig := (tAdsTimeout := T#2S, tPollInterval := T#150MS);
+END_VAR]]></Declaration>
+  </GVL>
+</TcPlcObject>

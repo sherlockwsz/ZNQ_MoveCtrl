@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_QrScanProcessConfig" Id="{126ba197-7969-4017-9ffa-bb3fabda6d37}">
+    <Declaration><![CDATA[TYPE ST_QrScanProcessConfig :
+STRUCT
+    fRelativeAngle : LREAL;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

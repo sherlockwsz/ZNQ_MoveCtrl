@@ -13,6 +13,7 @@ FUNCTION_BLOCK FB_AxisManager
 VAR_INPUT
     bAxisConfigured : BOOL;       // 当前数组下标是否已绑定有效NC轴
     bAxisUsedByAuto : BOOL;       // 是否属于当前整机自动流程轴清单
+    bAxisSelectedForHoming : BOOL;// 是否为本次WPF选中的唯一回零轴
     eMachineMode : E_MachineMode; // 整机唯一运行模式
     bProtectionEnabled : BOOL;    // 是否启用HMI通信保护
     bHmiOnline : BOOL;            // HMI心跳在线状态
@@ -72,6 +73,7 @@ END_IF;
 fbCommandArbiter(
     bAxisConfigured := bAxisConfigured,
     bAxisUsedByAuto := bAxisUsedByAuto,
+    bAxisSelectedForHoming := bAxisSelectedForHoming,
     eMachineMode := eMachineMode,
     stAxis := stAxis
 );
@@ -89,7 +91,8 @@ IF bAxisConfigured THEN
         bControlAllowed :=
             bControlAllowed
             OR (eControlOwner = E_AxisControlOwner.Stop)
-            OR (eControlOwner = E_AxisControlOwner.Recovery),
+            OR (eControlOwner = E_AxisControlOwner.Recovery)
+            OR (eControlOwner = E_AxisControlOwner.Homing),
         stLimit := stLimit,
         AxisRef := AxisRef,
         stAxis := stAxis

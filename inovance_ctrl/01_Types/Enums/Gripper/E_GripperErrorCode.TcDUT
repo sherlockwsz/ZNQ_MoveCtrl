@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_GripperErrorCode" Id="{758eea70-43f1-4857-82cd-b0e768793f37}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_GripperErrorCode :
+(
+    None                            := 16#0000,
+
+    InvalidParameters               := 16#0001,
+    NotReady                        := 16#0002,
+    Busy                            := 16#0003,
+    InvalidCommand                  := 16#0004,
+    CloseCurrentInvalid             := 16#0005,
+    MachineStopping                 := 16#0006,
+
+    ModbusExceptionBase             := 16#0100,
+
+    MotionTimeout                   := 16#2001,
+    DeviceFaultOrResetTimeout       := 16#2002,
+    CommunicationUnavailable        := 16#2003,
+    InterruptedByMachineStop        := 16#2004,
+
+    ActionInvalidCommand            := 16#3001,
+    ActionAcceptTimeout             := 16#3002,
+    ActionResultTimeout             := 16#3003,
+    ReservedActionCode3004          := 16#3004,
+    ActionCancelled                 := 16#3005,
+    ActionResultInvalid             := 16#3006,
+
+    ManualForbiddenInAuto           := 16#4001,
+    AutoForbiddenInCurrentMode      := 16#4002,
+    FaultModeCommandForbidden       := 16#4003,
+    ControlForbiddenInCurrentMode   := 16#4004,
+
+    CommunicationUnknown            := 16#FFFF
+) UDINT;
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

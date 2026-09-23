@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_HmiCommunicationConfig" Id="{72413807-3239-4fb4-8479-1f122fc4da96}">
+    <Declaration><![CDATA[TYPE ST_HmiCommunicationConfig :
+STRUCT
+    tWatchdogTimeout : TIME;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

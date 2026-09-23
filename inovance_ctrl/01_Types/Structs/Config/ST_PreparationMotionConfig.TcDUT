@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_PreparationMotionConfig" Id="{9e826ca4-7de3-4cbc-8b59-804ad9613b1c}">
+    <Declaration><![CDATA[TYPE ST_PreparationMotionConfig :
+STRUCT
+    stTray : ST_VelocityConfig;
+    stDamperLinear : ST_VelocityConfig;
+    stDamperRotation : ST_VelocityConfig;
+    stTurntable : ST_VelocityConfig;
+    stClamping : ST_VelocityConfig;
+    stAdjustment : ST_VelocityConfig;
+    stScrewdriver : ST_VelocityConfig;
+    fLinearPositionTolerance : LREAL;
+    fRotationPositionTolerance : LREAL;
+    tMoveTimeout : TIME;
+    tReadyTimeout : TIME;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
   <DUT Name="ST_DamperTurntableConfig" Id="{9b78c013-b08b-4d04-82f6-7a4befda2708}">
     <Declaration><![CDATA[(*
@@ -10,6 +10,9 @@
     2. 夹紧轴松开位置和接近位置；
     3. 夹紧转矩方向、大小和速度限制；
     4. 各轴速度、加速度和超时时间。
+
+    工作运动参数来源为GVL_MotionConfig；
+    准备与工位坐标来源为GVL_PositionConfig，夹紧深度边界来源为GVL_SafetyConfig。
 *)
 TYPE ST_DamperTurntableConfig :
 STRUCT
@@ -39,8 +42,6 @@ STRUCT
     fTurntableVelocity     : LREAL;
     fTurntableAcceleration : LREAL;
     fTurntableDeceleration : LREAL;
-    fTurntableJerk         : LREAL;
-
     fTurntablePositionTolerance : LREAL;
     tTurntableMoveTimeout       : TIME;
 
@@ -61,8 +62,6 @@ STRUCT
     fClampPositionVelocity     : LREAL;
     fClampPositionAcceleration : LREAL;
     fClampPositionDeceleration : LREAL;
-    fClampPositionJerk         : LREAL;
-
     fClampPositionTolerance : LREAL;
     tClampPositionTimeout   : TIME;
 

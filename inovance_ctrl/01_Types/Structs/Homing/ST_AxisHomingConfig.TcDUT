@@ -1,0 +1,34 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_AxisHomingConfig" Id="{9f21a3bb-7c55-4ad2-bb3a-bb18d4a1538e}">
+    <Declaration><![CDATA[TYPE ST_AxisHomingConfig :
+STRUCT
+    bEnabled             : BOOL;
+    eStrategy            : E_AxisHomingStrategy;
+    // 配置/诊断所用的期望找零方向。
+    // MC_DefaultHoming的实际方向仍必须在TwinCAT NC轴参数中一致配置。
+    eDirection           : E_AxisHomingDirection;
+
+    // 原点捕获位置对应的NC坐标；现场标定后修改。
+    fReferencePosition   : LREAL;
+    // 建立参考坐标后最终停靠位置，当前统一为0.0。
+    fFinalPosition       : LREAL;
+
+    // 从参考位置运动到最终位置所使用的定位参数。
+    fFinalVelocity       : LREAL;
+    fFinalAcceleration   : LREAL;
+    fFinalDeceleration   : LREAL;
+    fPositionTolerance   : LREAL;
+
+    // 驱动使能后等待自动松闸和伺服稳定。
+    tEnableReadyDelay    : TIME;
+    // 单次回零全过程超时。
+    tTimeout             : TIME;
+
+    // FALSE表示现场参考位置尚未完成标定。
+    // 仿真允许FALSE；实机运行前必须确认并置TRUE。
+    bReferenceCalibrated : BOOL;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

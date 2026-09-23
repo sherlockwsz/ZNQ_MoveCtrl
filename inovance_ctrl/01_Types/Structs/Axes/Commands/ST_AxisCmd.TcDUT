@@ -8,7 +8,7 @@
     bEnable、bStop、bJogPos、bJogNeg、bTorqueControl。
 
     上升沿触发信号：
-    bReset、bMoveAbs、bMoveRel。
+    bReset、bHome、bMoveAbs、bMoveRel。
 *)
 TYPE ST_AxisCmd :
 STRUCT
@@ -43,6 +43,9 @@ STRUCT
     // 2. FB_AxisControl负责恢复位置模式；
     // 3. 确认恢复位置模式后，才能再次执行MoveAbs等位置命令。
     bTorqueControl : BOOL;
+
+    // 追加在原结构体末尾，尽量保持既有命令字段的相对顺序。
+    bHome : BOOL;     // 回零命令，上升沿触发；只允许Homing所有者使用
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

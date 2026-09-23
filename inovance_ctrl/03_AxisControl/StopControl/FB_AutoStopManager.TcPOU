@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
   <POU Name="FB_AutoStopManager" Id="{665f07f3-f653-4973-bc04-b82c1c70bf7a}" SpecialFunc="None">
     <Declaration><![CDATA[//==============================================================
@@ -20,7 +20,7 @@ VAR_INPUT
     bExecute : BOOL;
 
     // 全轴停止最大等待时间。
-    tStopTimeout : TIME := T#10S;
+    tStopTimeout : TIME := GVL_SafetyConfig.stStop.tTimeout;
 
     // 非NC设备停止确认；当前用于COM3夹爪。
     bExternalStopRequired : BOOL := FALSE;
@@ -76,7 +76,7 @@ VAR
 	eStep : E_AutoStopStep := E_AutoStopStep.Idle;
 END_VAR]]></Declaration>
     <Implementation>
-      <ST><![CDATA[//==============================================================
+      <ST>//==============================================================
 // 1. 更新停止请求上升沿
 //==============================================================
 trigExecute(CLK := bExecute);
@@ -115,7 +115,7 @@ CASE eStep OF
             bError := FALSE;
             bTimeout := FALSE;
             uiErrorAxisIndex := 0;
-            nErrorID := 0;
+            nErrorID := TO_UDINT(E_AutoStopErrorCode.None);
             bStopConfirmed := FALSE;
             bExternalStopSeenLow := NOT bExternalStopDone;
             bEnableWithdrawalStarted := FALSE;
@@ -187,7 +187,7 @@ CASE eStep OF
                         // 未确认停稳前异常失去使能，不得报告正常停止。
                         bError := TRUE;
                         uiErrorAxisIndex := uiAxisIndex;
-                        nErrorID := 16#E501;
+                        nErrorID := TO_UDINT(E_AutoStopErrorCode.AxisLostPowerBeforeStop);
                     END_IF;
                     IF NOT aAxes[uiAxisIndex].State.bStopDone THEN
                         bAllAxesStopped := FALSE;
@@ -206,7 +206,7 @@ CASE eStep OF
 			bError := TRUE;
 			uiErrorAxisIndex := GVL_AxisIndex.DamperGripper;
 			IF udiExternalStopError = 0 THEN
-				nErrorID := 16#E505;
+				nErrorID := TO_UDINT(E_AutoStopErrorCode.ExternalDeviceStopFailed);
 			ELSE
 				nErrorID := udiExternalStopError;
 			END_IF;
@@ -232,9 +232,9 @@ CASE eStep OF
 			IF bAllAxesStopped AND bExternalStopRequired
 				AND NOT (bExternalStopSeenLow AND bExternalStopDone) THEN
 				uiErrorAxisIndex := GVL_AxisIndex.DamperGripper;
-				nErrorID := 16#E506;
+				nErrorID := TO_UDINT(E_AutoStopErrorCode.ExternalDeviceStopTimeout);
 			ELSE
-				nErrorID := 16#E502;
+				nErrorID := TO_UDINT(E_AutoStopErrorCode.ControlledStopTimeout);
 			END_IF;
             eStep := E_AutoStopStep.Fault;
         END_IF;
@@ -277,7 +277,7 @@ CASE eStep OF
 		ELSIF fbReleaseTimeout.Q THEN
 			bError := TRUE;
 			bTimeout := TRUE;
-			nErrorID := 16#E503;
+			nErrorID := TO_UDINT(E_AutoStopErrorCode.StopReleaseTimeout);
 			eStep := E_AutoStopStep.Fault;
 		END_IF;
 	
@@ -319,7 +319,7 @@ CASE eStep OF
 		ELSIF fbDisableTimeout.Q THEN
 			bError := TRUE;
 			bTimeout := TRUE;
-			nErrorID := 16#E504;
+			nErrorID := TO_UDINT(E_AutoStopErrorCode.DisableAxesTimeout);
 			eStep := E_AutoStopStep.Fault;
 		END_IF;
 	
@@ -394,7 +394,7 @@ ELSE
     bError := TRUE;
     eStep := E_AutoStopStep.Idle;
 
-END_CASE;]]></ST>
+END_CASE;</ST>
     </Implementation>
   </POU>
 </TcPlcObject>

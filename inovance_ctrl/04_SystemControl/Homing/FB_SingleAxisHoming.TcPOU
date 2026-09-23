@@ -1,0 +1,365 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <POU Name="FB_SingleAxisHoming" Id="{01b15c80-a26a-4598-b258-a3a0c3f4119a}" SpecialFunc="None">
+    <Declaration><![CDATA[//==============================================================
+// 选中单轴回零状态机
+//
+// 职责：
+// 1. 校验WPF选择的轴号和该轴回零配置；
+// 2. 请求整机Homing模式，并只向选中轴写Homing命令源；
+// 3. 执行MC_Home，建立坐标后再运动到配置的最终位置；
+// 4. 发布稳定的Done/Error/Timeout/Rejected状态。
+//
+// 不负责：
+// 1. 不直接调用任何PLCopen功能块；
+// 2. 不管理十轴自动回零；每次只允许一根轴；
+// 3. ExternalSensor为转台专用流程预留，当前明确拒绝执行。
+//==============================================================
+FUNCTION_BLOCK FB_SingleAxisHoming
+VAR_INPUT
+    bStart          : BOOL; // WPF启动回零，上升沿有效
+    bAbort          : BOOL; // 整机Stop、故障或外部中止
+    bReset          : BOOL; // 清除本FB锁存结果
+    bModeGranted    : BOOL; // FB_MachineModeManager已授予Homing模式
+    bControlAllowed : BOOL; // HMI通信和控制许可
+    bSimulationMode : BOOL; // TRUE时以MC_Direct模拟开关回零
+    uiSelectedAxis  : UINT; // WPF选择的业务轴号1..14
+END_VAR
+
+VAR_IN_OUT
+    aConfig : ARRAY[1..GVL_Constants.cMaxAxisCount]
+        OF ST_AxisHomingConfig;
+    aAxes : ARRAY[1..GVL_Constants.cMaxAxisCount]
+        OF ST_AxisInterface;
+END_VAR
+
+VAR_OUTPUT
+    bModeRequest     : BOOL;
+    bBusy            : BOOL;
+    bDone            : BOOL;
+    bError           : BOOL;
+    bTimeout         : BOOL;
+    bRequestRejected : BOOL;
+    bAborted         : BOOL;
+    uiActiveAxis     : UINT;
+    eStep            : E_AxisHomingStep := E_AxisHomingStep.Idle;
+    eStrategy        : E_AxisHomingStrategy;
+    eDirection       : E_AxisHomingDirection;
+    udiErrorCode     : UDINT;
+END_VAR
+
+VAR
+    trigStart       : R_TRIG;
+    tonEnableReady  : TON;
+    tonTimeout      : TON;
+    stActiveConfig  : ST_AxisHomingConfig;
+    uiItem          : UINT;
+    bActiveAxisValid : BOOL;
+    bActiveAxisPowerStatus : BOOL;
+    bHomeDoneSeen   : BOOL;
+    bFinalMoveDoneSeen : BOOL;
+    bAnyAxisBusy    : BOOL;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[//==============================================================
+// 1. 命令边沿和默认命令清理
+//
+// HomingCmd由本FB唯一写入。每周期先清除瞬时命令，随后只给
+// 当前选中的轴重新生成命令，避免上一次回零留下残余请求。
+//==============================================================
+trigStart(CLK := bStart);
+
+bAnyAxisBusy := FALSE;
+FOR uiItem := 1 TO GVL_Constants.cMaxAxisCount DO
+    IF GVL_AxisConfig.AxisLimits[uiItem].bConfigured
+        AND
+        (
+            aAxes[uiItem].State.bBusy
+            OR aAxes[uiItem].State.bActive
+        )
+    THEN
+        bAnyAxisBusy := TRUE;
+    END_IF;
+
+    aAxes[uiItem].HomingCmd.bEnable := FALSE;
+    aAxes[uiItem].HomingCmd.bReset := FALSE;
+    aAxes[uiItem].HomingCmd.bHome := FALSE;
+    aAxes[uiItem].HomingCmd.bStop := FALSE;
+    aAxes[uiItem].HomingCmd.bMoveAbs := FALSE;
+    aAxes[uiItem].HomingCmd.bMoveRel := FALSE;
+    aAxes[uiItem].HomingCmd.bJogPos := FALSE;
+    aAxes[uiItem].HomingCmd.bJogNeg := FALSE;
+    aAxes[uiItem].HomingCmd.bTorqueControl := FALSE;
+END_FOR;
+
+// 未运行时允许人工清除上一次结果。
+IF bReset AND NOT bBusy THEN
+    bDone := FALSE;
+    bError := FALSE;
+    bTimeout := FALSE;
+    bRequestRejected := FALSE;
+    bAborted := FALSE;
+    bHomeDoneSeen := FALSE;
+    bFinalMoveDoneSeen := FALSE;
+    udiErrorCode := TO_UDINT(E_AxisHomingErrorCode.None);
+    uiActiveAxis := 0;
+    eStrategy := E_AxisHomingStrategy.Disabled;
+    eDirection := E_AxisHomingDirection.None;
+    eStep := E_AxisHomingStep.Idle;
+END_IF;
+
+//==============================================================
+// 2. 新回零请求准入和配置锁存
+//==============================================================
+IF trigStart.Q AND NOT bBusy THEN
+    bDone := FALSE;
+    bError := FALSE;
+    bTimeout := FALSE;
+    bRequestRejected := FALSE;
+    bAborted := FALSE;
+    bHomeDoneSeen := FALSE;
+    bFinalMoveDoneSeen := FALSE;
+    udiErrorCode := TO_UDINT(E_AxisHomingErrorCode.None);
+
+    IF (uiSelectedAxis < 1)
+        OR (uiSelectedAxis > GVL_Constants.cMaxAxisCount) THEN
+        bRequestRejected := TRUE;
+        udiErrorCode := TO_UDINT(E_AxisHomingErrorCode.AxisIndexOutOfRange); // 轴号越界
+        eStep := E_AxisHomingStep.Error;
+
+    ELSIF NOT aConfig[uiSelectedAxis].bEnabled THEN
+        bRequestRejected := TRUE;
+        udiErrorCode := TO_UDINT(E_AxisHomingErrorCode.HomingNotEnabled); // 当前轴未开放回零
+        eStep := E_AxisHomingStep.Error;
+
+    ELSIF NOT GVL_AxisConfig.AxisLimits[uiSelectedAxis].bConfigured THEN
+        bRequestRejected := TRUE;
+        udiErrorCode := TO_UDINT(E_AxisHomingErrorCode.AxisMappingInvalid); // 当前业务轴没有有效NC映射
+        eStep := E_AxisHomingStep.Error;
+
+    ELSIF NOT bControlAllowed THEN
+        bRequestRejected := TRUE;
+        udiErrorCode := TO_UDINT(E_AxisHomingErrorCode.ControlNotAllowed); // HMI/控制许可无效
+        eStep := E_AxisHomingStep.Error;
+
+    ELSIF bAnyAxisBusy THEN
+        bRequestRejected := TRUE;
+        udiErrorCode := TO_UDINT(E_AxisHomingErrorCode.OtherMotionActive); // 其他运动尚未停止，禁止切换回零所有权
+        eStep := E_AxisHomingStep.Error;
+
+    ELSIF aAxes[uiSelectedAxis].Alarm.bError THEN
+        bRequestRejected := TRUE;
+        udiErrorCode := TO_UDINT(E_AxisHomingErrorCode.SelectedAxisHasAlarm); // 选中轴存在报警，应先执行故障复位
+        eStep := E_AxisHomingStep.Error;
+
+    ELSIF aConfig[uiSelectedAxis].eStrategy
+        = E_AxisHomingStrategy.ExternalSensor THEN
+        bRequestRejected := TRUE;
+        udiErrorCode := TO_UDINT(E_AxisHomingErrorCode.ExternalSensorNotImplemented); // 外部IO传感器回零尚未实现
+        eStep := E_AxisHomingStep.Error;
+
+    ELSIF NOT bSimulationMode
+        AND NOT aConfig[uiSelectedAxis].bReferenceCalibrated THEN
+        bRequestRejected := TRUE;
+        udiErrorCode := TO_UDINT(E_AxisHomingErrorCode.ReferenceNotCalibrated); // 实机参考坐标尚未标定确认
+        eStep := E_AxisHomingStep.Error;
+
+    ELSE
+        uiActiveAxis := uiSelectedAxis;
+        stActiveConfig := aConfig[uiSelectedAxis];
+        eStrategy := stActiveConfig.eStrategy;
+        eDirection := stActiveConfig.eDirection;
+        bModeRequest := TRUE;
+        bBusy := TRUE;
+        eStep := E_AxisHomingStep.WaitModeGranted;
+    END_IF;
+END_IF;
+
+//==============================================================
+// 3. 运行期Abort和总超时
+//==============================================================
+tonTimeout(
+    IN := bBusy,
+    PT := stActiveConfig.tTimeout
+);
+
+bActiveAxisValid :=
+    (uiActiveAxis >= 1)
+    AND (uiActiveAxis <= GVL_Constants.cMaxAxisCount);
+bActiveAxisPowerStatus := FALSE;
+IF bActiveAxisValid THEN
+    bActiveAxisPowerStatus :=
+        aAxes[uiActiveAxis].State.bPowerStatus;
+END_IF;
+
+tonEnableReady(
+    IN := bBusy
+          AND (eStep = E_AxisHomingStep.EnableAxis)
+          AND bActiveAxisPowerStatus,
+    PT := stActiveConfig.tEnableReadyDelay
+);
+
+IF bBusy AND bAbort THEN
+    bBusy := FALSE;
+    bModeRequest := FALSE;
+    bAborted := TRUE;
+    eStep := E_AxisHomingStep.Aborted;
+
+ELSIF bBusy AND tonTimeout.Q THEN
+    bBusy := FALSE;
+    bModeRequest := FALSE;
+    bError := TRUE;
+    bTimeout := TRUE;
+    udiErrorCode := TO_UDINT(E_AxisHomingErrorCode.HomingTimeout);
+    eStep := E_AxisHomingStep.Error;
+END_IF;
+
+//==============================================================
+// 4. 回零状态机
+//==============================================================
+IF bBusy THEN
+    // 回零全过程保持选中轴使能；垂直轴抱闸由驱动器随使能管理。
+    aAxes[uiActiveAxis].HomingCmd.bEnable := TRUE;
+
+    CASE eStep OF
+        E_AxisHomingStep.WaitModeGranted:
+            IF bModeGranted THEN
+                eStep := E_AxisHomingStep.EnableAxis;
+            END_IF;
+
+        E_AxisHomingStep.EnableAxis:
+            IF aAxes[uiActiveAxis].Alarm.bError THEN
+                bBusy := FALSE;
+                bModeRequest := FALSE;
+                bError := TRUE;
+                udiErrorCode := aAxes[uiActiveAxis].Alarm.nErrorID;
+                IF udiErrorCode = TO_UDINT(E_AxisHomingErrorCode.None) THEN
+                    udiErrorCode := TO_UDINT(E_AxisHomingErrorCode.EnableAxisFault);
+                END_IF;
+                eStep := E_AxisHomingStep.Error;
+
+            ELSIF tonEnableReady.Q THEN
+                eStep := E_AxisHomingStep.StartHome;
+            END_IF;
+
+        E_AxisHomingStep.StartHome:
+            // 仿真：不寻找物理开关，直接建立临时参考坐标。
+            // 实机绝对编码器轴：只确认标定，再回绝对零位。
+            // 实机开关轴：执行NC轴中配置的标准回零流程。
+            IF bSimulationMode THEN
+                aAxes[uiActiveAxis].HomingSet.Homing.eCommandMode :=
+                    E_AxisHomeCommandMode.Direct;
+            ELSIF stActiveConfig.eStrategy
+                = E_AxisHomingStrategy.AbsolutePosition THEN
+                aAxes[uiActiveAxis].HomingSet.Homing.eCommandMode :=
+                    E_AxisHomeCommandMode.ForceCalibration;
+            ELSE
+                aAxes[uiActiveAxis].HomingSet.Homing.eCommandMode :=
+                    E_AxisHomeCommandMode.DefaultHoming;
+            END_IF;
+
+            aAxes[uiActiveAxis].HomingSet.Homing.fReferencePosition :=
+                stActiveConfig.fReferencePosition;
+            aAxes[uiActiveAxis].HomingCmd.bHome := TRUE;
+            eStep := E_AxisHomingStep.WaitHome;
+
+        E_AxisHomingStep.WaitHome:
+            IF aAxes[uiActiveAxis].State.bDone THEN
+                // Done与NC Homed状态可能跨两个PLC扫描周期更新，
+                // 因此先锁存完成，再等待坐标基准确认。
+                bHomeDoneSeen := TRUE;
+            END_IF;
+
+            IF aAxes[uiActiveAxis].Alarm.bError THEN
+                bBusy := FALSE;
+                bModeRequest := FALSE;
+                bError := TRUE;
+                udiErrorCode := aAxes[uiActiveAxis].Alarm.nErrorID;
+                IF udiErrorCode = TO_UDINT(E_AxisHomingErrorCode.None) THEN
+                    udiErrorCode := TO_UDINT(E_AxisHomingErrorCode.HomingAxisFault);
+                END_IF;
+                eStep := E_AxisHomingStep.Error;
+
+            ELSIF aAxes[uiActiveAxis].State.bCmdRejected THEN
+                bBusy := FALSE;
+                bModeRequest := FALSE;
+                bError := TRUE;
+                udiErrorCode := TO_UDINT(E_AxisHomingErrorCode.HomingCommandRejected);
+                eStep := E_AxisHomingStep.Error;
+
+            ELSIF aAxes[uiActiveAxis].State.bCommandAborted THEN
+                bBusy := FALSE;
+                bModeRequest := FALSE;
+                bError := TRUE;
+                udiErrorCode := TO_UDINT(E_AxisHomingErrorCode.HomingCommandAborted);
+                eStep := E_AxisHomingStep.Error;
+
+            ELSIF bHomeDoneSeen
+                AND aAxes[uiActiveAxis].State.bHomed THEN
+                eStep := E_AxisHomingStep.StartFinalMove;
+            END_IF;
+
+        E_AxisHomingStep.StartFinalMove:
+            aAxes[uiActiveAxis].HomingSet.Position.fAbsolutePosition :=
+                stActiveConfig.fFinalPosition;
+            aAxes[uiActiveAxis].HomingSet.Position.fVelocity :=
+                stActiveConfig.fFinalVelocity;
+            aAxes[uiActiveAxis].HomingSet.Position.fAcceleration :=
+                stActiveConfig.fFinalAcceleration;
+            aAxes[uiActiveAxis].HomingSet.Position.fDeceleration :=
+                stActiveConfig.fFinalDeceleration;
+            aAxes[uiActiveAxis].HomingCmd.bMoveAbs := TRUE;
+            eStep := E_AxisHomingStep.WaitFinalMove;
+
+        E_AxisHomingStep.WaitFinalMove:
+            IF aAxes[uiActiveAxis].State.bDone THEN
+                // Done与实际位置反馈同样允许跨扫描周期到达。
+                bFinalMoveDoneSeen := TRUE;
+            END_IF;
+
+            IF aAxes[uiActiveAxis].Alarm.bError THEN
+                bBusy := FALSE;
+                bModeRequest := FALSE;
+                bError := TRUE;
+                udiErrorCode := aAxes[uiActiveAxis].Alarm.nErrorID;
+                IF udiErrorCode = TO_UDINT(E_AxisHomingErrorCode.None) THEN
+                    udiErrorCode := TO_UDINT(E_AxisHomingErrorCode.FinalMoveAxisFault);
+                END_IF;
+                eStep := E_AxisHomingStep.Error;
+
+            ELSIF aAxes[uiActiveAxis].State.bCmdRejected THEN
+                bBusy := FALSE;
+                bModeRequest := FALSE;
+                bError := TRUE;
+                udiErrorCode := TO_UDINT(E_AxisHomingErrorCode.FinalMoveCommandRejected);
+                eStep := E_AxisHomingStep.Error;
+
+            ELSIF aAxes[uiActiveAxis].State.bCommandAborted THEN
+                bBusy := FALSE;
+                bModeRequest := FALSE;
+                bError := TRUE;
+                udiErrorCode := TO_UDINT(E_AxisHomingErrorCode.FinalMoveCommandAborted);
+                eStep := E_AxisHomingStep.Error;
+
+            ELSIF bFinalMoveDoneSeen
+                AND ABS(
+                    aAxes[uiActiveAxis].Data.fActPosition
+                    - stActiveConfig.fFinalPosition
+                ) <= stActiveConfig.fPositionTolerance THEN
+                bBusy := FALSE;
+                bModeRequest := FALSE;
+                bDone := TRUE;
+                eStep := E_AxisHomingStep.Done;
+            END_IF;
+
+        ELSE
+            bBusy := FALSE;
+            bModeRequest := FALSE;
+            bError := TRUE;
+            udiErrorCode := TO_UDINT(E_AxisHomingErrorCode.InvalidProcessStep);
+            eStep := E_AxisHomingStep.Error;
+    END_CASE;
+END_IF;]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

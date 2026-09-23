@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_DamperRotationQrMotionConfig" Id="{096e03de-dbc3-4387-8898-39c420d54177}">
+    <Declaration><![CDATA[TYPE ST_DamperRotationQrMotionConfig :
+STRUCT
+    stQrScan : ST_QrScanMotionConfig;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

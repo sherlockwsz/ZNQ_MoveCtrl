@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_DamperGridConfig" Id="{af1337c1-2c75-4f3c-aa11-aec96bde444e}">
+    <Declaration><![CDATA[TYPE ST_DamperGridConfig :
+STRUCT
+    stOrigin : ST_Point2D;
+    fRowPitchX : LREAL;
+    fColumnPitchY : LREAL;
+    fPickZ : LREAL;
+    aSlotOffset : ARRAY[1..4, 1..6] OF ST_Point2D;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

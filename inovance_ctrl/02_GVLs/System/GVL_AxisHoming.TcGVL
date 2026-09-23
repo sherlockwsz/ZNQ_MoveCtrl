@@ -1,0 +1,133 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <GVL Name="GVL_AxisHoming" Id="{ce340f72-39c0-469a-aa9d-7e7d9427e7dd}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+VAR_GLOBAL
+    //==========================================================
+    // 单轴回零公共配置
+    //
+    // 当前工程NC轴处于仿真模式，因此默认TRUE：
+    // 原点开关轴使用MC_Direct建立临时参考坐标，不产生找零运动。
+    // 现场完成驱动器DI和NC回零配置后，必须改为FALSE。
+    //==========================================================
+    bSimulationMode : BOOL := TRUE;
+
+    // 十根当前自动流程轴均建立配置；其余轴暂时Disabled。
+    // 转台已配置ExternalSensor策略；在EL1008原点传感器完成
+    // 语义映射和专用状态机前，状态机会明确拒绝执行。
+    AxisConfig : ARRAY[1..GVL_Constants.cMaxAxisCount]
+        OF ST_AxisHomingConfig := [
+        // [1] TrayX：负向寻找原点开关
+        (bEnabled := TRUE,
+         eStrategy := E_AxisHomingStrategy.DriveHomeSwitch,
+         eDirection := E_AxisHomingDirection.Negative,
+         fReferencePosition := 0.0, fFinalPosition := 0.0,
+         fFinalVelocity := 10.0, fFinalAcceleration := 200.0,
+         fFinalDeceleration := 500.0, fPositionTolerance := 0.1,
+         tEnableReadyDelay := T#500MS, tTimeout := T#60S,
+         bReferenceCalibrated := FALSE),
+
+        // [2] TrayZ：负向寻找原点开关
+        (bEnabled := TRUE,
+         eStrategy := E_AxisHomingStrategy.DriveHomeSwitch,
+         eDirection := E_AxisHomingDirection.Negative,
+         fReferencePosition := 0.0, fFinalPosition := 0.0,
+         fFinalVelocity := 10.0, fFinalAcceleration := 200.0,
+         fFinalDeceleration := 500.0, fPositionTolerance := 0.1,
+         tEnableReadyDelay := T#800MS, tTimeout := T#60S,
+         bReferenceCalibrated := FALSE),
+
+        // [3] DamperX：负向寻找原点开关
+        (bEnabled := TRUE,
+         eStrategy := E_AxisHomingStrategy.DriveHomeSwitch,
+         eDirection := E_AxisHomingDirection.Negative,
+         fReferencePosition := 0.0, fFinalPosition := 0.0,
+         fFinalVelocity := 10.0, fFinalAcceleration := 200.0,
+         fFinalDeceleration := 500.0, fPositionTolerance := 0.1,
+         tEnableReadyDelay := T#500MS, tTimeout := T#60S,
+         bReferenceCalibrated := FALSE),
+
+        // [4] DamperY：正向寻找原点开关
+        (bEnabled := TRUE,
+         eStrategy := E_AxisHomingStrategy.DriveHomeSwitch,
+         eDirection := E_AxisHomingDirection.Positive,
+         fReferencePosition := 0.0, fFinalPosition := 0.0,
+         fFinalVelocity := 10.0, fFinalAcceleration := 200.0,
+         fFinalDeceleration := 500.0, fPositionTolerance := 0.1,
+         tEnableReadyDelay := T#500MS, tTimeout := T#60S,
+         bReferenceCalibrated := FALSE),
+
+        // [5] DamperZ：正向寻找原点开关
+        (bEnabled := TRUE,
+         eStrategy := E_AxisHomingStrategy.DriveHomeSwitch,
+         eDirection := E_AxisHomingDirection.Positive,
+         fReferencePosition := 0.0, fFinalPosition := 0.0,
+         fFinalVelocity := 10.0, fFinalAcceleration := 200.0,
+         fFinalDeceleration := 500.0, fPositionTolerance := 0.1,
+         tEnableReadyDelay := T#800MS, tTimeout := T#60S,
+         bReferenceCalibrated := FALSE),
+
+        // [6] DamperRotation：绝对编码器轴，回绝对0度
+        (bEnabled := TRUE,
+         eStrategy := E_AxisHomingStrategy.AbsolutePosition,
+         eDirection := E_AxisHomingDirection.None,
+         fReferencePosition := 0.0, fFinalPosition := 0.0,
+         fFinalVelocity := 30.0, fFinalAcceleration := 100.0,
+         fFinalDeceleration := 100.0, fPositionTolerance := 0.1,
+         tEnableReadyDelay := T#500MS, tTimeout := T#60S,
+         bReferenceCalibrated := TRUE),
+
+        // [7] DamperGripper：串口夹爪，不属于NC回零轴
+        (bEnabled := FALSE,
+         eStrategy := E_AxisHomingStrategy.Disabled),
+
+        // [8] Turntable：倍福IO原点传感器流程后续接入
+        (bEnabled := TRUE,
+         eStrategy := E_AxisHomingStrategy.ExternalSensor,
+         eDirection := E_AxisHomingDirection.None,
+         fReferencePosition := 0.0, fFinalPosition := 0.0,
+         fFinalVelocity := 10.0, fFinalAcceleration := 100.0,
+         fFinalDeceleration := 100.0, fPositionTolerance := 0.1,
+         tEnableReadyDelay := T#500MS, tTimeout := T#60S,
+         bReferenceCalibrated := FALSE),
+
+        // [9] Clamping：正向寻找原点开关
+        (bEnabled := TRUE,
+         eStrategy := E_AxisHomingStrategy.DriveHomeSwitch,
+         eDirection := E_AxisHomingDirection.Positive,
+         fReferencePosition := 0.0, fFinalPosition := 0.0,
+         fFinalVelocity := 5.0, fFinalAcceleration := 100.0,
+         fFinalDeceleration := 200.0, fPositionTolerance := 0.1,
+         tEnableReadyDelay := T#500MS, tTimeout := T#60S,
+         bReferenceCalibrated := FALSE),
+
+        // [10..12] AdjustmentX/Y/Z：当前回零方式尚未确定
+        3((bEnabled := FALSE,
+           eStrategy := E_AxisHomingStrategy.Disabled)),
+
+        // [13] ScrewdriverY：负向寻找原点开关
+        (bEnabled := TRUE,
+         eStrategy := E_AxisHomingStrategy.DriveHomeSwitch,
+         eDirection := E_AxisHomingDirection.Negative,
+         fReferencePosition := 0.0, fFinalPosition := 0.0,
+         fFinalVelocity := 10.0, fFinalAcceleration := 200.0,
+         fFinalDeceleration := 500.0, fPositionTolerance := 0.1,
+         tEnableReadyDelay := T#500MS, tTimeout := T#60S,
+         bReferenceCalibrated := FALSE),
+
+        // [14] ScrewdriverZ：正向寻找原点开关
+        (bEnabled := TRUE,
+         eStrategy := E_AxisHomingStrategy.DriveHomeSwitch,
+         eDirection := E_AxisHomingDirection.Positive,
+         fReferencePosition := 0.0, fFinalPosition := 0.0,
+         fFinalVelocity := 10.0, fFinalAcceleration := 200.0,
+         fFinalDeceleration := 500.0, fPositionTolerance := 0.1,
+         tEnableReadyDelay := T#800MS, tTimeout := T#60S,
+         bReferenceCalibrated := FALSE)
+    ];
+
+    // 稳定ADS状态，由MAIN每周期更新。
+    Status : ST_AxisHomingStatus;
+END_VAR]]></Declaration>
+  </GVL>
+</TcPlcObject>

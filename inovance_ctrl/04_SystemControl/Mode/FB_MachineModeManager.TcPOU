@@ -14,8 +14,8 @@ VAR_INPUT
     bAutoRequest     : BOOL; // WPF自动运行请求
     bAutoEnabling    : BOOL; // 自动启动协调器正在使能/等待Ready
     bAutoRunning     : BOOL; // 自动流程启动许可或流程Busy
-    bHomingRequest   : BOOL; // 回零模式预留请求
-    bHomingBusy      : BOOL; // 回零流程预留状态
+    bHomingRequest   : BOOL; // 选中单轴回零模式请求
+    bHomingBusy      : BOOL; // 选中单轴回零流程正在执行
     bStopActive      : BOOL; // Stop请求、Abort锁存或Stop管理器Busy/Error
     bMachineFault    : BOOL; // 整机第一故障已经锁存
 	bPreparationRequest : BOOL;

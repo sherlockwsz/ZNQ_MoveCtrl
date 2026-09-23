@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_AxisHomingSet" Id="{9bed5215-2991-4e4e-bdcb-8f2bca714b80}">
+    <Declaration><![CDATA[TYPE ST_AxisHomingSet :
+STRUCT
+    eCommandMode : E_AxisHomeCommandMode;
+    // MC_Home结束时写入NC轴的参考坐标。
+    // 现场标定前暂设0.0，后续只修改配置，不修改状态机。
+    fReferencePosition : LREAL;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

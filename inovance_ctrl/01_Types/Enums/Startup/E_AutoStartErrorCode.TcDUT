@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_AutoStartErrorCode" Id="{e3e55ce1-42fc-42df-9535-3d69673815bc}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_AutoStartErrorCode :
+(
+    None                    := 16#0000,
+    HmiOffline              := 16#0001,
+    ControlNotAllowed       := 16#0002,
+    GripperNotReady         := 16#0003,
+    AxisNotConfigured       := 16#0004,
+    StartConditionLost      := 16#0005,
+    AxisAlarm               := 16#0006,
+    AxisReadyTimeout        := 16#0007,
+    InvalidProcessStep      := 16#0008,
+    SupervisorStartTimeout  := 16#A107
+) UDINT;
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

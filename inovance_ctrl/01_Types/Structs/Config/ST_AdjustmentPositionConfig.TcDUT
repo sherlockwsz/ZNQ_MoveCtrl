@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_AdjustmentPositionConfig" Id="{3868465d-c7c9-4806-9fdb-9de513f64122}">
+    <Declaration><![CDATA[TYPE ST_AdjustmentPositionConfig :
+STRUCT
+    stReady : ST_Point3D;
+    stWork : ST_Point3D;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
   <GVL Name="GVL_System" Id="{e087346e-e6fe-4094-b4e2-6f8a98151646}">
     <Declaration><![CDATA[{attribute 'qualified_only'}
@@ -11,15 +11,9 @@ VAR_GLOBAL
     // 确认WPF已经能够稳定写入心跳后，再改为TRUE。
     bUseHmiWatchdog : BOOL := FALSE;
 
-    // WPF心跳超过2秒没有变化，判定通信失效。
-    // WPF建议每250～500ms更新一次。
-    tHmiWatchdogTimeout : TIME := T#2S;
-END_VAR
+    // 超时阈值见GVL_CommunicationConfig；此开关保留WPF现有ADS路径。
 
-VAR_GLOBAL CONSTANT
-    // 仅用于“NC轴仿真、无COM3夹爪”的测试工程。
-    // 实机下载前必须改回FALSE并重新编译。
-    bSkipCom3ForSimulation : BOOL := TRUE;
-END_VAR]]></Declaration>
+END_VAR
+]]></Declaration>
   </GVL>
 </TcPlcObject>

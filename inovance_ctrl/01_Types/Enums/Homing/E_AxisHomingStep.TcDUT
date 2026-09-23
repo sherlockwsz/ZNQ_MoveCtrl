@@ -1,0 +1,22 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_AxisHomingStep" Id="{32699bc3-591a-4306-a5bf-d3cab11f08bb}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_AxisHomingStep :
+(
+    Idle              := 0,
+    WaitModeGranted   := 10,
+    EnableAxis        := 20,
+    StartHome         := 30,
+    WaitHome          := 40,
+    StartFinalMove    := 50,
+    WaitFinalMove     := 60,
+    Done              := 100,
+    Aborted           := 110,
+    Error             := 120
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

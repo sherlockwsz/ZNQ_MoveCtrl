@@ -13,6 +13,7 @@ STRUCT
                                     // 0表示尚未标定，不能据此判定夹紧成功
 
     tReplyTimeout         : TIME;   // 单次Modbus请求的应答超时
+    tFeedbackTimeout      : TIME;   // 最长有效反馈间隔；单帧异常不会立即判离线
     tMoveTimeout          : TIME;   // 一次张开/夹紧动作的总超时
 
     bParametersVerified   : BOOL;   // 站号、方向、行程和电流阈值实测确认后置TRUE

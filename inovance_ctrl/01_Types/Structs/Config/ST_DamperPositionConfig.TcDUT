@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_DamperPositionConfig" Id="{252d8d98-8cad-4275-aa58-be8d3c3ff54f}">
+    <Declaration><![CDATA[TYPE ST_DamperPositionConfig :
+STRUCT
+    stGrid : ST_DamperGridConfig;
+    fSafeZ : LREAL;
+    fRotationZero : LREAL;
+    stTransfer : ST_Point3D;
+    stBuffer : ST_Point3D;
+    stCameraOffset : ST_Point2D;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

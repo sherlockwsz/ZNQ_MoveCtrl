@@ -1,7 +1,7 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.18">
   <POU Name="FB_HmiWatchdog" Id="{df81b304-bd24-448b-8153-41afa23e1505}" SpecialFunc="None">
-    <Declaration><![CDATA[//==============================================================
+    <Declaration>//==============================================================
 // HMI心跳看门狗
 //
 // 职责边界：
@@ -31,30 +31,30 @@ VAR
     bPreviousEnable : BOOL;
     tEffectiveTimeout : TIME;
     fbHeartbeatTimeout : TON;
-END_VAR]]></Declaration>
+END_VAR</Declaration>
     <Implementation>
-      <ST><![CDATA[// FB主体只保留按顺序执行的主要任务。
+      <ST>// FB主体只保留按顺序执行的主要任务。
 M_ResolveTimeout();
 M_UpdateHeartbeat();
 
 // 保存本周期使能状态，供下一周期检测看门狗启用沿。
-bPreviousEnable := bEnable;]]></ST>
+bPreviousEnable := bEnable;</ST>
     </Implementation>
     <Method Name="M_ResolveTimeout" Id="{a9a7541c-7294-4940-abc5-7999b0da785a}">
-      <Declaration><![CDATA[METHOD PRIVATE M_ResolveTimeout]]></Declaration>
+      <Declaration>METHOD PRIVATE M_ResolveTimeout</Declaration>
       <Implementation>
         <ST><![CDATA[// 防止外部误把超时时间设置为0，导致立即超时。
 IF tTimeout <= T#0MS THEN
-    tEffectiveTimeout := T#2S;
+    tEffectiveTimeout := GVL_CommunicationConfig.stHmi.tWatchdogTimeout;
 ELSE
     tEffectiveTimeout := tTimeout;
 END_IF;]]></ST>
       </Implementation>
     </Method>
     <Method Name="M_UpdateHeartbeat" Id="{2adb5171-b73b-4dc3-a5f5-f13a6e36fb8d}">
-      <Declaration><![CDATA[METHOD PRIVATE M_UpdateHeartbeat]]></Declaration>
+      <Declaration>METHOD PRIVATE M_UpdateHeartbeat</Declaration>
       <Implementation>
-        <ST><![CDATA[//==============================================================
+        <ST>//==============================================================
 // 1. 看门狗未启用：旁路通信保护并复位内部状态
 //==============================================================
 IF NOT bEnable THEN
@@ -85,7 +85,7 @@ END_IF;
 // 3. 检测心跳变化并更新超时定时器
 //==============================================================
 bHeartbeatChanged :=
-    udiHeartbeat <> udiLastHeartbeat;
+    udiHeartbeat &lt;&gt; udiLastHeartbeat;
 
 IF bHeartbeatChanged THEN
     udiLastHeartbeat := udiHeartbeat;
@@ -107,7 +107,7 @@ END_IF;
 // 4. 输出纯通信状态
 //==============================================================
 bTimeout := fbHeartbeatTimeout.Q;
-bOnline := bHeartbeatSeen AND NOT bTimeout;]]></ST>
+bOnline := bHeartbeatSeen AND NOT bTimeout;</ST>
       </Implementation>
     </Method>
   </POU>

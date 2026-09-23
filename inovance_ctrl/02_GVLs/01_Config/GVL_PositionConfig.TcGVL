@@ -1,0 +1,14 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <GVL Name="GVL_PositionConfig" Id="{7e4ccee6-1baf-4388-8c98-9455c834cb7d}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+VAR_GLOBAL
+    stDamper : ST_DamperPositionConfig := (fRotationZero := 0.0, stGrid := (stOrigin := (X := -191.5, Y := 95), fRowPitchX := 80.0, fColumnPitchY := -80.0, fPickZ := -15.0, aSlotOffset := [24((X := 0.0, Y := 0.0))]), fSafeZ := 110.0, stTransfer := (X := 57.0, Y := -543.0, Z := 60.0), stBuffer := (X := 194.0, Y := -472.0, Z := -23.0), stCameraOffset := (X := 0.0, Y := 90.0));
+    stTray : ST_TrayPositionConfig := (fStandbyZ := -753.0, fRackStationX := 288.5, fLiftStationX := -95.0, fPickupLevelZ := 3.0, aLayer := [(fHighPosition := -705.0, fLowPosition := -755.0), (fHighPosition := -575.0, fLowPosition := -615.0), (fHighPosition := -455.0, fLowPosition := -490.0), (fHighPosition := -330.0, fLowPosition := -365.0), (fHighPosition := -205.0, fLowPosition := -240.0)]);
+    stClamping : ST_ClampingPositionConfig := (fApproachPosition := 40.0, fReadyPosition := 80.5);
+    stTurntable : ST_TurntablePositionConfig := (fPosition180 := 190.5, fPosition0 := 10.5);
+    stAdjustment : ST_AdjustmentPositionConfig := (stWork := (X := -1.2, Y := -80.5, Z := 81.0), stReady := (X := -1.2, Y := -30.0, Z := 101.0));
+    stScrewdriver : ST_ScrewdriverPositionConfig := (stWork := (Y := 61.5, Z := 80.0), stReady := (Y := -15.0, Z := 97.0));
+END_VAR]]></Declaration>
+  </GVL>
+</TcPlcObject>

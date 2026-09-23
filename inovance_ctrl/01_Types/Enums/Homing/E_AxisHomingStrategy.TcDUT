@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_AxisHomingStrategy" Id="{837d03fd-91ad-4af9-94b2-414ff0dd9751}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+//==============================================================
+// 单轴回零执行策略
+//==============================================================
+TYPE E_AxisHomingStrategy :
+(
+    Disabled         := 0,  // 当前轴不允许回零
+    DriveHomeSwitch  := 10, // 使用原点开关执行标准回零
+    AbsolutePosition := 20, // 绝对编码器轴：确认标定后运动到绝对零位
+    ExternalSensor   := 30  // 外部IO原点传感器，当前为转台预留
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

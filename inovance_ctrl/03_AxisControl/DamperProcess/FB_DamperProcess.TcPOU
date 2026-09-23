@@ -130,30 +130,29 @@ VAR
     //==========================================================
     // 料盘坐标参数
     //==========================================================
-    fFirstSlotX : LREAL := -191.5;
-    fFirstSlotY : LREAL :=  95;
 
-    fRowPitchX    : LREAL := 80.0;
-    fColumnPitchY : LREAL := -80.0;
+
+
+
 
     //==========================================================
     // Z轴参数
     //==========================================================
-    fSlotPickZ       : LREAL := -15.0;
+
 	//==========================================================
 	// Z轴统一抬升绝对位置
 	//
 	// 所有XY运动前，以及取放料完成后，Z轴均抬升到110mm。
 	// 该位置是实际测量确认的安全位置，不再进行高度计算。
 	//==========================================================
-	fZLiftPosition : LREAL := 110.0;
+
 	
 	//==========================================================
 	// 转台备料位实测绝对坐标，单位mm
 	//==========================================================
-	fTransferXSetting     : LREAL :=   57.0;
-	fTransferYSetting     : LREAL := -543.0;
-	fTransferPickZSetting : LREAL :=   60.0;	
+
+
+	
 	
 	//==========================================================
 	// 最终缓冲位1绝对坐标
@@ -161,19 +160,19 @@ VAR
 	// 当前为临时模拟值。
 	// 实测完成后只修改以下三个参数。
 	//==========================================================
-	fBufferXSetting     : LREAL := 194.0;
-	fBufferYSetting     : LREAL := -472.0;
-	fBufferPickZSetting : LREAL := -23.0;
+
+
+
 	
     //==========================================================
     // 测试运动参数
     //==========================================================
-    fDamperXVelocity : LREAL := 50.0;
-    fDamperYVelocity : LREAL := 50.0;
-    fDamperZVelocity : LREAL := 50.0;
+
+
+
 
     // 判断某根XY轴是否已经在目标位置。
-    fPositionTolerance : LREAL := 0.01;
+
 
 		
     //==========================================================
@@ -213,11 +212,11 @@ VAR
 	// 相机位于夹爪Y正方向90mm，因此相机对准阻尼器时：
 	// 轴Y目标位置 = 阻尼器Y位置 - 90mm。
 	//==============================================================
-	fCameraOffsetX : LREAL := 0.0;
-	fCameraOffsetY : LREAL := 90.0;
+
+
 	
 	// 当前检测高度与统一安全高度相同。
-	fCameraVisionZ : LREAL := 110.0;
+
 	
 	
 	//==============================================================
@@ -225,10 +224,10 @@ VAR
 	//==============================================================
 	
 	// 每个阻尼器到达相机位置后等待2秒。
-	tSimulatedVisionDetection : TIME := T#2S;
+
 	
 	// 模拟相机返回带方向的相对修正角。
-	fSimulatedAngleCorrection : LREAL := 60.0;
+
 	
 	
 	//==============================================================
@@ -236,12 +235,12 @@ VAR
 	//
 	// 单位应与DamperRotation NC轴缩放一致，当前按照“度”使用。
 	//==============================================================
-	fDamperRotationVelocity     : LREAL := 30.0;
-	fDamperRotationAcceleration : LREAL := 100.0;
-	fDamperRotationDeceleration : LREAL := 100.0;
+
+
+
 	
 	// 修正角绝对值小于该值时，不发送旋转命令。
-	fRotationAngleDeadband : LREAL := 0.01;
+
 	
 	//==============================================================
 	// 二维码扫描旋转参数
@@ -253,17 +252,17 @@ VAR
 	
 	// 二维码扫描相对旋转角度。
 	// 正值表示正方向旋转；当前固定旋转一整圈。
-	fQrScanRelativeAngle : LREAL := 360.0;
+
 	
 	// 二维码扫描时使用独立速度，
 	// 后续可以根据相机曝光时间和识别效果单独调整。
-	fQrScanVelocity : LREAL := 60.0;
+
 	
 	// 二维码扫描旋转加速度。
-	fQrScanAcceleration : LREAL := 100.0;
+
 	
 	// 二维码扫描旋转减速度。
-	fQrScanDeceleration : LREAL := 100.0;
+
 	
 	
 	//==============================================================
@@ -450,7 +449,7 @@ fbSimulatedVisionDetection(
             = E_DamperTakeStep.SimulateVisionDetection
         ),
 
-    PT := tSimulatedVisionDetection
+    PT := GVL_ProcessConfig.stVision.tDetectionDelay
 );
 //==============================================================
 // 7. 五盘阻尼器上下料主流程
@@ -806,7 +805,7 @@ CASE eCurrentStep OF
 		nPreviousSourceRow := nCurrentRow;
 		nPreviousSourceColumn := nCurrentColumn;
 		
-        IF nCurrentColumn < 6 THEN
+        IF nCurrentColumn < UPPER_BOUND(aSlots, 2) THEN
             // 同一行内，列号增加。
             // 下一次取料时DamperX目标不变，只有DamperY需要运动。
             nCurrentColumn := nCurrentColumn + 1;
@@ -814,7 +813,7 @@ CASE eCurrentStep OF
             eCurrentStep :=
                 E_DamperProcessStep.TakeCurrentDamper;
 
-        ELSIF nCurrentRow < 4 THEN
+        ELSIF nCurrentRow < UPPER_BOUND(aSlots, 1) THEN
             // 当前行结束：
             // DamperY回第1列，DamperX进入下一行。
             //
@@ -828,13 +827,13 @@ CASE eCurrentStep OF
 
         ELSE
             // 当前盘第24件已经进入调整位，
-			IF (nCurrentRow = 4) AND (nCurrentColumn = 6) THEN
+			IF (nCurrentRow = UPPER_BOUND(aSlots, 1)) AND (nCurrentColumn = UPPER_BOUND(aSlots, 2)) THEN
 				// 记录是哪一盘的第24件正在等待调整结果。
 				bWaitingTrayResult := TRUE;
 				nTrayAwaitingResult := nCurrentTray;
 			END_IF;
             // 第23件已经放入当前盘第24个空料位。
-            IF nCurrentTray < 5 THEN
+            IF nCurrentTray < UPPER_BOUND(GVL_PositionConfig.stTray.aLayer, 1) THEN
                 // 方案B：
                 // 第24件处于调整位期间，开始模拟更换料盘。
                 eCurrentStep :=
@@ -1075,7 +1074,7 @@ bTakeRotationDoneLatched := FALSE;
 //==============================================================
 fbSimulatedVisionDetection(
     IN := FALSE,
-    PT := tSimulatedVisionDetection
+    PT := GVL_ProcessConfig.stVision.tDetectionDelay
 );
 
 
@@ -1139,22 +1138,24 @@ ePlaceStep := E_DamperPlaceStep.Idle;
 METHOD PRIVATE M_InitializeDamperCoordinates
 
 VAR
-    nRow : INT;
-    nColumn : INT;
+    nRow : DINT;
+    nColumn : DINT;
 END_VAR]]></Declaration>
       <Implementation>
         <ST><![CDATA[//==============================================================
 // 1. 初始化24个料位XY坐标
 //==============================================================
-FOR nRow := 1 TO 4 DO
-    FOR nColumn := 1 TO 6 DO
+FOR nRow := 1 TO UPPER_BOUND(aSlots, 1) DO
+    FOR nColumn := 1 TO UPPER_BOUND(aSlots, 2) DO
         aSlots[nRow, nColumn].fXPosition :=
-            fFirstSlotX
-            + INT_TO_LREAL(nRow - 1) * fRowPitchX;
+            GVL_PositionConfig.stDamper.stGrid.stOrigin.X
+            + DINT_TO_LREAL(nRow - 1) * GVL_PositionConfig.stDamper.stGrid.fRowPitchX
+            + GVL_PositionConfig.stDamper.stGrid.aSlotOffset[nRow, nColumn].X;
 
         aSlots[nRow, nColumn].fYPosition :=
-            fFirstSlotY
-            + INT_TO_LREAL(nColumn - 1) * fColumnPitchY;
+            GVL_PositionConfig.stDamper.stGrid.stOrigin.Y
+            + DINT_TO_LREAL(nColumn - 1) * GVL_PositionConfig.stDamper.stGrid.fColumnPitchY
+            + GVL_PositionConfig.stDamper.stGrid.aSlotOffset[nRow, nColumn].Y;
     END_FOR
 END_FOR;
 
@@ -1163,10 +1164,10 @@ END_FOR;
 	// 2. 料盘Z轴位置
 	//==============================================================
 	// 料盘取放绝对高度。
-	fTrayPickZ := fSlotPickZ;
+	fTrayPickZ := GVL_PositionConfig.stDamper.stGrid.fPickZ;
 	
 	// 料盘区域XY移动前统一抬升到110mm。
-	fTraySafeZ := fZLiftPosition;
+	fTraySafeZ := GVL_PositionConfig.stDamper.fSafeZ;
 
 	//==============================================================
 	// 3. 备料/取回位
@@ -1174,12 +1175,12 @@ END_FOR;
 	//==============================================================
 	// 备料位使用实测绝对坐标
 	//==============================================================
-	fTransferX := fTransferXSetting;
-	fTransferY := fTransferYSetting;
-	fTransferPickZ := fTransferPickZSetting;
+	fTransferX := GVL_PositionConfig.stDamper.stTransfer.X;
+	fTransferY := GVL_PositionConfig.stDamper.stTransfer.Y;
+	fTransferPickZ := GVL_PositionConfig.stDamper.stTransfer.Z;
 	
 	// 备料位取放完成后，同样抬升到固定110mm。
-	fTransferSafeZ := fZLiftPosition;
+	fTransferSafeZ := GVL_PositionConfig.stDamper.fSafeZ;
 
 
 
@@ -1187,17 +1188,15 @@ END_FOR;
 	// 4. 最终缓冲位
 	//
 	// 当前临时坐标：
-	// X = -860.5 mm
-	// Y = -342.5 mm
-	// Z =  -77.0 mm
+	// 缓冲位实测目标从GVL_PositionConfig.stDamper读取。
 	//==============================================================
 	// 最终缓冲位1直接使用绝对坐标。
-	fBufferX := fBufferXSetting;
-	fBufferY := fBufferYSetting;
-	fBufferPickZ := fBufferPickZSetting;
+	fBufferX := GVL_PositionConfig.stDamper.stBuffer.X;
+	fBufferY := GVL_PositionConfig.stDamper.stBuffer.Y;
+	fBufferPickZ := GVL_PositionConfig.stDamper.stBuffer.Z;
 	
 	// 所有取放完成后统一抬升到110mm。
-	fBufferSafeZ := fZLiftPosition;]]></ST>
+	fBufferSafeZ := GVL_PositionConfig.stDamper.fSafeZ;]]></ST>
       </Implementation>
     </Method>
     <Method Name="M_MoveXYParallel" Id="{76cd42f8-d1ed-4032-942b-c970dbafe1eb}">
@@ -1228,18 +1227,18 @@ END_VAR]]></Declaration>
 IF NOT bXYCommandIssued THEN
     bXDoneLatched :=
         ABS(ioAxisX.Data.fActPosition - fTargetX)
-        <= fPositionTolerance;
+        <= GVL_MotionConfig.stDamper.fPositionTolerance;
 
     bYDoneLatched :=
         ABS(ioAxisY.Data.fActPosition - fTargetY)
-        <= fPositionTolerance;
+        <= GVL_MotionConfig.stDamper.fPositionTolerance;
 
 
     // X轴尚未到位时发送绝对运动脉冲。
     IF NOT bXDoneLatched THEN
         ioAxisX.AutoSet.Position.fAbsolutePosition := fTargetX;
         ioAxisX.AutoSet.Position.fVelocity :=
-            fDamperXVelocity;
+            GVL_MotionConfig.stDamper.stX.fVelocity;
 
         ioAxisX.AutoCmd.bMoveAbs := TRUE;
     END_IF;
@@ -1249,7 +1248,7 @@ IF NOT bXYCommandIssued THEN
     IF NOT bYDoneLatched THEN
         ioAxisY.AutoSet.Position.fAbsolutePosition := fTargetY;
         ioAxisY.AutoSet.Position.fVelocity :=
-            fDamperYVelocity;
+            GVL_MotionConfig.stDamper.stY.fVelocity;
 
         ioAxisY.AutoCmd.bMoveAbs := TRUE;
     END_IF;
@@ -1302,12 +1301,12 @@ END_VAR]]></Declaration>
 IF NOT bZCommandIssued THEN
     bZDoneLatched :=
         ABS(ioAxisZ.Data.fActPosition - fTargetZ)
-        <= fPositionTolerance;
+        <= GVL_MotionConfig.stDamper.fPositionTolerance;
 
     IF NOT bZDoneLatched THEN
         ioAxisZ.AutoSet.Position.fAbsolutePosition := fTargetZ;
         ioAxisZ.AutoSet.Position.fVelocity :=
-            fDamperZVelocity;
+            GVL_MotionConfig.stDamper.stZ.fVelocity;
 
         ioAxisZ.AutoCmd.bMoveAbs := TRUE;
     END_IF;
@@ -1489,16 +1488,16 @@ END_CASE;]]></ST>
 METHOD PRIVATE M_ResetDamperSlotStates
 
 VAR
-    nRow : INT;
-    nColumn : INT;
+    nRow : DINT;
+    nColumn : DINT;
 END_VAR]]></Declaration>
       <Implementation>
         <ST><![CDATA[//==============================================================
 // 将4×6共24个料位全部设置为“未调整”。
 // 本Method只修改状态，不修改料位坐标。
 //==============================================================
-FOR nRow := 1 TO 4 DO
-    FOR nColumn := 1 TO 6 DO
+FOR nRow := 1 TO UPPER_BOUND(aSlots, 1) DO
+    FOR nColumn := 1 TO UPPER_BOUND(aSlots, 2) DO
         aSlots[nRow, nColumn].eState :=
             E_DamperSlotState.Unadjusted;
     END_FOR
@@ -1587,7 +1586,7 @@ CASE eTakeStep OF
     //==========================================================
     E_DamperTakeStep.EnsureSafeZ:
         IF M_MoveZAbsolute(
-            fTargetZ := fCameraVisionZ,
+            fTargetZ := GVL_PositionConfig.stDamper.fSafeZ,
             ioAxisZ := ioAxisZ
         ) THEN
             eTakeStep :=
@@ -1606,10 +1605,10 @@ CASE eTakeStep OF
     //==========================================================
     E_DamperTakeStep.MoveXYToVisionPosition:
         fCurrentVisionX :=
-            fSourceX - fCameraOffsetX;
+            fSourceX - GVL_PositionConfig.stDamper.stCameraOffset.X;
 
         fCurrentVisionY :=
-            fSourceY - fCameraOffsetY;
+            fSourceY - GVL_PositionConfig.stDamper.stCameraOffset.Y;
 
         IF M_MoveXYParallel(
             fTargetX := fCurrentVisionX,
@@ -1632,7 +1631,7 @@ CASE eTakeStep OF
 		IF fbSimulatedVisionDetection.Q THEN
 			// 锁存本次检测得到的相对修正角。
 			fAngleCorrectionLatched :=
-				fSimulatedAngleCorrection;
+				GVL_ProcessConfig.stVision.fAngleCorrection;
 	
 			// 旋转将在夹爪夹紧阻尼器后执行。
 			bRotationCommandIssued := FALSE;
@@ -1726,7 +1725,7 @@ CASE eTakeStep OF
 			// 检测角度在死区内时，不需要发送旋转命令。
 			IF
 				ABS(fAngleCorrectionLatched)
-				<= fRotationAngleDeadband
+				<= GVL_MotionConfig.stDamper.stRotation.fPositionTolerance
 			THEN
 				bTakeRotationDoneLatched := TRUE;
 				bRotationCommandIssued := FALSE;
@@ -1738,13 +1737,13 @@ CASE eTakeStep OF
 						fAngleCorrectionLatched;
 	
 					ioAxisRotation.AutoSet.Position.fVelocity :=
-						fDamperRotationVelocity;
+						GVL_MotionConfig.stDamper.stRotation.fVelocity;
 	
 					ioAxisRotation.AutoSet.Position.fAcceleration :=
-						fDamperRotationAcceleration;
+						GVL_MotionConfig.stDamper.stRotation.fAcceleration;
 	
 					ioAxisRotation.AutoSet.Position.fDeceleration :=
-						fDamperRotationDeceleration;
+						GVL_MotionConfig.stDamper.stRotation.fDeceleration;
 	
 					// 产生一个PLC扫描周期的相对运动命令。
 					ioAxisRotation.AutoCmd.bMoveRel := TRUE;
@@ -1812,8 +1811,8 @@ CASE eTakeStep OF
 	
 		// 如果扫描角度被设置为接近0°，直接跳过扫码旋转。
 		IF
-			ABS(fQrScanRelativeAngle)
-			<= fRotationAngleDeadband
+			ABS(GVL_ProcessConfig.stQrScan.fRelativeAngle)
+			<= GVL_MotionConfig.stDamper.stRotation.fPositionTolerance
 		THEN
 			bQrScanCommandIssued := FALSE;
 	
@@ -1824,16 +1823,16 @@ CASE eTakeStep OF
 			// 每件阻尼器只发送一次二维码扫描旋转命令。
 			IF NOT bQrScanCommandIssued THEN
 				ioAxisRotation.AutoSet.Position.fRelativeDistance :=
-					fQrScanRelativeAngle;
+					GVL_ProcessConfig.stQrScan.fRelativeAngle;
 	
 				ioAxisRotation.AutoSet.Position.fVelocity :=
-					fQrScanVelocity;
+					GVL_MotionConfig.stDamperRotation.stQrScan.fVelocity;
 	
 				ioAxisRotation.AutoSet.Position.fAcceleration :=
-					fQrScanAcceleration;
+					GVL_MotionConfig.stDamperRotation.stQrScan.fAcceleration;
 	
 				ioAxisRotation.AutoSet.Position.fDeceleration :=
-					fQrScanDeceleration;
+					GVL_MotionConfig.stDamperRotation.stQrScan.fDeceleration;
 	
 				// 产生一个PLC扫描周期的相对运动命令。
 				ioAxisRotation.AutoCmd.bMoveRel := TRUE;

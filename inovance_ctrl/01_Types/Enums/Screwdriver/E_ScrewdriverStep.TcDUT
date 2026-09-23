@@ -6,23 +6,38 @@
 {attribute 'to_string'}
 TYPE E_ScrewdriverStep :
 (
-    Idle                    := 0,
-    InitializeSafeZ         := 10,  // 首次启动：Z先到85
-    InitializeYZero         := 20,  // 首次启动：Y再到0
+    Idle                       := 0,
 
-    MoveYForPreTighten      := 30,  // 第一件需要Y进位；后续已在62可直接跳过
-    LowerForPreTighten      := 40,
-    WaitPreTighten          := 50,
-    LiftAfterPreTighten     := 60,
-    RetreatYForAdjustment  := 70,  // 当前机构有干涉：调整前必须Y回0
-    WaitAdjustment         := 80,  // 独立模拟调整
+    // 首次初始化
+    InitializeSafeZ            := 10,
+    InitializeYZero            := 20,
 
-    MoveYForFinalTighten    := 90,
-    LowerForFinalTighten    := 100,
-    WaitFinalTighten        := 110,
-    FinalLiftZ              := 120, // Z到85后才允许转台松夹
-    WaitDoneAck             := 130, // 保持完成信号，等待转台确认
-    Error                   := 900
+    // 预拧紧
+    MoveYForPreTighten         := 30,
+    LowerForPreTighten         := 40,
+    WaitPreTighten             := 50,
+    LiftAfterPreTighten        := 60,
+    RetreatYForAdjustment     := 70,
+
+    // 调整机构进入工作位置
+    MoveAdjustmentXYToWork     := 80,
+    LowerAdjustmentZToWork     := 90,
+    WaitAdjustment             := 100,
+
+    // 二次拧紧
+    MoveYForFinalTighten       := 110,
+    LowerForFinalTighten       := 120,
+    WaitFinalTighten           := 130,
+    FinalLiftScrewdriverZ      := 140,
+
+    // 调整机构撤离
+    LiftAdjustmentZToSafe      := 150,
+    ReturnAdjustmentXYStandby  := 160,
+
+    // 全部撤离完成后保持完成信号
+    WaitDoneAck                := 170,
+
+    Error                      := 900
 );
 END_TYPE]]></Declaration>
   </DUT>

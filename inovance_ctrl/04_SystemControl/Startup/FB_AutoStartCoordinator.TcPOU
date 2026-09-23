@@ -10,7 +10,7 @@ VAR_INPUT
     bGripperReady        : BOOL;
     bGripperActionFault  : BOOL;
     bProcessDone         : BOOL;  // 整套五盘流程已完成
-    tEnableTimeout       : TIME := T#15S;
+    tEnableTimeout       : TIME := GVL_SafetyConfig.stStartup.tEnableTimeout;
 	bMachinePreparationDone  : BOOL;
 	bMachinePreparationError : BOOL;
 END_VAR
@@ -37,7 +37,7 @@ VAR
     trigStart       : R_TRIG;
     fbEnableTimeout : TON;
 
-    uiItem       : UINT;
+    uiItem       : DINT;
     uiAxis       : UINT;
     bAllAxesReady : BOOL;
 
@@ -68,30 +68,30 @@ ELSE
                 bError := FALSE;
                 bTimeout := FALSE;
                 uiErrorAxisIndex := 0;
-                uiErrorCode := 0;
+                uiErrorCode := TO_UINT(E_AutoStartErrorCode.None);
 
                 IF NOT bHmiOnline THEN
                     bStartRejected := TRUE;
-                    uiErrorCode := 1;
+                    uiErrorCode := TO_UINT(E_AutoStartErrorCode.HmiOffline);
 
                 ELSIF NOT bControlAllowed THEN
                     bStartRejected := TRUE;
-                    uiErrorCode := 2;
+                    uiErrorCode := TO_UINT(E_AutoStartErrorCode.ControlNotAllowed);
 
                 ELSIF bGripperActionFault OR NOT bGripperReady THEN
                     bStartRejected := TRUE;
-                    uiErrorCode := 3;
+                    uiErrorCode := TO_UINT(E_AutoStartErrorCode.GripperNotReady);
 
                 ELSE
                     // 在发使能之前确认八根参与轴均已配置。
-                    FOR uiItem := 1 TO GVL_AxisIndex.AutoProcessAxisCount DO
+                    FOR uiItem := LOWER_BOUND(GVL_AxisIndex.AutoProcessAxes, 1) TO UPPER_BOUND(GVL_AxisIndex.AutoProcessAxes, 1) DO
                         uiAxis := GVL_AxisIndex.AutoProcessAxes[uiItem];
 
                         IF NOT GVL_AxisConfig.AxisLimits[
                             uiAxis
                         ].bConfigured THEN
                             bStartRejected := TRUE;
-                            uiErrorCode := 4;
+                            uiErrorCode := TO_UINT(E_AutoStartErrorCode.AxisNotConfigured);
                             uiErrorAxisIndex := uiAxis;
                             EXIT;
                         END_IF;
@@ -111,20 +111,20 @@ ELSE
 
                 bError := TRUE;
                 bErrorPulse := TRUE;
-                uiErrorCode := 5;
+                uiErrorCode := TO_UINT(E_AutoStartErrorCode.StartConditionLost);
                 eStep := E_AutoStartStep.Idle;
 
             ELSE
                 bAllAxesReady := TRUE;
                 uiErrorAxisIndex := 0;
 
-                FOR uiItem := 1 TO GVL_AxisIndex.AutoProcessAxisCount DO
+                FOR uiItem := LOWER_BOUND(GVL_AxisIndex.AutoProcessAxes, 1) TO UPPER_BOUND(GVL_AxisIndex.AutoProcessAxes, 1) DO
                     uiAxis := GVL_AxisIndex.AutoProcessAxes[uiItem];
 
                     IF aAxes[uiAxis].Alarm.bError THEN
                         bError := TRUE;
                         bErrorPulse := TRUE;
-                        uiErrorCode := 6;
+                        uiErrorCode := TO_UINT(E_AutoStartErrorCode.AxisAlarm);
                         uiErrorAxisIndex := uiAxis;
                         eStep := E_AutoStartStep.Idle;
                         EXIT;
@@ -148,7 +148,7 @@ ELSE
                         bError := TRUE;
                         bTimeout := TRUE;
                         bErrorPulse := TRUE;
-                        uiErrorCode := 7;
+                        uiErrorCode := TO_UINT(E_AutoStartErrorCode.AxisReadyTimeout);
                         eStep := E_AutoStartStep.Idle;
                     END_IF;
                 END_IF;
@@ -171,7 +171,7 @@ ELSE
         ELSE
             bError := TRUE;
             bErrorPulse := TRUE;
-            uiErrorCode := 8;
+            uiErrorCode := TO_UINT(E_AutoStartErrorCode.InvalidProcessStep);
             eStep := E_AutoStartStep.Idle;
     END_CASE;
 END_IF;

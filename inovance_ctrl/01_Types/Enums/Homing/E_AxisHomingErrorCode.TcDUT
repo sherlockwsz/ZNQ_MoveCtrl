@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_AxisHomingErrorCode" Id="{efa1fb23-9b00-4c86-9d1b-f3dc1b6b99e4}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_AxisHomingErrorCode :
+(
+    None                         := 16#0000,
+    FaultWithoutDetail           := 16#C100,
+    AxisIndexOutOfRange          := 16#C101,
+    HomingNotEnabled             := 16#C102,
+    AxisMappingInvalid           := 16#C103,
+    ControlNotAllowed            := 16#C104,
+    ExternalSensorNotImplemented := 16#C105,
+    ReferenceNotCalibrated       := 16#C106,
+    HomingTimeout                := 16#C107,
+    EnableAxisFault              := 16#C108,
+    HomingAxisFault              := 16#C109,
+    HomingCommandRejected        := 16#C10A,
+    HomingCommandAborted         := 16#C10B,
+    FinalMoveAxisFault           := 16#C10C,
+    FinalMoveCommandRejected     := 16#C10D,
+    FinalMoveCommandAborted      := 16#C10E,
+    OtherMotionActive            := 16#C10F,
+    SelectedAxisHasAlarm         := 16#C110,
+    InvalidProcessStep           := 16#C1FF
+) UDINT;
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

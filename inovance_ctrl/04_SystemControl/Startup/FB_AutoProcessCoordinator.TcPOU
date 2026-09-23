@@ -1,7 +1,7 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
   <POU Name="FB_AutoProcessCoordinator" Id="{40395fc0-80f0-4ed1-95be-597e4ef209f6}" SpecialFunc="None">
-    <Declaration><![CDATA[FUNCTION_BLOCK FB_AutoProcessCoordinator
+    <Declaration>FUNCTION_BLOCK FB_AutoProcessCoordinator
 VAR_INPUT
     // 来自 FB_AutoStartCoordinator；全部轴就绪后保持 TRUE。
     bStart : BOOL;
@@ -49,7 +49,7 @@ VAR
     // COM3 动作本周期报错时，Damper 可在同周期收到 TRUE。
     bEffectiveAbort : BOOL;
 	stTurntableInputForThisScan : ST_DamperTurntableInput;
-END_VAR]]></Declaration>
+END_VAR</Declaration>
     <Implementation>
       <ST><![CDATA[// ============================================================
 // 调用顺序不可随意交换：
@@ -83,27 +83,31 @@ ioTrayProcess(
 );
 
 // ------------------------------------------------------------
-// 2. COM3 上下料夹爪动作
-// Damper 本周期提出的新请求，将在下一扫描由此处受理。
+// 2. COM3上下料夹爪动作
+//
+// 机构尚未准备完成时，COM3命令权属于FB_MachinePreparation。
+// 准备完成后，命令权才交给Damper自动流程。
+// 保证同一个FB_GripperAction每周期最多调用一次。
 // ------------------------------------------------------------
-ioGripperAction(
-    bExecute := ioDamperProcess.bGripperActionExecute,
-    eCommand := ioDamperProcess.eGripperActionCommand,
-    bCancel := bStopRequest OR bAbort,
-    tAcceptTimeout := T#3S,
-    tResultTimeout := T#8S,
-    ioGripper := ioGripper
-);
+IF bMachinePrepared THEN
+    ioGripperAction(
+        bExecute := ioDamperProcess.bGripperActionExecute,
+        eCommand := ioDamperProcess.eGripperActionCommand,
+        bCancel := bStopRequest OR bAbort,
+        tAcceptTimeout := GVL_ProcessConfig.stGripper.tAcceptTimeout,
+        tResultTimeout := GVL_ProcessConfig.stGripper.tResultTimeout,
+        ioGripper := ioGripper
+    );
 
-// 与原 MAIN 判断保持一致：只在 Damper 流程运行中，
-// 将 COM3 动作失败升级为整机流程中止。
-IF ioGripperAction.bError
-    AND ioDamperProcess.bBusy
-    AND NOT bAbort THEN
-
-    bGripperActionFault := TRUE;
-    udGripperActionError := ioGripperAction.udErrorCode;
-    bEffectiveAbort := TRUE;
+    // 只在正式Damper流程运行期间升级夹爪动作故障。
+    IF ioGripperAction.bError
+        AND ioDamperProcess.bBusy
+        AND NOT bAbort
+    THEN
+        bGripperActionFault := TRUE;
+        udGripperActionError := ioGripperAction.udErrorCode;
+        bEffectiveAbort := TRUE;
+    END_IF;
 END_IF;
 
 // ------------------------------------------------------------
@@ -157,15 +161,25 @@ ioDamperProcess(
 ioScrewdriverProcess(
     bEnable := bStart,
     bAbort := bEffectiveAbort,
-	bMachinePrepared := bMachinePrepared,
+    bMachinePrepared := bMachinePrepared,
+
     bRequest :=
         ioTurntableProcess.stStatus.bAdjustmentRequest,
+
     bClampHolding :=
         ioTurntableProcess.stStatus.bClampHolding,
+
     bDoneAck :=
         ioTurntableProcess.stStatus.bAdjustmentDoneAck,
+
+    // 螺丝刀机构
     stAxisY := aAxes[GVL_AxisIndex.ScrewdriverY],
-    stAxisZ := aAxes[GVL_AxisIndex.ScrewdriverZ]
+    stAxisZ := aAxes[GVL_AxisIndex.ScrewdriverZ],
+
+    // 同轴度调整机构
+    stAdjustmentX := aAxes[GVL_AxisIndex.AdjustmentX],
+    stAdjustmentY := aAxes[GVL_AxisIndex.AdjustmentY],
+    stAdjustmentZ := aAxes[GVL_AxisIndex.AdjustmentZ]
 );
 
 stTurntableInputForThisScan := ioDamperProcess.stTurntableInput;

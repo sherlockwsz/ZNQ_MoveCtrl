@@ -82,6 +82,7 @@ END_VAR]]></Declaration>
 M_AreCommandsSafe :=
     NOT iCmd.bEnable
     AND NOT iCmd.bReset
+    AND NOT iCmd.bHome
     AND NOT iCmd.bStop
     AND NOT iCmd.bMoveAbs
     AND NOT iCmd.bMoveRel
@@ -108,6 +109,7 @@ IF NOT bHoldEnableForStop THEN
 END_IF;
 
 ioCmd.bReset := FALSE;
+ioCmd.bHome := FALSE;
 ioCmd.bMoveAbs := FALSE;
 ioCmd.bMoveRel := FALSE;
 

@@ -16,7 +16,7 @@ VAR
     fbAdjustGripperManager : FB_GripperManager;//调整轴夹爪
 
     uiAxisIndex : UINT;
-    uiAutoAxisItem : UINT;
+    uiAutoAxisItem : DINT;
     bAxisInAutoProcess : BOOL;
     bAnyAxisConfigured : BOOL;
     bAllAxesControlAllowed : BOOL;
@@ -54,9 +54,17 @@ VAR
 	// 建议WPF只写TRUE，完成或失败后PLC自动清FALSE。
 	bControlPrepare : BOOL;
 
-	// 回零模式入口预留；回零状态机接入前保持FALSE。
+	// WPF单轴回零入口：先写uiHomingAxisIndex，再将bControlHoming置TRUE。
 	bControlHoming : BOOL;
 	bHomingBusy : BOOL;
+	uiHomingAxisIndex : UINT := 1;
+	fbSingleAxisHoming : FB_SingleAxisHoming;
+	bHomingDone : BOOL;
+	bHomingError : BOOL;
+	bHomingTimeout : BOOL;
+	bHomingRequestRejected : BOOL;
+	bHomingAborted : BOOL;
+	udiHomingErrorCode : UDINT;
 	
 	
 	//==============================================================
@@ -124,6 +132,12 @@ VAR
 	udiMachinePreparationError : UDINT;
 	
 	bPreparationModeActive : BOOL;
+	
+	// TRUE：夹爪只做通信联调，异常不触发整机停机。
+    // 正式运行前必须恢复为FALSE。
+    bDebugBypassDamperGripper : BOOL := TRUE;
+	
+	stPreparationConfig : ST_MachinePreparationConfig;
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[// =============================================================
@@ -138,7 +152,7 @@ PRG_IO_ReadInputs();
 fbHmiWatchdog(
     bEnable := GVL_System.bUseHmiWatchdog,
     udiHeartbeat := GVL_HMI.Comm.udiHeartbeat,
-    tTimeout := GVL_System.tHmiWatchdogTimeout
+    tTimeout := GVL_CommunicationConfig.stHmi.tWatchdogTimeout
 );
 
 //==============================================================
@@ -189,6 +203,8 @@ IF
     bStopRequestRaw
     OR bAbortProcesses
     OR fbMachineSupervisor.stFault.bActive
+    OR bControlHoming
+    OR fbSingleAxisHoming.bBusy
     OR (fbMachineModeManager.eMode = E_MachineMode.Homing)
 THEN
     bControlAuto := FALSE;
@@ -198,6 +214,85 @@ END_IF;
 // 启动条件由夹爪管理层统一发布，MAIN不再重复读取底层有效位。
 bDamperGripperAutoReady :=
     GVL_DamperGripper.stDamperGripper.State.bAutoReady;
+
+//==============================================================
+// 选中单轴回零
+//
+// 新请求只允许从Manual模式进入。进入Homing后，FB持续持有
+// 自己锁存的轴号和配置，不受WPF中途改写选择轴号影响。
+//==============================================================
+fbSingleAxisHoming(
+    bStart := bControlHoming,
+    bAbort :=
+        bStopRequestRaw
+        OR bAbortProcesses
+        OR bMachineFault,
+    bReset := trigResetMachineFault.Q,
+    bModeGranted := fbMachineModeManager.bHomingAllowed,
+    bControlAllowed :=
+        GVL_HMI.Comm.bControlAllowed
+        AND
+        (
+            (fbMachineModeManager.eMode = E_MachineMode.Manual)
+            OR fbSingleAxisHoming.bBusy
+        )
+        AND NOT bControlAuto
+        AND NOT bControlPrepare
+        AND NOT fbMachinePreparation.bBusy
+        AND NOT fbAutoStart.bEnabling
+        AND NOT fbAutoProcessCoordinator.bBusy,
+    bSimulationMode := GVL_AxisHoming.bSimulationMode,
+    uiSelectedAxis := uiHomingAxisIndex,
+    aConfig := GVL_AxisHoming.AxisConfig,
+    aAxes := GVL_AxisRuntime.Axes
+);
+
+bHomingBusy := fbSingleAxisHoming.bBusy;
+bHomingDone := fbSingleAxisHoming.bDone;
+bHomingError := fbSingleAxisHoming.bError;
+bHomingTimeout := fbSingleAxisHoming.bTimeout;
+bHomingRequestRejected := fbSingleAxisHoming.bRequestRejected;
+bHomingAborted := fbSingleAxisHoming.bAborted;
+udiHomingErrorCode := fbSingleAxisHoming.udiErrorCode;
+
+// 发布稳定ADS状态，WPF无需读取FB实例内部变量。
+GVL_AxisHoming.Status.bBusy := bHomingBusy;
+GVL_AxisHoming.Status.bDone := bHomingDone;
+GVL_AxisHoming.Status.bError := bHomingError;
+GVL_AxisHoming.Status.bTimeout := bHomingTimeout;
+GVL_AxisHoming.Status.bRequestRejected := bHomingRequestRejected;
+GVL_AxisHoming.Status.bAborted := bHomingAborted;
+GVL_AxisHoming.Status.bSimulationActive :=
+    GVL_AxisHoming.bSimulationMode AND bHomingBusy;
+GVL_AxisHoming.Status.uiRequestedAxis := uiHomingAxisIndex;
+GVL_AxisHoming.Status.uiActiveAxis := fbSingleAxisHoming.uiActiveAxis;
+GVL_AxisHoming.Status.eStep := fbSingleAxisHoming.eStep;
+GVL_AxisHoming.Status.eStrategy := fbSingleAxisHoming.eStrategy;
+GVL_AxisHoming.Status.eDirection := fbSingleAxisHoming.eDirection;
+GVL_AxisHoming.Status.udiErrorCode := udiHomingErrorCode;
+
+// 回零完成后返回Manual，并保持该轴使能，便于继续单轴调试。
+IF bControlHoming AND bHomingDone THEN
+    IF (fbSingleAxisHoming.uiActiveAxis >= 1)
+        AND (fbSingleAxisHoming.uiActiveAxis <= GVL_Constants.cMaxAxisCount) THEN
+        GVL_AxisRuntime.Axes[
+            fbSingleAxisHoming.uiActiveAxis
+        ].Cmd.bEnable := TRUE;
+    END_IF;
+    bControlHoming := FALSE;
+END_IF;
+
+IF bControlHoming
+    AND
+    (
+        bHomingError
+        OR bHomingRequestRejected
+        OR bHomingAborted
+    )
+THEN
+    bControlHoming := FALSE;
+END_IF;
+
 	// 必须放在 Stop 请求处理、COM3 就绪计算之后，
 	// 且必须放在 Tray/Damper/Turntable 流程调用之前。
 	fbAutoStart(
@@ -211,13 +306,15 @@ bDamperGripperAutoReady :=
 				   OR bAbortProcesses
 				   OR fbAutoStopManager.bError
 				   OR fbMachineSupervisor.stFault.bActive
+				   OR bControlHoming
+				   OR fbSingleAxisHoming.bBusy
 				   OR (fbMachineModeManager.eMode = E_MachineMode.Homing),
 		bHmiOnline := fbHmiWatchdog.bOnline,
 		bControlAllowed := GVL_HMI.Comm.bControlAllowed,
 		bGripperReady := bDamperGripperAutoReady,
 		bGripperActionFault := bDamperGripperActionFault,
 		bProcessDone := bAutoProcessDone,
-		tEnableTimeout := T#15S,
+		tEnableTimeout := GVL_SafetyConfig.stStartup.tEnableTimeout,
 		aAxes := GVL_AxisRuntime.Axes
 	);
 	
@@ -225,7 +322,7 @@ bDamperGripperAutoReady :=
 		// 沿用 WPF 当前直接读写的请求位：拒绝后由 PLC 清除。
 		bControlAuto := FALSE;
 	
-		IF fbAutoStart.uiErrorCode = 3 THEN
+		IF fbAutoStart.uiErrorCode = TO_UINT(E_AutoStartErrorCode.GripperNotReady) THEN
 			bDamperGripperStartRejected := TRUE;
 		END_IF;
 	END_IF;
@@ -278,17 +375,49 @@ bPreparationStartRequest :=
     AND fbHmiWatchdog.bOnline
     AND GVL_HMI.Comm.bControlAllowed;
 
+stPreparationConfig.fTrayXStandby := GVL_PositionConfig.stTray.fLiftStationX;
+stPreparationConfig.fTrayZStandby := GVL_PositionConfig.stTray.fStandbyZ;
+stPreparationConfig.fDamperXStandby := GVL_PositionConfig.stDamper.stGrid.stOrigin.X + GVL_PositionConfig.stDamper.stGrid.aSlotOffset[1, 1].X;
+stPreparationConfig.fDamperYStandby := GVL_PositionConfig.stDamper.stGrid.stOrigin.Y + GVL_PositionConfig.stDamper.stGrid.aSlotOffset[1, 1].Y;
+stPreparationConfig.fDamperZStandby := GVL_PositionConfig.stDamper.fSafeZ;
+stPreparationConfig.fDamperRotationZero := GVL_PositionConfig.stDamper.fRotationZero;
+stPreparationConfig.fClampOpenPosition := GVL_PositionConfig.stClamping.fReadyPosition;
+stPreparationConfig.fTurntableZero := GVL_PositionConfig.stTurntable.fPosition0;
+stPreparationConfig.fAdjustmentXStandby := GVL_PositionConfig.stAdjustment.stReady.X;
+stPreparationConfig.fAdjustmentYStandby := GVL_PositionConfig.stAdjustment.stReady.Y;
+stPreparationConfig.fAdjustmentZStandby := GVL_PositionConfig.stAdjustment.stReady.Z;
+stPreparationConfig.fScrewdriverYZero := GVL_PositionConfig.stScrewdriver.stReady.Y;
+stPreparationConfig.fScrewdriverZSafe := GVL_PositionConfig.stScrewdriver.stReady.Z;
+stPreparationConfig.fTrayVelocity := GVL_MotionConfig.stPreparation.stTray.fVelocity;
+stPreparationConfig.fDamperVelocity := GVL_MotionConfig.stPreparation.stDamperLinear.fVelocity;
+stPreparationConfig.fDamperRotationVelocity := GVL_MotionConfig.stPreparation.stDamperRotation.fVelocity;
+stPreparationConfig.fClampVelocity := GVL_MotionConfig.stPreparation.stClamping.fVelocity;
+stPreparationConfig.fTurntableVelocity := GVL_MotionConfig.stPreparation.stTurntable.fVelocity;
+stPreparationConfig.fAdjustmentVelocity := GVL_MotionConfig.stPreparation.stAdjustment.fVelocity;
+stPreparationConfig.fScrewdriverVelocity := GVL_MotionConfig.stPreparation.stScrewdriver.fVelocity;
+stPreparationConfig.fLinearTolerance := GVL_MotionConfig.stPreparation.fLinearPositionTolerance;
+stPreparationConfig.fRotationTolerance := GVL_MotionConfig.stPreparation.fRotationPositionTolerance;
+stPreparationConfig.tReadyTimeout := GVL_MotionConfig.stPreparation.tReadyTimeout;
+stPreparationConfig.tMotionTimeout := GVL_MotionConfig.stPreparation.tMoveTimeout;
+
 fbMachinePreparation(
     bStart := bPreparationStartRequest,
+
     bAbort :=
         bStopRequestRaw
         OR bAbortProcesses
         OR bMachineFault,
-    bReset := trigResetMachineFault.Q,
-    stConfig := GVL_MachinePreparation.stConfig,
-    aAxes := GVL_AxisRuntime.Axes
-);
 
+    bReset := trigResetMachineFault.Q,
+
+    stConfig := stPreparationConfig,
+
+    aAxes := GVL_AxisRuntime.Axes,
+
+    // 与正式Damper流程复用同一个COM3自动动作实例。
+    ioGripperAction := fbDamperGripperAction,
+    ioGripper := GVL_DamperGripper.stDamperGripper
+);
 bMachinePreparationBusy :=
     fbMachinePreparation.bBusy;
 
@@ -314,7 +443,7 @@ IF bControlPrepare
     AND fbMachinePreparation.bDone
 THEN
     FOR uiAutoAxisItem := 1 TO
-        GVL_AxisIndex.AutoProcessAxisCount
+        UPPER_BOUND(GVL_AxisIndex.AutoProcessAxes, 1)
     DO
         uiAxisIndex :=
             GVL_AxisIndex.AutoProcessAxes[uiAutoAxisItem];
@@ -352,7 +481,7 @@ IF fbAutoStart.bEnableAxes
     AND GVL_HMI.Comm.bControlAllowed
 THEN
     // 与启动检查、运行监控共用同一份自动轴清单。
-    FOR uiAutoAxisItem := 1 TO GVL_AxisIndex.AutoProcessAxisCount DO
+    FOR uiAutoAxisItem := LOWER_BOUND(GVL_AxisIndex.AutoProcessAxes, 1) TO UPPER_BOUND(GVL_AxisIndex.AutoProcessAxes, 1) DO
         uiAxisIndex := GVL_AxisIndex.AutoProcessAxes[uiAutoAxisItem];
         // 自动启动只写Auto通道，不覆盖WPF手动Cmd。
         GVL_AxisRuntime.Axes[uiAxisIndex].AutoCmd.bEnable := TRUE;
@@ -396,6 +525,7 @@ bAutoProcessDone :=
 bDamperGripperRequired :=
     fbAutoStart.bEnabling
     OR fbAutoStart.bProcessStart
+	OR fbMachinePreparation.bBusy
     OR fbAutoProcessCoordinator.bBusy
     OR fbDamperGripperAction.bBusy;
 
@@ -414,9 +544,11 @@ fbMachineSupervisor(
     bAutoActive := bControlAuto
                    OR fbAutoStart.bEnabling
                    OR fbAutoStart.bProcessStart
-                   OR fbAutoProcessCoordinator.bBusy
+				   OR fbAutoProcessCoordinator.bBusy
 				   OR fbMachinePreparation.bBusy
-				   OR bControlPrepare,
+				   OR bControlPrepare
+                   OR fbSingleAxisHoming.bBusy
+                   OR bControlHoming,
     bHmiWatchdogTimeout :=
         GVL_System.bUseHmiWatchdog AND fbHmiWatchdog.bTimeout,
 
@@ -429,19 +561,33 @@ fbMachineSupervisor(
 	
 	udiMachinePreparationError :=
 		fbMachinePreparation.udiErrorCode,
+
+    bAxisHomingFault := fbSingleAxisHoming.bError,
+    uiAxisHomingErrorAxis := fbSingleAxisHoming.uiActiveAxis,
+    udiAxisHomingError := fbSingleAxisHoming.udiErrorCode,
     bAutoStartErrorPulse := fbAutoStart.bErrorPulse,
     bAutoStartTimeout := fbAutoStart.bTimeout,
     uiAutoStartErrorAxis := fbAutoStart.uiErrorAxisIndex,
     uiAutoStartErrorCode := fbAutoStart.uiErrorCode,
 
-    bDamperGripperHealthOK :=
-		GVL_DamperGripper.stDamperGripper.State.bHealthy,
-    bDamperGripperRequired := bDamperGripperRequired,
-    bDamperGripperFault :=
-        fbAutoProcessCoordinator.bGripperActionFault,
-    udiDamperGripperError :=
-        fbAutoProcessCoordinator.udGripperActionError,
-
+	// 调试旁路打开时，对Supervisor报告夹爪健康，
+	// 但底层真实反馈和诊断变量仍继续更新。
+	bDamperGripperHealthOK :=
+		bDebugBypassDamperGripper
+		OR GVL_DamperGripper.stDamperGripper.State.bHealthy,
+	
+	// 调试旁路打开时，不把夹爪健康作为整机运行条件。
+	bDamperGripperRequired :=
+		bDamperGripperRequired
+		AND NOT bDebugBypassDamperGripper,
+	
+	// 调试旁路打开时，夹爪动作错误不升级为整机故障。
+	bDamperGripperFault :=
+		fbAutoProcessCoordinator.bGripperActionFault
+		AND NOT bDebugBypassDamperGripper,
+	
+	udiDamperGripperError :=
+		fbAutoProcessCoordinator.udGripperActionError,
     bTurntableFault := fbAutoProcessCoordinator.bTurntableFault,
     udiTurntableError := fbTurntableProcess.stStatus.nErrorID,
 	bScrewdriverFault :=
@@ -517,8 +663,8 @@ END_IF;
 //==============================================================
 fbAutoStopManager(
 	bExecute := bAbortProcesses,
-	tStopTimeout := T#10S,
-	bExternalStopRequired := NOT GVL_System.bSkipCom3ForSimulation,
+	tStopTimeout := GVL_SafetyConfig.stStop.tTimeout,
+	bExternalStopRequired := NOT GVL_SequenceConfig.bSkipDamperGripperForSimulation,
 	bExternalStopDone :=
 		GVL_DamperGripper.stDamperGripper.State.bStopAcknowledged,
 	bExternalStopError :=
@@ -582,8 +728,10 @@ fbMachineModeManager(
     bAutoRunning :=
         fbAutoStart.bProcessStart
         OR fbAutoProcessCoordinator.bBusy,
-    bHomingRequest := bControlHoming,
-    bHomingBusy := bHomingBusy,
+	bHomingRequest :=
+        bControlHoming
+        OR fbSingleAxisHoming.bModeRequest,
+	bHomingBusy := fbSingleAxisHoming.bBusy,
     bStopActive :=
         bStopRequestRaw
         OR bAbortProcesses
@@ -607,8 +755,8 @@ bPreparationModeActive := fbMachineModeManager.bPreparationAllowed;
 //==============================================================
 // COM3：阻尼器上下料夹爪，参与当前自动流程和整机Stop。
 fbDamperGripperManager(
-    bEnableComm := NOT GVL_System.bSkipCom3ForSimulation,
-    bSimulationMode := GVL_System.bSkipCom3ForSimulation,
+    bEnableComm := NOT GVL_SequenceConfig.bSkipDamperGripperForSimulation,
+    bSimulationMode := GVL_SequenceConfig.bSkipDamperGripperForSimulation,
     bStopRequested := bStopRequestRaw OR bAbortProcesses,
     bControlAllowed := GVL_HMI.Comm.bControlAllowed,
     eMachineMode := eMachineMode,
@@ -648,7 +796,7 @@ bAnyAxisRequireEnableReset := FALSE;
 FOR uiAxisIndex := 1 TO GVL_Constants.cMaxAxisCount DO
     // 自动模式下只有清单中的八根轴能够取得Auto所有权。
     bAxisInAutoProcess := FALSE;
-    FOR uiAutoAxisItem := 1 TO GVL_AxisIndex.AutoProcessAxisCount DO
+    FOR uiAutoAxisItem := LOWER_BOUND(GVL_AxisIndex.AutoProcessAxes, 1) TO UPPER_BOUND(GVL_AxisIndex.AutoProcessAxes, 1) DO
         IF uiAxisIndex = GVL_AxisIndex.AutoProcessAxes[uiAutoAxisItem] THEN
             bAxisInAutoProcess := TRUE;
             EXIT;
@@ -658,6 +806,9 @@ FOR uiAxisIndex := 1 TO GVL_Constants.cMaxAxisCount DO
     aAxisManagers[uiAxisIndex](
         bAxisConfigured := GVL_AxisConfig.AxisLimits[uiAxisIndex].bConfigured,
         bAxisUsedByAuto := bAxisInAutoProcess,
+        bAxisSelectedForHoming :=
+            fbSingleAxisHoming.bBusy
+            AND (uiAxisIndex = fbSingleAxisHoming.uiActiveAxis),
         eMachineMode := eMachineMode,
         bProtectionEnabled := GVL_System.bUseHmiWatchdog,
         bHmiOnline := fbHmiWatchdog.bOnline,

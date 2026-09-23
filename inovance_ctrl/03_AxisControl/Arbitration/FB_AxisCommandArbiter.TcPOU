@@ -12,6 +12,7 @@ FUNCTION_BLOCK FB_AxisCommandArbiter
 VAR_INPUT
     bAxisConfigured : BOOL;
     bAxisUsedByAuto : BOOL;
+    bAxisSelectedForHoming : BOOL; // 仅选中的单轴取得Homing所有权
     eMachineMode    : E_MachineMode;
 END_VAR
 VAR_IN_OUT
@@ -54,7 +55,11 @@ ELSE
 					E_AxisControlOwner.None;
 			END_IF;
         E_MachineMode.Homing:
-            eRequestedOwner := E_AxisControlOwner.Homing;
+            IF bAxisSelectedForHoming THEN
+                eRequestedOwner := E_AxisControlOwner.Homing;
+            ELSE
+                eRequestedOwner := E_AxisControlOwner.None;
+            END_IF;
 
         E_MachineMode.AutoStarting,
         E_MachineMode.Automatic:
@@ -175,6 +180,7 @@ END_VAR]]></Declaration>
       <Implementation>
         <ST><![CDATA[ioCmd.bEnable := FALSE;
 ioCmd.bReset := FALSE;
+ioCmd.bHome := FALSE;
 ioCmd.bStop := FALSE;
 ioCmd.bMoveAbs := FALSE;
 ioCmd.bMoveRel := FALSE;
@@ -192,6 +198,7 @@ END_VAR]]></Declaration>
         <ST><![CDATA[M_HasActiveCommand :=
     iCmd.bEnable
     OR iCmd.bReset
+    OR iCmd.bHome
     OR iCmd.bStop
     OR iCmd.bMoveAbs
     OR iCmd.bMoveRel
@@ -210,6 +217,7 @@ END_VAR]]></Declaration>
 M_HasMotionCommand :=
     iCmd.bEnable
     OR iCmd.bStop
+    OR iCmd.bHome
     OR iCmd.bMoveAbs
     OR iCmd.bMoveRel
     OR iCmd.bJogPos

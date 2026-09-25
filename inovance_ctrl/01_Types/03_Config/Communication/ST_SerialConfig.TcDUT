@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_SerialConfig" Id="{CD5B7FFD-F849-447E-A4F4-D42C4F970B0C}">
+    <Declaration><![CDATA[TYPE ST_SerialConfig :
+STRUCT
+    stPortConfig  : ComSerialConfig; // TF6340端口参数；来源由设备接口或GVL统一提供
+    tAdsTimeout   : TIME;            // ADS打开/关闭串口操作超时
+    tReplyTimeout : TIME;            // 一次请求等待返回帧的最长时间
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

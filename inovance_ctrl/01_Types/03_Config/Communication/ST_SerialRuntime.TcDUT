@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_SerialRuntime" Id="{6FF7913D-0A66-47DB-A9BE-9F927B79DE88}">
+    <Declaration><![CDATA[TYPE ST_SerialRuntime :
+STRUCT
+    eState            : E_SerialState;
+    eError            : E_SerialError;
+    bConfigValid      : BOOL;
+    bPortOpened       : BOOL;
+    bBusy             : BOOL;
+    bSendDone         : BOOL;  // 请求帧写入发送缓冲区完成，一周期脉冲
+    bNewData          : BOOL;  // 本周期收到至少一个新字节，一周期脉冲
+    bFrameReady       : BOOL;  // 完整帧已通过可选CRC校验，一周期脉冲
+    bTransactionError : BOOL;  // 本次事务失败，一周期脉冲
+    bReplyTimeout     : BOOL;
+    bCrcError         : BOOL;
+    bReceiveError     : BOOL;
+    udErrorId         : UDINT; // TF6340原始错误码；公共层自定义错误时为0
+    uiRxLength        : UINT;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

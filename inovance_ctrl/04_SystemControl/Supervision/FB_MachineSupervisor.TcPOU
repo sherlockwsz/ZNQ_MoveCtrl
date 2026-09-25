@@ -29,6 +29,11 @@ VAR_INPUT
     bDamperGripperFault      : BOOL;
     udiDamperGripperError    : UDINT;
 
+    bAdjustGripperHealthOK   : BOOL;
+    bAdjustGripperRequired   : BOOL;
+    bAdjustGripperFault      : BOOL;
+    udiAdjustGripperError    : UDINT;
+
     bTurntableFault          : BOOL;
     udiTurntableError        : UDINT;
 	
@@ -67,6 +72,7 @@ VAR
     uiFaultAxis       : UINT;
     udiAxisError      : UDINT;
     bGripperHealthFault : BOOL;
+    bAdjustGripperHealthFault : BOOL;
     bActiveCondition  : BOOL;
 END_VAR]]></Declaration>
     <Implementation>
@@ -110,6 +116,15 @@ bGripperHealthFault :=
     )
     AND NOT bDamperGripperHealthOK;
 
+bAdjustGripperHealthFault :=
+    (
+        bAdjustGripperRequired
+        OR
+        (stFault.bActive
+         AND (stFault.eSource = E_MachineFaultSource.AdjustGripper))
+    )
+    AND NOT bAdjustGripperHealthOK;
+
 // 当前仍存在的故障条件，用于禁止“带故障复位”。
 bActiveCondition :=
     bHmiWatchdogTimeout
@@ -118,6 +133,8 @@ bActiveCondition :=
     OR bAxisHomingFault
     OR bGripperHealthFault
     OR bDamperGripperFault
+    OR bAdjustGripperHealthFault
+    OR bAdjustGripperFault
     OR bTurntableFault
 	OR bScrewdriverFault
     OR bAutoStopFault;
@@ -185,6 +202,19 @@ IF NOT stFault.bActive THEN
         IF bDamperGripperFault AND (udiDamperGripperError <> 0) THEN
             stFault.udiErrorCode := udiDamperGripperError;
         ELSIF bDamperGripperFault THEN
+            stFault.udiErrorCode := TO_UDINT(E_MachineErrorCode.GripperActionWithoutDetail);
+        ELSE
+            stFault.udiErrorCode := TO_UDINT(E_MachineErrorCode.GripperHealthFault);
+        END_IF;
+        bStopRequestPulse := TRUE;
+
+    ELSIF bAdjustGripperFault OR bAdjustGripperHealthFault THEN
+        stFault.bActive := TRUE;
+        stFault.eSource := E_MachineFaultSource.AdjustGripper;
+        stFault.uiAxisIndex := 0;
+        IF bAdjustGripperFault AND (udiAdjustGripperError <> 0) THEN
+            stFault.udiErrorCode := udiAdjustGripperError;
+        ELSIF bAdjustGripperFault THEN
             stFault.udiErrorCode := TO_UDINT(E_MachineErrorCode.GripperActionWithoutDetail);
         ELSE
             stFault.udiErrorCode := TO_UDINT(E_MachineErrorCode.GripperHealthFault);

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_ScrewdriverDirection" Id="{F3DEF1DC-AD19-4BC2-A4A6-6C546BC578E4}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_ScrewdriverDirection :
+(
+    None       := 0,
+    Tightening := 10,
+    Loosening  := 20,
+    Unknown    := 90
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

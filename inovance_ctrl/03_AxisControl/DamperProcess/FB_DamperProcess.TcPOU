@@ -226,7 +226,7 @@ VAR
 	// 每个阻尼器到达相机位置后等待2秒。
 
 	
-	// 模拟相机返回带方向的相对修正角。
+	// 模拟相机返回机械零点坐标系下的绝对角度。
 
 	
 	
@@ -243,35 +243,12 @@ VAR
 
 	
 	//==============================================================
-	// 二维码扫描旋转参数
+	// 二维码扫描绝对角度参数
 	//
 	// XY到达转台备料位后，DamperZ保持在110mm，
-	// DamperRotation执行一次+360°相对运动。
+	// DamperRotation绝对运动到“相机角度+扫码偏移角”。
 	// 当前使用旋转完成作为二维码扫描成功条件。
 	//==============================================================
-	
-	// 二维码扫描相对旋转角度。
-	// 正值表示正方向旋转；当前固定旋转一整圈。
-
-	
-	// 二维码扫描时使用独立速度，
-	// 后续可以根据相机曝光时间和识别效果单独调整。
-
-	
-	// 二维码扫描旋转加速度。
-
-	
-	// 二维码扫描旋转减速度。
-
-	
-	
-	//==============================================================
-	// 二维码扫描运行变量
-	//==============================================================
-	
-	// TRUE表示二维码扫描相对旋转命令已经发送，
-	// 防止每个PLC扫描周期重复发送bMoveRel。
-	bQrScanCommandIssued : BOOL;	
 	//==============================================================
 	// 相机检测与旋转运行变量
 	//==============================================================
@@ -283,10 +260,11 @@ VAR
 	fCurrentVisionX : LREAL;
 	fCurrentVisionY : LREAL;
 	
-	// 锁存本次检测得到的相对修正角。
-	fAngleCorrectionLatched : LREAL;
+	// 锁存本次检测得到的绝对相机角度，以及由其计算出的绝对扫码角度。
+	fCameraAngleLatched : LREAL;
+	fScanTargetAngle    : LREAL;
 	
-	// 防止每扫描周期重复发送DamperRotation相对运动命令。
+	// 防止每扫描周期重复发送DamperRotation绝对运动命令。
 	bRotationCommandIssued : BOOL;
 	
 	//==============================================================
@@ -296,11 +274,14 @@ VAR
 	// 因此必须分别锁存，不能直接将两个bDone进行AND判断。
 	//==============================================================
 	
-	// TRUE：本次取料后的Z轴抬升已经完成。
-	bTakeLiftZDoneLatched : BOOL;
+	// 夹紧后：Z轴抬升与Rotation到相机角度的完成锁存。
+	bCameraLiftZDoneLatched    : BOOL;
+	bCameraRotationDoneLatched : BOOL;
 	
-	// TRUE：本次阻尼器角度修正已经完成。
-	bTakeRotationDoneLatched : BOOL;	
+	// 放料后：Z轴抬升、转台换位与Rotation回零的完成锁存。
+	bResetLiftZDoneLatched     : BOOL;
+	bResetTurntableDoneLatched : BOOL;
+	bResetRotationDoneLatched  : BOOL;
 END_VAR
 ]]></Declaration>
     <Implementation>
@@ -407,7 +388,7 @@ END_IF;
 //==============================================================
 // 5. 自动运行期间清除上一周期运动命令
 //
-// M_MoveXYParallel和M_MoveZAbsolute会在需要时重新生成
+// 各运动辅助Method会在需要时重新生成
 // 一个PLC周期的bMoveAbs命令脉冲。
 //==============================================================
 IF bBusy THEN
@@ -415,9 +396,8 @@ IF bBusy THEN
     stAxisY.AutoCmd.bMoveAbs := FALSE;
     stAxisZ.AutoCmd.bMoveAbs := FALSE;
 
-    // DamperRotation使用相对运动，
-    // bMoveRel只保持一个PLC扫描周期。
-    stAxisRotation.AutoCmd.bMoveRel := FALSE;
+    // DamperRotation只使用绝对位置运动。
+    stAxisRotation.AutoCmd.bMoveAbs := FALSE;
 END_IF;
 
 //==============================================================
@@ -650,16 +630,13 @@ CASE eCurrentStep OF
 				// 新增DamperRotation轴。
 				ioAxisRotation := stAxisRotation
 			) THEN				
-				// 当前Method返回时，阻尼器已放入转台备料位且Z轴回到安全高度。
+				// 当前Method返回时：
+				// 1. 阻尼器已经放入转台备料位；
+				// 2. Z轴已经回到安全高度；
+				// 3. 转台已经完成下一工位旋转；
+				// 4. DamperRotation已经绝对回到机械零点。
 				aSlots[nCurrentRow, nCurrentColumn].eState :=
 					E_DamperSlotState.Empty;
-			
-				eTransferPositionState :=
-					E_DamperSlotState.PendingAdjustment;
-			
-				// 机械手已经离开转台运动区域，请求转台执行一次交换。
-				stTurntableInput.bExchangeRequest := TRUE;
-				stTurntableInput.bNoMorePartsToLoad := FALSE;
 			
 				eCurrentStep := E_DamperProcessStep.RotateTurntable;
 			END_IF;
@@ -1061,9 +1038,11 @@ bExchangeCompleteLatched := FALSE;
 bStartPending := FALSE;
 
 bRotationCommandIssued := FALSE;
-bQrScanCommandIssued := FALSE;
-bTakeLiftZDoneLatched := FALSE;
-bTakeRotationDoneLatched := FALSE;
+bCameraLiftZDoneLatched := FALSE;
+bCameraRotationDoneLatched := FALSE;
+bResetLiftZDoneLatched := FALSE;
+bResetTurntableDoneLatched := FALSE;
+bResetRotationDoneLatched := FALSE;
 
 
 //==============================================================
@@ -1332,6 +1311,69 @@ IF bZCommandIssued THEN
 END_IF;]]></ST>
       </Implementation>
     </Method>
+    <Method Name="M_MoveRotationAbsolute" Id="{8b630280-4267-4fa1-8e7d-1778dc522e7e}">
+      <Declaration><![CDATA[//==============================================================
+// DamperRotation统一绝对角度运动。
+//
+// 调用方只传入参数层提供或计算出的绝对目标角度，
+// 本Method不读取当前角度进行目标累加。
+//==============================================================
+METHOD PRIVATE M_MoveRotationAbsolute : BOOL
+
+VAR_INPUT
+    fTargetAngle : LREAL;
+    fVelocity : LREAL;
+    fAcceleration : LREAL;
+    fDeceleration : LREAL;
+END_VAR
+
+VAR_IN_OUT
+    ioAxisRotation : ST_AxisInterface;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_MoveRotationAbsolute := FALSE;
+
+// 已在目标角度公差内时无需发令。
+IF NOT bRotationCommandIssued THEN
+    IF
+        ABS(ioAxisRotation.Data.fActPosition - fTargetAngle)
+        <= GVL_MotionConfig.stDamper.stRotation.fPositionTolerance
+    THEN
+        M_MoveRotationAbsolute := TRUE;
+
+    ELSIF ioAxisRotation.State.bReady THEN
+        ioAxisRotation.AutoSet.Position.fAbsolutePosition := fTargetAngle;
+        ioAxisRotation.AutoSet.Position.fVelocity := fVelocity;
+        ioAxisRotation.AutoSet.Position.fAcceleration := fAcceleration;
+        ioAxisRotation.AutoSet.Position.fDeceleration := fDeceleration;
+
+        // 只产生一个PLC扫描周期的绝对运动命令脉冲。
+        ioAxisRotation.AutoCmd.bMoveAbs := TRUE;
+        bRotationCommandIssued := TRUE;
+    END_IF;
+
+ELSE
+    IF
+        ioAxisRotation.State.bDone
+        OR
+        (
+            ABS(ioAxisRotation.Data.fActPosition - fTargetAngle)
+            <= GVL_MotionConfig.stDamper.stRotation.fPositionTolerance
+        )
+    THEN
+        bRotationCommandIssued := FALSE;
+        M_MoveRotationAbsolute := TRUE;
+
+    ELSIF
+        ioAxisRotation.State.bCmdRejected
+        OR ioAxisRotation.State.bCommandAborted
+    THEN
+        // 清除发令锁存，待轴重新Ready后按同一绝对目标重试。
+        bRotationCommandIssued := FALSE;
+    END_IF;
+END_IF;]]></ST>
+      </Implementation>
+    </Method>
     <Method Name="M_PlaceDamper" Id="{0002ecd5-5e0f-4917-ab65-8cb804e7e274}">
       <Declaration><![CDATA[//==============================================================
 // 从转台取回位取出已调整阻尼器，放到指定目标位置。
@@ -1529,14 +1571,18 @@ ioAxisY.AutoCmd.bMoveAbs := FALSE;
 ioAxisZ.AutoCmd.bMoveAbs := FALSE;
 
 // 复位相机检测和旋转运行状态。
-fAngleCorrectionLatched := 0.0;
+fCameraAngleLatched := GVL_PositionConfig.stDamper.fRotationZero;
+fScanTargetAngle := GVL_PositionConfig.stDamper.fRotationZero;
 bRotationCommandIssued := FALSE;
-// 复位取料后Z轴与旋转轴的并行完成锁存。
-bTakeLiftZDoneLatched := FALSE;
-bTakeRotationDoneLatched := FALSE;
-// 清除二维码扫描旋转发令状态。
-bQrScanCommandIssued := FALSE;
-// 清除可能残留的DamperRotation相对运动命令。
+// 复位夹紧后两个并行动作的完成锁存。
+bCameraLiftZDoneLatched := FALSE;
+bCameraRotationDoneLatched := FALSE;
+// 复位放料后三个并行动作的完成锁存。
+bResetLiftZDoneLatched := FALSE;
+bResetTurntableDoneLatched := FALSE;
+bResetRotationDoneLatched := FALSE;
+// 清除可能残留的DamperRotation运动命令。
+ioAxisRotation.AutoCmd.bMoveAbs := FALSE;
 ioAxisRotation.AutoCmd.bMoveRel := FALSE;]]></ST>
       </Implementation>
     </Method>
@@ -1567,16 +1613,18 @@ CASE eTakeStep OF
     // 本次取料子流程开始
     //==========================================================
 	E_DamperTakeStep.Idle:
-		// 清除上一件阻尼器锁存的检测角度。
-		fAngleCorrectionLatched := 0.0;
+		// 清除上一件阻尼器锁存的绝对角度。
+		fCameraAngleLatched := GVL_PositionConfig.stDamper.fRotationZero;
+		fScanTargetAngle := GVL_PositionConfig.stDamper.fRotationZero;
 	
 		// 清除DamperRotation发令状态。
 		bRotationCommandIssued := FALSE;
-		// 清除Z轴抬升与旋转轴完成锁存。
-		bTakeLiftZDoneLatched := FALSE;
-		bTakeRotationDoneLatched := FALSE;
-		// 清除上一件阻尼器的二维码扫描发令状态。
-		bQrScanCommandIssued := FALSE;	
+		// 清除两组并行动作完成锁存。
+		bCameraLiftZDoneLatched := FALSE;
+		bCameraRotationDoneLatched := FALSE;
+		bResetLiftZDoneLatched := FALSE;
+		bResetTurntableDoneLatched := FALSE;
+		bResetRotationDoneLatched := FALSE;
 	
 		eTakeStep :=
 			E_DamperTakeStep.EnsureSafeZ;
@@ -1624,18 +1672,18 @@ CASE eTakeStep OF
     //==========================================================
 	// 3. 延时2秒模拟相机检测
 	//
-	// 当前固定返回+60°相对修正角。
+	// 当前固定返回60°绝对相机角度。
 	// 此处只锁存角度，不立即旋转。
 	//==========================================================
 	E_DamperTakeStep.SimulateVisionDetection:
 		IF fbSimulatedVisionDetection.Q THEN
-			// 锁存本次检测得到的相对修正角。
-			fAngleCorrectionLatched :=
-				GVL_ProcessConfig.stVision.fAngleCorrection;
+			// 锁存本次检测得到的绝对相机角度。
+			fCameraAngleLatched :=
+				GVL_ProcessConfig.stVision.fCameraAngle;
 	
 			// 旋转将在夹爪夹紧阻尼器后执行。
 			bRotationCommandIssued := FALSE;
-			bTakeRotationDoneLatched := FALSE;
+			bCameraRotationDoneLatched := FALSE;
 	
 			// 检测完成后，XY先回到理论料位。
 			eTakeStep :=
@@ -1684,76 +1732,51 @@ CASE eTakeStep OF
 	
 		// 本次Close被验证完成之前，禁止Z抬升和DamperRotation运动。
 		IF bGripperActionDone AND NOT bGripperActionError THEN
-			bTakeLiftZDoneLatched := FALSE;
-			bTakeRotationDoneLatched := FALSE;
+			bCameraLiftZDoneLatched := FALSE;
+			bCameraRotationDoneLatched := FALSE;
 			bRotationCommandIssued := FALSE;
 	
-			eTakeStep := E_DamperTakeStep.LiftZFromSlot;
+			eTakeStep := E_DamperTakeStep.RotationToCameraAngle;
 		END_IF;
 	//==========================================================
-	// 7. Z轴抬升与DamperRotation相对旋转并行执行
+	// 7. Z轴抬升与DamperRotation绝对运动并行执行
 	//
 	// 同一个PLC扫描周期内：
 	// 1. DamperZ开始向110mm安全位置运动；
-	// 2. DamperRotation按照检测角度开始相对运动。
+	// 2. DamperRotation从机械零点绝对运动到相机角度。
 	//
 	// 两根轴分别锁存完成状态。
 	// 只有两根轴全部完成后，XY才能移动到转台备料位。
 	//==========================================================
-	E_DamperTakeStep.LiftZFromSlot:
+	E_DamperTakeStep.RotationToCameraAngle:
 	
 		//======================================================
 		// 7.1 启动并等待DamperZ抬升
 		//======================================================
-		IF NOT bTakeLiftZDoneLatched THEN
+		IF NOT bCameraLiftZDoneLatched THEN
 			IF M_MoveZAbsolute(
 				fTargetZ := fTraySafeZ,
 				ioAxisZ := ioAxisZ
 			) THEN
 				// Z轴完成信号可能只保持一个PLC周期，
 				// 因此在这里锁存。
-				bTakeLiftZDoneLatched := TRUE;
+				bCameraLiftZDoneLatched := TRUE;
 			END_IF;
 		END_IF;
 	
 	
 		//======================================================
-		// 7.2 启动并等待DamperRotation相对旋转
+		// 7.2 启动并等待DamperRotation到绝对相机角度
 		//======================================================
-		IF NOT bTakeRotationDoneLatched THEN
-	
-			// 检测角度在死区内时，不需要发送旋转命令。
-			IF
-				ABS(fAngleCorrectionLatched)
-				<= GVL_MotionConfig.stDamper.stRotation.fPositionTolerance
-			THEN
-				bTakeRotationDoneLatched := TRUE;
-				bRotationCommandIssued := FALSE;
-	
-			ELSE
-				// 每件阻尼器只允许发送一次相对旋转命令。
-				IF NOT bRotationCommandIssued THEN
-					ioAxisRotation.AutoSet.Position.fRelativeDistance :=
-						fAngleCorrectionLatched;
-	
-					ioAxisRotation.AutoSet.Position.fVelocity :=
-						GVL_MotionConfig.stDamper.stRotation.fVelocity;
-	
-					ioAxisRotation.AutoSet.Position.fAcceleration :=
-						GVL_MotionConfig.stDamper.stRotation.fAcceleration;
-	
-					ioAxisRotation.AutoSet.Position.fDeceleration :=
-						GVL_MotionConfig.stDamper.stRotation.fDeceleration;
-	
-					// 产生一个PLC扫描周期的相对运动命令。
-					ioAxisRotation.AutoCmd.bMoveRel := TRUE;
-					bRotationCommandIssued := TRUE;
-	
-				ELSIF ioAxisRotation.State.bDone THEN
-					// 相对旋转完成，锁存完成状态。
-					bTakeRotationDoneLatched := TRUE;
-					bRotationCommandIssued := FALSE;
-				END_IF;
+		IF NOT bCameraRotationDoneLatched THEN
+			IF M_MoveRotationAbsolute(
+				fTargetAngle := fCameraAngleLatched,
+				fVelocity := GVL_MotionConfig.stDamper.stRotation.fVelocity,
+				fAcceleration := GVL_MotionConfig.stDamper.stRotation.fAcceleration,
+				fDeceleration := GVL_MotionConfig.stDamper.stRotation.fDeceleration,
+				ioAxisRotation := ioAxisRotation
+			) THEN
+				bCameraRotationDoneLatched := TRUE;
 			END_IF;
 		END_IF;
 	
@@ -1762,15 +1785,15 @@ CASE eTakeStep OF
 		// 7.3 等待两个并行动作全部完成
 		//======================================================
 		IF
-			bTakeLiftZDoneLatched
-			AND bTakeRotationDoneLatched
+			bCameraLiftZDoneLatched
+			AND bCameraRotationDoneLatched
 		THEN
-			// 为下一件阻尼器清除并行运行状态。
-			bTakeLiftZDoneLatched := FALSE;
-			bTakeRotationDoneLatched := FALSE;
+			// 清除本阶段并行运行状态。
+			bCameraLiftZDoneLatched := FALSE;
+			bCameraRotationDoneLatched := FALSE;
 			bRotationCommandIssued := FALSE;
 	
-			// Z轴已经到达安全位置且角度修正完成，
+			// Z轴已经到达安全位置且绝对相机角度到位，
 			// 现在允许XY移动到转台备料位。
 			eTakeStep :=
 				E_DamperTakeStep.MoveXYToTransfer;
@@ -1790,14 +1813,18 @@ CASE eTakeStep OF
 			ioAxisX := ioAxisX,
 			ioAxisY := ioAxisY
 		) THEN
-			// 准备发送一次二维码扫描旋转命令。
-			bQrScanCommandIssued := FALSE;
+			// 绝对扫码目标固定由本件相机角度与工艺偏移计算，
+			// 不读取、不累加当前轴位置。
+			fScanTargetAngle :=
+				fCameraAngleLatched
+				+ GVL_ProcessConfig.stQrScan.fOffsetAngle;
+			bRotationCommandIssued := FALSE;
 	
 			eTakeStep :=
-				E_DamperTakeStep.RotateForQrScan;
+				E_DamperTakeStep.RotationToScanAngle;
 		END_IF;
 	//==========================================================
-	// 9. DamperRotation旋转360°模拟二维码扫描
+	// 9. DamperRotation绝对运动到扫码目标角度
 	//
 	// 当前机械状态：
 	// 1. DamperX/Y已经到达转台备料位；
@@ -1805,48 +1832,18 @@ CASE eTakeStep OF
 	// 3. 夹爪仍然夹持阻尼器。
 	//
 	// 当前二维码相机尚未接入，
-	// DamperRotation完成一圈相对运动即认为扫描成功。
+	// DamperRotation到达“相机角度+扫码偏移角”即认为扫描成功。
 	//==========================================================
-	E_DamperTakeStep.RotateForQrScan:
-	
-		// 如果扫描角度被设置为接近0°，直接跳过扫码旋转。
-		IF
-			ABS(GVL_ProcessConfig.stQrScan.fRelativeAngle)
-			<= GVL_MotionConfig.stDamper.stRotation.fPositionTolerance
-		THEN
-			bQrScanCommandIssued := FALSE;
-	
-			eTakeStep :=
-				E_DamperTakeStep.LowerZToTransfer;
-	
-		ELSE
-			// 每件阻尼器只发送一次二维码扫描旋转命令。
-			IF NOT bQrScanCommandIssued THEN
-				ioAxisRotation.AutoSet.Position.fRelativeDistance :=
-					GVL_ProcessConfig.stQrScan.fRelativeAngle;
-	
-				ioAxisRotation.AutoSet.Position.fVelocity :=
-					GVL_MotionConfig.stDamperRotation.stQrScan.fVelocity;
-	
-				ioAxisRotation.AutoSet.Position.fAcceleration :=
-					GVL_MotionConfig.stDamperRotation.stQrScan.fAcceleration;
-	
-				ioAxisRotation.AutoSet.Position.fDeceleration :=
-					GVL_MotionConfig.stDamperRotation.stQrScan.fDeceleration;
-	
-				// 产生一个PLC扫描周期的相对运动命令。
-				ioAxisRotation.AutoCmd.bMoveRel := TRUE;
-				bQrScanCommandIssued := TRUE;
-	
-			ELSIF ioAxisRotation.State.bDone THEN
-				// 完成+360°相对旋转，
-				// 当前模拟阶段直接认为二维码扫描成功。
-				bQrScanCommandIssued := FALSE;
-	
-				// 扫码结束后允许DamperZ下降到备料取放高度。
-				eTakeStep :=
-					E_DamperTakeStep.LowerZToTransfer;
-			END_IF;
+	E_DamperTakeStep.RotationToScanAngle:
+		IF M_MoveRotationAbsolute(
+			fTargetAngle := fScanTargetAngle,
+			fVelocity := GVL_MotionConfig.stDamperRotation.stQrScan.fVelocity,
+			fAcceleration := GVL_MotionConfig.stDamperRotation.stQrScan.fAcceleration,
+			fDeceleration := GVL_MotionConfig.stDamperRotation.stQrScan.fDeceleration,
+			ioAxisRotation := ioAxisRotation
+		) THEN
+			// 扫码结束后允许DamperZ下降到备料取放高度。
+			eTakeStep := E_DamperTakeStep.LowerZToTransfer;
 		END_IF;
 	// Z轴下降到实测备料位取放高度。
 	// 当前fTransferPickZ为60mm。
@@ -1867,20 +1864,93 @@ CASE eTakeStep OF
 		eGripperActionCommand := E_GripperCommand.Open;
 	
 		IF bGripperActionDone AND NOT bGripperActionError THEN
-			eTakeStep := E_DamperTakeStep.LiftZFromTransfer;
+			// 工件已经实际放入备料位，先更新共享物料状态，
+			// 但此时不启动转台；必须先确认DamperZ到达安全位置。
+			eTransferPositionState := E_DamperSlotState.PendingAdjustment;
+			stTurntableInput.bExchangeRequest := FALSE;
+			stTurntableInput.bNoMorePartsToLoad := FALSE;
+
+			bResetLiftZDoneLatched := FALSE;
+			bResetTurntableDoneLatched := FALSE;
+			bResetRotationDoneLatched := FALSE;
+			bRotationCommandIssued := FALSE;
+
+			eTakeStep := E_DamperTakeStep.RotationReturnHome;
 		END_IF;
 
-    // 阻尼器放入备料位后，
-	// DamperZ回到统一安全高度fTransferSafeZ。
-	// 当前安全高度为110mm。
-    E_DamperTakeStep.LiftZFromTransfer:
-        IF M_MoveZAbsolute(
-            fTargetZ := fTransferSafeZ,
-            ioAxisZ := ioAxisZ
-        ) THEN
-            eTakeStep :=
-                E_DamperTakeStep.Completed;
-        END_IF;
+	//==========================================================
+	// 10. 放料完成后的安全复位
+	//
+	// 第一阶段同时执行并分别锁存：
+	// 1. DamperZ绝对运动到110mm安全高度；
+	// 2. DamperRotation绝对运动到机械零点。
+	//
+	// 只有DamperZ确认到达安全高度后，才允许请求转台换位。
+	//==========================================================
+	E_DamperTakeStep.RotationReturnHome:
+		IF NOT bResetLiftZDoneLatched THEN
+			IF M_MoveZAbsolute(
+				fTargetZ := fTransferSafeZ,
+				ioAxisZ := ioAxisZ
+			) THEN
+				bResetLiftZDoneLatched := TRUE;
+			END_IF;
+		END_IF;
+
+		IF NOT bResetRotationDoneLatched THEN
+			IF M_MoveRotationAbsolute(
+				fTargetAngle := GVL_PositionConfig.stDamper.fRotationZero,
+				fVelocity := GVL_MotionConfig.stDamper.stRotation.fVelocity,
+				fAcceleration := GVL_MotionConfig.stDamper.stRotation.fAcceleration,
+				fDeceleration := GVL_MotionConfig.stDamper.stRotation.fDeceleration,
+				ioAxisRotation := ioAxisRotation
+			) THEN
+				bResetRotationDoneLatched := TRUE;
+			END_IF;
+		END_IF;
+
+		// Z轴安全到位是转台启动的唯一前置条件。
+		// Rotation允许继续回零，不要求先于转台完成。
+		IF bResetLiftZDoneLatched THEN
+			stTurntableInput.bExchangeRequest := TRUE;
+			stTurntableInput.bNoMorePartsToLoad := FALSE;
+
+			eTakeStep := E_DamperTakeStep.WaitTurntableRotation;
+		END_IF;
+
+	//==========================================================
+	// 11. Z轴已经安全到位，等待转台换位与Rotation回零
+	//==========================================================
+	E_DamperTakeStep.WaitTurntableRotation:
+		// 如果Rotation回零尚未完成，继续执行并等待原绝对目标。
+		IF NOT bResetRotationDoneLatched THEN
+			IF M_MoveRotationAbsolute(
+				fTargetAngle := GVL_PositionConfig.stDamper.fRotationZero,
+				fVelocity := GVL_MotionConfig.stDamper.stRotation.fVelocity,
+				fAcceleration := GVL_MotionConfig.stDamper.stRotation.fAcceleration,
+				fDeceleration := GVL_MotionConfig.stDamper.stRotation.fDeceleration,
+				ioAxisRotation := ioAxisRotation
+			) THEN
+				bResetRotationDoneLatched := TRUE;
+			END_IF;
+		END_IF;
+
+		IF stTurntableStatus.bRotationDone THEN
+			bResetTurntableDoneLatched := TRUE;
+		END_IF;
+
+		IF
+			bResetLiftZDoneLatched
+			AND bResetTurntableDoneLatched
+			AND bResetRotationDoneLatched
+		THEN
+			bResetLiftZDoneLatched := FALSE;
+			bResetTurntableDoneLatched := FALSE;
+			bResetRotationDoneLatched := FALSE;
+			bRotationCommandIssued := FALSE;
+
+			eTakeStep := E_DamperTakeStep.Completed;
+		END_IF;
 
 
     E_DamperTakeStep.Completed:

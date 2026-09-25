@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_ScrewdriverError" Id="{4D069BE7-6148-45D5-8105-15532A6703FD}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_ScrewdriverError :
+(
+    None                := 0,
+
+    InvalidStationId    := 10,
+    InvalidSerialConfig := 11,
+
+    CommandConflict     := 20,
+    DirectionConflict   := 21,
+    PcControlRequired   := 22,
+    NoActiveMotion      := 23,
+    DirectionUnknown    := 24,
+    AlreadyRunning      := 25,
+
+    PortOpenFailed      := 30,
+    SendFailed          := 31,
+    ReplyTimeout        := 32,
+    CrcError            := 33,
+    ReplyMismatch       := 34,
+    ModbusException     := 35,
+    ConnectionLost      := 36
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

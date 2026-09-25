@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_ScrewdriverState" Id="{5192CC16-C491-423A-911A-8EA31FBA04A4}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_ScrewdriverState :
+(
+    Disabled       := 0,
+    Initializing   := 10,
+    OpeningPort    := 20,
+    Ready          := 30,
+    Sending        := 40,
+    WaitingReply   := 50,
+    RunningTighten := 60,
+    RunningLoosen  := 70,
+    Stopping       := 80,
+    Fault          := 90
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

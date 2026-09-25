@@ -18,267 +18,310 @@
     <LibraryReferences>{019a77e5-ff0d-4ac9-99c8-1675a70892e9}</LibraryReferences>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="01_Types\Arrays\Damper\A_DamperSlotGrid.TcDUT">
+    <Compile Include="01_Types\06_Process\Damper\Arrays\A_DamperSlotGrid.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Axes\Commands\E_AxisCommand.TcDUT">
+    <Compile Include="01_Types\02_Axis\Enums\Commands\E_AxisCommand.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Axes\States\E_AxisMotionDirection.TcDUT">
+    <Compile Include="01_Types\02_Axis\Enums\States\E_AxisMotionDirection.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Axes\States\E_AxisMotionState.TcDUT">
+    <Compile Include="01_Types\02_Axis\Enums\States\E_AxisMotionState.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Axes\Modes\E_AxisControlMode.TcDUT">
+    <Compile Include="01_Types\02_Axis\Enums\Modes\E_AxisControlMode.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Axes\Modes\E_AxisControlOwner.TcDUT">
+    <Compile Include="01_Types\02_Axis\Enums\Modes\E_AxisControlOwner.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Axes\Alarms\E_AxisErrorSource.TcDUT">
+    <Compile Include="01_Types\02_Axis\Enums\Alarms\E_AxisErrorSource.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Axes\Alarms\E_AxisRejectReason.TcDUT">
+    <Compile Include="01_Types\02_Axis\Enums\Alarms\E_AxisRejectReason.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Damper\E_DamperErrorCode.TcDUT">
+    <Compile Include="01_Types\06_Process\Damper\Enums\E_DamperErrorCode.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Damper\E_DamperPlaceStep.TcDUT">
+    <Compile Include="01_Types\06_Process\Damper\Enums\E_DamperPlaceStep.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Damper\E_DamperProcessStep.TcDUT">
+    <Compile Include="01_Types\06_Process\Damper\Enums\E_DamperProcessStep.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Damper\E_DamperSlotState.TcDUT">
+    <Compile Include="01_Types\06_Process\Damper\Enums\E_DamperSlotState.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Damper\E_DamperTakeStep.TcDUT">
+    <Compile Include="01_Types\06_Process\Damper\Enums\E_DamperTakeStep.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Gripper\E_GripperActionStep.TcDUT">
+    <Compile Include="01_Types\05_Gripper\Enums\E_GripperActionStep.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Gripper\E_GripperCommErrorReason.TcDUT">
+    <Compile Include="01_Types\05_Gripper\Enums\E_GripperCommErrorReason.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Gripper\E_GripperCommand.TcDUT">
+    <Compile Include="01_Types\05_Gripper\Enums\E_GripperCommand.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Gripper\E_GripperCommStep.TcDUT">
+    <Compile Include="01_Types\05_Gripper\Enums\E_GripperCommStep.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Gripper\E_GripperControlOwner.TcDUT">
+    <Compile Include="01_Types\05_Gripper\Enums\E_GripperControlOwner.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Gripper\E_GripperErrorCode.TcDUT">
+    <Compile Include="01_Types\05_Gripper\Enums\E_GripperErrorCode.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Clamping\E_ClampingErrorCode.TcDUT">
+    <Compile Include="01_Types\05_Gripper\Enums\E_GripperProtocolResult.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Screwdriver\E_ScrewdriverErrorCode.TcDUT">
+    <Compile Include="01_Types\03_Config\Communication\E_SerialState.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Screwdriver\E_ScrewdriverStep.TcDUT">
+    <Compile Include="01_Types\03_Config\Communication\E_SerialError.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Startup\E_AutoStartErrorCode.TcDUT">
+    <Compile Include="01_Types\06_Process\Clamping\Enums\E_ClampingErrorCode.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Startup\E_AutoStartStep.TcDUT">
+    <Compile Include="01_Types\06_Process\Screwdriver\Enums\E_ScrewdriverErrorCode.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Stop\E_AutoStopStep.TcDUT">
+    <Compile Include="01_Types\06_Process\Screwdriver\Enums\E_ScrewdriverStep.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Stop\E_AutoStopErrorCode.TcDUT">
+    <Compile Include="01_Types\08_Screwdriver\Enums\E_ScrewdriverCommand.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\System\E_MachineErrorCode.TcDUT">
+    <Compile Include="01_Types\08_Screwdriver\Enums\E_ScrewdriverDirection.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\System\E_MachineFaultSource.TcDUT">
+    <Compile Include="01_Types\08_Screwdriver\Enums\E_ScrewdriverState.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\System\E_MachineMode.TcDUT">
+    <Compile Include="01_Types\08_Screwdriver\Enums\E_ScrewdriverError.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\System\E_MachinePreparationStep.TcDUT">
+    <Compile Include="01_Types\08_Screwdriver\Enums\E_ScrewdriverProtocolResult.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\System\E_MachinePreparationErrorCode.TcDUT">
+    <Compile Include="01_Types\06_Process\Adjustment\Enums\E_AdjustmentStep.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Homing\E_AxisHomingErrorCode.TcDUT">
+    <Compile Include="01_Types\07_System\Enums\Startup\E_AutoStartErrorCode.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Homing\E_AxisHomingStrategy.TcDUT">
+    <Compile Include="01_Types\07_System\Enums\Startup\E_AutoStartStep.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Homing\E_AxisHomingDirection.TcDUT">
+    <Compile Include="01_Types\07_System\Enums\Stop\E_AutoStopStep.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Homing\E_AxisHomeCommandMode.TcDUT">
+    <Compile Include="01_Types\07_System\Enums\Stop\E_AutoStopErrorCode.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Homing\E_AxisHomingStep.TcDUT">
+    <Compile Include="01_Types\07_System\Enums\System\E_MachineErrorCode.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Tray\E_Tray.TcDUT">
+    <Compile Include="01_Types\07_System\Enums\System\E_MachineFaultSource.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Tray\E_TrayErrorCode.TcDUT">
+    <Compile Include="01_Types\07_System\Enums\System\E_MachineMode.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Tray\E_TrayProcessStep.TcDUT">
+    <Compile Include="01_Types\07_System\Enums\System\E_MachinePreparationStep.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Turntable\E_DamperClampStep.TcDUT">
+    <Compile Include="01_Types\07_System\Enums\System\E_MachinePreparationErrorCode.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Turntable\E_DamperTurntablePosition.TcDUT">
+    <Compile Include="01_Types\04_Homing\Enums\E_AxisHomingErrorCode.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Turntable\E_DamperTurntableStep.TcDUT">
+    <Compile Include="01_Types\04_Homing\Enums\E_AxisHomingStrategy.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Enums\Turntable\E_TurntableErrorCode.TcDUT">
+    <Compile Include="01_Types\04_Homing\Enums\E_AxisHomingDirection.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Axes\Commands\ST_AxisCmd.TcDUT">
+    <Compile Include="01_Types\04_Homing\Enums\E_AxisHomeCommandMode.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Axes\Settings\ST_AxisJogSet.TcDUT">
+    <Compile Include="01_Types\04_Homing\Enums\E_AxisHomingStep.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Axes\Settings\ST_AxisTorqueSet.TcDUT">
+    <Compile Include="01_Types\06_Process\Tray\Enums\E_Tray.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Axes\Settings\ST_PositionSet.TcDUT">
+    <Compile Include="01_Types\06_Process\Tray\Enums\E_TrayErrorCode.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Homing\ST_AxisHomingSet.TcDUT">
+    <Compile Include="01_Types\06_Process\Tray\Enums\E_TrayProcessStep.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Homing\ST_AxisHomingConfig.TcDUT">
+    <Compile Include="01_Types\06_Process\Turntable\Enums\E_DamperClampStep.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Homing\ST_AxisHomingStatus.TcDUT">
+    <Compile Include="01_Types\06_Process\Turntable\Enums\E_DamperTurntablePosition.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Axes\Settings\ST_AxisSet.TcDUT">
+    <Compile Include="01_Types\06_Process\Turntable\Enums\E_DamperTurntableStep.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Axes\Feedback\ST_AxisData.TcDUT">
+    <Compile Include="01_Types\06_Process\Turntable\Enums\E_TurntableErrorCode.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Axes\Feedback\ST_AxisState.TcDUT">
+    <Compile Include="01_Types\02_Axis\Structs\Commands\ST_AxisCmd.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Axes\Alarms\ST_AxisAlarm.TcDUT">
+    <Compile Include="01_Types\02_Axis\Structs\Settings\ST_AxisJogSet.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Axes\Limits\ST_AxisLimit.TcDUT">
+    <Compile Include="01_Types\02_Axis\Structs\Settings\ST_AxisTorqueSet.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Axes\Limits\ST_AxisSoftLimitResult.TcDUT">
+    <Compile Include="01_Types\02_Axis\Structs\Settings\ST_PositionSet.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Axes\Interface\ST_AxisInterface.TcDUT">
+    <Compile Include="01_Types\04_Homing\Structs\ST_AxisHomingSet.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Axes\Internal\ST_AxisControlInternal.TcDUT">
+    <Compile Include="01_Types\04_Homing\Structs\ST_AxisHomingConfig.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Communication\ST_HmiCommunication.TcDUT">
+    <Compile Include="01_Types\04_Homing\Structs\ST_AxisHomingStatus.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Damper\ST_DamperSlot.TcDUT">
+    <Compile Include="01_Types\02_Axis\Structs\Settings\ST_AxisSet.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Gripper\ST_GripperChannelFeedback.TcDUT">
+    <Compile Include="01_Types\02_Axis\Structs\Feedback\ST_AxisData.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Gripper\ST_GripperConfig.TcDUT">
+    <Compile Include="01_Types\02_Axis\Structs\Feedback\ST_AxisState.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Gripper\ST_GripperFeedback.TcDUT">
+    <Compile Include="01_Types\02_Axis\Structs\Alarms\ST_AxisAlarm.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Gripper\ST_GripperInterface.TcDUT">
+    <Compile Include="01_Types\02_Axis\Structs\Limits\ST_AxisLimit.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Gripper\ST_GripperManagerState.TcDUT">
+    <Compile Include="01_Types\02_Axis\Structs\Limits\ST_AxisSoftLimitResult.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Gripper\ST_GripperRequest.TcDUT">
+    <Compile Include="01_Types\02_Axis\Structs\Interface\ST_AxisInterface.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\System\ST_MachinePreparationConfig.TcDUT">
+    <Compile Include="01_Types\02_Axis\Structs\Internal\ST_AxisControlInternal.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Tray\ST_Tray.TcDUT">
+    <Compile Include="01_Types\07_System\Communication\ST_HmiCommunication.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Turntable\ST_DamperTurntableConfig.TcDUT">
+    <Compile Include="01_Types\06_Process\Damper\Structs\ST_DamperSlot.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Turntable\ST_DamperTurntableInput.TcDUT">
+    <Compile Include="01_Types\05_Gripper\Structs\ST_GripperChannelFeedback.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Turntable\ST_DamperTurntableStatus.TcDUT">
+    <Compile Include="01_Types\05_Gripper\Structs\ST_GripperConfig.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\System\ST_MachineFaultStatus.TcDUT">
+    <Compile Include="01_Types\05_Gripper\Structs\ST_GripperFeedback.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="02_GVLs\Axes\Configuration\GVL_AxisConfig.TcGVL">
+    <Compile Include="01_Types\05_Gripper\Structs\ST_GripperInterface.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\05_Gripper\Structs\ST_GripperManagerState.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\05_Gripper\Structs\ST_GripperRequest.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\08_Screwdriver\Structs\ST_ScrewdriverConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\08_Screwdriver\Structs\ST_ScrewdriverCommand.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\08_Screwdriver\Structs\ST_ScrewdriverRuntime.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\08_Screwdriver\Structs\ST_ScrewdriverInterface.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\07_System\Structs\ST_MachinePreparationConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\06_Process\Tray\Structs\ST_Tray.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\06_Process\Turntable\Structs\ST_DamperTurntableConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\06_Process\Turntable\Structs\ST_DamperTurntableInput.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\06_Process\Turntable\Structs\ST_DamperTurntableStatus.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\07_System\Structs\ST_MachineFaultStatus.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="02_GVLs\02_Axis\Configuration\GVL_AxisConfig.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
-    <Compile Include="02_GVLs\Axes\Configuration\GVL_AxisIndex.TcGVL">
+    <Compile Include="02_GVLs\02_Axis\Configuration\GVL_AxisIndex.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
-    <Compile Include="02_GVLs\Axes\Constants\GVL_Constants.TcGVL">
+    <Compile Include="02_GVLs\02_Axis\Configuration\GVL_Constants.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
-    <Compile Include="02_GVLs\Axes\References\GVL_AxisRef.TcGVL">
+    <Compile Include="02_GVLs\02_Axis\References\GVL_AxisRef.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
-    <Compile Include="02_GVLs\Axes\Interface\GVL_ClampingPdo.TcGVL">
+    <Compile Include="02_GVLs\02_Axis\PDO\GVL_ClampingPdo.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
-    <Compile Include="02_GVLs\Axes\Interface\GVL_AxisRuntime.TcGVL">
+    <Compile Include="02_GVLs\02_Axis\Runtime\GVL_AxisRuntime.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
-    <Compile Include="02_GVLs\Communication\GVL_HMI.TcGVL">
+    <Compile Include="02_GVLs\04_Communication\GVL_HMI.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
-    <Compile Include="02_GVLs\DamperGripper\GVL_DamperGripper.TcGVL">
+    <Compile Include="02_GVLs\05_Gripper\GVL_DamperGripper.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
-    <Compile Include="02_GVLs\EL_IO_Mod\GVL_IO.TcGVL">
+    <Compile Include="02_GVLs\08_Screwdriver\GVL_Screwdriver.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
-    <Compile Include="02_GVLs\EL_IO_Mod\GVL_IO_Raw.TcGVL">
+    <Compile Include="02_GVLs\06_IO\GVL_IO.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
-    <Compile Include="02_GVLs\System\GVL_AxisHoming.TcGVL">
+    <Compile Include="02_GVLs\06_IO\GVL_IO_Raw.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
-    <Compile Include="02_GVLs\System\GVL_System.TcGVL">
+    <Compile Include="02_GVLs\03_Homing\GVL_AxisHoming.TcGVL">
+      <SubType>Code</SubType>
+      <LinkAlways>true</LinkAlways>
+    </Compile>
+    <Compile Include="02_GVLs\07_System\GVL_System.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
@@ -289,6 +332,9 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="03_AxisControl\DamperProcess\FB_DamperProcess.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="03_AxisControl\AdjustmentProcess\FB_AdjustmentProcess.TcPOU">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="03_AxisControl\ScrewdriverProcess\FB_ScrewdriverProcess.TcPOU">
@@ -306,7 +352,7 @@
     <Compile Include="03_AxisControl\TrayProcess\FB_TrayProcess.TcPOU">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="03_AxisControl\TurntableProcess\FB_TurntableProcess.TcPOU">
+    <Compile Include="03_AxisControl\TurntableUnit\FB_TurntableUnit.TcPOU">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="04_SystemControl\Communication\FB_HmiWatchdog.TcPOU">
@@ -336,6 +382,12 @@
     <Compile Include="04_SystemControl\Supervision\FB_MachineSupervisor.TcPOU">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="04_Communication\Serial\F_SerialCrc16.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="04_Communication\Serial\FB_SerialPort.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="06_Programs\MAIN.TcPOU">
       <SubType>Code</SubType>
     </Compile>
@@ -348,28 +400,40 @@
     <Compile Include="07_GripperControl\Management\FB_GripperManager.TcPOU">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="07_GripperControl\Protocol\FB_GripperProtocol.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="07_GripperControl\Protocol\F_GripperModbusCrc16.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="08_ScrewdriverControl\Protocol\FB_ScrewdriverProtocol.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="08_ScrewdriverControl\Core\FB_ScrewdriverControl.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="08_ScrewdriverControl\Management\PRG_ScrewdriverManager.TcPOU">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="PlcTask.TcTTO">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Config\ST_TurntablePositionConfig.TcDUT">
+    <Compile Include="01_Types\03_Config\Position\ST_TurntablePositionConfig.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Config\ST_DamperPositionConfig.TcDUT">
+    <Compile Include="01_Types\03_Config\Position\ST_DamperPositionConfig.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Config\ST_AdjustmentPositionConfig.TcDUT">
+    <Compile Include="01_Types\03_Config\Position\ST_AdjustmentPositionConfig.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Config\ST_TrayPositionConfig.TcDUT">
+    <Compile Include="01_Types\03_Config\Position\ST_TrayPositionConfig.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Config\ST_ClampingPositionConfig.TcDUT">
+    <Compile Include="01_Types\03_Config\Position\ST_ClampingPositionConfig.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\Structs\Config\ST_ScrewdriverPositionConfig.TcDUT">
+    <Compile Include="01_Types\03_Config\Position\ST_ScrewdriverPositionConfig.TcDUT">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="02_GVLs\01_Config\GVL_MotionConfig.TcGVL">
@@ -396,92 +460,176 @@
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
-    <Compile Include="01_Types\Structs\Config\ST_Point2D.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_Point3D.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_DamperGridConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_TrayLayerPositionConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_VelocityConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_ClampingMotionConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_TurntableMotionConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_AdjustmentMotionConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_ScrewdriverMotionConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_DamperRotationMotionConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_DamperMotionConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_TrayMotionConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_PreparationMotionConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_QrScanMotionConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_DamperRotationQrMotionConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_ClampTorqueConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_ClampingProcessConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_VisionProcessConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_QrScanProcessConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_GripperProcessConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_AdjustmentProcessConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_ScrewdriverProcessConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_ClampingSafetyConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_StopSafetyConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_StartupSafetyConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_HmiCommunicationConfig.TcDUT"><SubType>Code</SubType></Compile>
-    <Compile Include="01_Types\Structs\Config\ST_GripperCommunicationConfig.TcDUT"><SubType>Code</SubType></Compile>
+    <Compile Include="01_Types\01_Common\ST_Point2D.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\01_Common\ST_Point3D.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Position\ST_DamperGridConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Position\ST_TrayLayerPositionConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\01_Common\ST_VelocityConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Motion\ST_ClampingMotionConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Motion\ST_TurntableMotionConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Motion\ST_AdjustmentMotionConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Motion\ST_ScrewdriverMotionConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Motion\ST_DamperRotationMotionConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Motion\ST_DamperMotionConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Motion\ST_TrayMotionConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Motion\ST_PreparationMotionConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Motion\ST_QrScanMotionConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Motion\ST_DamperRotationQrMotionConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Process\ST_ClampTorqueConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Process\ST_ClampingProcessConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Process\ST_VisionProcessConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Process\ST_QrScanProcessConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Process\ST_GripperProcessConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Process\ST_AdjustmentProcessConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Process\ST_ScrewdriverProcessConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Safety\ST_ClampingSafetyConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Safety\ST_StopSafetyConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Safety\ST_StartupSafetyConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Communication\ST_HmiCommunicationConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Communication\ST_GripperCommunicationConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Communication\ST_SerialConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\03_Config\Communication\ST_SerialRuntime.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
   </ItemGroup>
   <ItemGroup>
     <Folder Include="01_Types" />
-    <Folder Include="01_Types\Structs\Config" />
-    <Folder Include="01_Types\Arrays\Damper" />
-    <Folder Include="01_Types\Enums" />
-    <Folder Include="01_Types\Enums\Axes" />
-    <Folder Include="01_Types\Enums\Axes\Commands" />
-    <Folder Include="01_Types\Enums\Axes\States" />
-    <Folder Include="01_Types\Enums\Axes\Modes" />
-    <Folder Include="01_Types\Enums\Axes\Alarms" />
-    <Folder Include="01_Types\Enums\Clamping" />
-    <Folder Include="01_Types\Enums\Damper" />
-    <Folder Include="01_Types\Enums\Gripper" />
-    <Folder Include="01_Types\Enums\Homing" />
-    <Folder Include="01_Types\Enums\Screwdriver" />
-    <Folder Include="01_Types\Enums\Stop" />
-    <Folder Include="01_Types\Enums\Startup" />
-    <Folder Include="01_Types\Enums\System" />
-    <Folder Include="01_Types\Enums\Turntable" />
-    <Folder Include="01_Types\Enums\Tray" />
-    <Folder Include="01_Types\Arrays" />
-    <Folder Include="01_Types\Structs" />
-    <Folder Include="01_Types\Structs\Axes" />
-    <Folder Include="01_Types\Structs\Axes\Interface" />
-    <Folder Include="01_Types\Structs\Axes\Commands" />
-    <Folder Include="01_Types\Structs\Axes\Settings" />
-    <Folder Include="01_Types\Structs\Axes\Feedback" />
-    <Folder Include="01_Types\Structs\Axes\Alarms" />
-    <Folder Include="01_Types\Structs\Axes\Limits" />
-    <Folder Include="01_Types\Structs\Axes\Internal" />
-    <Folder Include="01_Types\Structs\Communication" />
-    <Folder Include="01_Types\Structs\Damper" />
-    <Folder Include="01_Types\Structs\Gripper" />
-    <Folder Include="01_Types\Structs\Homing" />
-    <Folder Include="01_Types\Structs\System" />
-    <Folder Include="01_Types\Structs\Turntable" />
-    <Folder Include="01_Types\Structs\Tray" />
+    <Folder Include="01_Types\01_Common" />
+    <Folder Include="01_Types\02_Axis" />
+    <Folder Include="01_Types\02_Axis\Enums" />
+    <Folder Include="01_Types\02_Axis\Enums\Alarms" />
+    <Folder Include="01_Types\02_Axis\Enums\Commands" />
+    <Folder Include="01_Types\02_Axis\Enums\Modes" />
+    <Folder Include="01_Types\02_Axis\Enums\States" />
+    <Folder Include="01_Types\02_Axis\Structs" />
+    <Folder Include="01_Types\02_Axis\Structs\Alarms" />
+    <Folder Include="01_Types\02_Axis\Structs\Commands" />
+    <Folder Include="01_Types\02_Axis\Structs\Feedback" />
+    <Folder Include="01_Types\02_Axis\Structs\Interface" />
+    <Folder Include="01_Types\02_Axis\Structs\Internal" />
+    <Folder Include="01_Types\02_Axis\Structs\Limits" />
+    <Folder Include="01_Types\02_Axis\Structs\Settings" />
+    <Folder Include="01_Types\03_Config" />
+    <Folder Include="01_Types\03_Config\Communication" />
+    <Folder Include="01_Types\03_Config\Motion" />
+    <Folder Include="01_Types\03_Config\Position" />
+    <Folder Include="01_Types\03_Config\Process" />
+    <Folder Include="01_Types\03_Config\Safety" />
+    <Folder Include="01_Types\04_Homing" />
+    <Folder Include="01_Types\04_Homing\Enums" />
+    <Folder Include="01_Types\04_Homing\Structs" />
+    <Folder Include="01_Types\05_Gripper" />
+    <Folder Include="01_Types\05_Gripper\Enums" />
+    <Folder Include="01_Types\05_Gripper\Structs" />
+    <Folder Include="01_Types\06_Process" />
+    <Folder Include="01_Types\06_Process\Clamping" />
+    <Folder Include="01_Types\06_Process\Clamping\Enums" />
+    <Folder Include="01_Types\06_Process\Damper" />
+    <Folder Include="01_Types\06_Process\Damper\Arrays" />
+    <Folder Include="01_Types\06_Process\Damper\Enums" />
+    <Folder Include="01_Types\06_Process\Damper\Structs" />
+    <Folder Include="01_Types\06_Process\Adjustment" />
+    <Folder Include="01_Types\06_Process\Adjustment\Enums" />
+    <Folder Include="01_Types\06_Process\Screwdriver" />
+    <Folder Include="01_Types\06_Process\Screwdriver\Enums" />
+    <Folder Include="01_Types\06_Process\Tray" />
+    <Folder Include="01_Types\06_Process\Tray\Enums" />
+    <Folder Include="01_Types\06_Process\Tray\Structs" />
+    <Folder Include="01_Types\06_Process\Turntable" />
+    <Folder Include="01_Types\06_Process\Turntable\Enums" />
+    <Folder Include="01_Types\06_Process\Turntable\Structs" />
+    <Folder Include="01_Types\07_System" />
+    <Folder Include="01_Types\07_System\Communication" />
+    <Folder Include="01_Types\07_System\Enums" />
+    <Folder Include="01_Types\07_System\Enums\Startup" />
+    <Folder Include="01_Types\07_System\Enums\Stop" />
+    <Folder Include="01_Types\07_System\Enums\System" />
+    <Folder Include="01_Types\07_System\Structs" />
+    <Folder Include="01_Types\08_Screwdriver" />
+    <Folder Include="01_Types\08_Screwdriver\Enums" />
+    <Folder Include="01_Types\08_Screwdriver\Structs" />
     <Folder Include="02_GVLs" />
     <Folder Include="02_GVLs\01_Config" />
-    <Folder Include="02_GVLs\Axes" />
-    <Folder Include="02_GVLs\Axes\Configuration" />
-    <Folder Include="02_GVLs\Axes\Constants" />
-    <Folder Include="02_GVLs\Axes\References" />
-    <Folder Include="02_GVLs\Axes\Interface" />
-    <Folder Include="02_GVLs\Communication" />
-    <Folder Include="02_GVLs\DamperGripper" />
-    <Folder Include="02_GVLs\EL_IO_Mod" />
-    <Folder Include="02_GVLs\System" />
+    <Folder Include="02_GVLs\02_Axis" />
+    <Folder Include="02_GVLs\02_Axis\Configuration" />
+    <Folder Include="02_GVLs\02_Axis\PDO" />
+    <Folder Include="02_GVLs\02_Axis\References" />
+    <Folder Include="02_GVLs\02_Axis\Runtime" />
+    <Folder Include="02_GVLs\03_Homing" />
+    <Folder Include="02_GVLs\04_Communication" />
+    <Folder Include="02_GVLs\05_Gripper" />
+    <Folder Include="02_GVLs\06_IO" />
+    <Folder Include="02_GVLs\07_System" />
+    <Folder Include="02_GVLs\08_Screwdriver" />
     <Folder Include="03_AxisControl" />
+    <Folder Include="03_AxisControl\AdjustmentProcess" />
     <Folder Include="03_AxisControl\Arbitration" />
     <Folder Include="03_AxisControl\Core" />
     <Folder Include="03_AxisControl\Management" />
     <Folder Include="03_AxisControl\DamperProcess" />
     <Folder Include="03_AxisControl\ScrewdriverProcess" />
     <Folder Include="03_AxisControl\StopControl" />
-    <Folder Include="03_AxisControl\TurntableProcess" />
+    <Folder Include="03_AxisControl\TurntableUnit" />
     <Folder Include="03_AxisControl\TrayProcess" />
     <Folder Include="03_AxisControl\Supervision" />
+    <Folder Include="04_Communication" />
+    <Folder Include="04_Communication\Serial" />
     <Folder Include="04_SystemControl" />
     <Folder Include="04_SystemControl\Communication" />
     <Folder Include="04_SystemControl\Homing" />
@@ -496,6 +644,10 @@
     <Folder Include="07_GripperControl\Management" />
     <Folder Include="07_GripperControl\Actions" />
     <Folder Include="07_GripperControl\Protocol" />
+    <Folder Include="08_ScrewdriverControl" />
+    <Folder Include="08_ScrewdriverControl\Core" />
+    <Folder Include="08_ScrewdriverControl\Protocol" />
+    <Folder Include="08_ScrewdriverControl\Management" />
   </ItemGroup>
   <ItemGroup>
     <PlaceholderReference Include="Tc2_MC2">

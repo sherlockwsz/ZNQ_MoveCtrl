@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_ScrewdriverRuntime" Id="{BDE66BA4-8310-4CFC-A9E6-9B4EA94075FF}">
+    <Declaration><![CDATA[TYPE ST_ScrewdriverRuntime :
+STRUCT
+    bReady              : BOOL;
+    bBusy               : BOOL;
+    bOnline             : BOOL; // 至少收到过一次本实例的有效回显
+    bRunning            : BOOL;
+    bCommandDone        : BOOL; // 正确回显确认，一周期脉冲；不代表工艺完成
+    bCommandError       : BOOL;
+    bCommandConflict    : BOOL;
+    bPcControlConfirmed : BOOL;
+
+    eState              : E_ScrewdriverState;
+    eDirection          : E_ScrewdriverDirection;
+    eActiveCommand      : E_ScrewdriverCommand;
+    eLastCommand        : E_ScrewdriverCommand;
+    eError              : E_ScrewdriverError;
+
+    byActiveStationId     : BYTE;
+    byRetryCount          : USINT;
+    byModbusExceptionCode : BYTE;
+
+    nTxLength     : UINT;
+    nRxLength     : UINT;
+    aLastTxBuffer : ARRAY[0..31] OF BYTE;
+    aLastRxBuffer : ARRAY[0..31] OF BYTE;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

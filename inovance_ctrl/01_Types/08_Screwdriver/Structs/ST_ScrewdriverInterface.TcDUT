@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_ScrewdriverInterface" Id="{470F221A-8F81-468F-998B-B8B483F2D7DB}">
+    <Declaration><![CDATA[TYPE ST_ScrewdriverInterface :
+STRUCT
+    Port    : ST_SerialConfig;
+    Set     : ST_ScrewdriverConfig;
+    Cmd     : ST_ScrewdriverCommand;
+    Runtime : ST_ScrewdriverRuntime;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

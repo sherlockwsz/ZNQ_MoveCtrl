@@ -12,33 +12,23 @@ VAR_IN_OUT
 END_VAR
 
 VAR
-    fbSerial       : SerialLineControlADS;
-    fbSend         : SendData;
-    fbReceiveByte  : ReceiveByte;
-    fbReplyTimeout : TON;
+    fbSerialPort   : FB_SerialPort;
+    fbProtocol     : FB_GripperProtocol;
+    stSerialConfig : ST_SerialConfig;
     fbPollInterval : TON;
     fbFeedbackTimeout : TON; // 有效反馈看门狗；单帧错误只丢弃
-
-    stTxBuffer     : ComBuffer;
-    stRxBuffer     : ComBuffer;
-
-	aTx            : ARRAY[0..12] OF BYTE; // 10写两个寄存器：最长13字节
-    aRx            : ARRAY[0..31] OF BYTE; // 保留异常帧及扩展余量
 	// 0=选请求；10=发送；20=等回复；90=通信错误
 	eStep : E_GripperCommStep := E_GripperCommStep.SelectRequest;
 
     nPollKind      : INT := 1;   // 1=位置；2=电流；3=故障
     nActiveKind    : INT;        // 当前正在等待的请求种类
 
-    nRxLength      : UINT;
     nExpectedLen   : UINT;
-    nIndex         : INT;
-    wCrc           : WORD;
-    wRxCrc         : WORD;
-    dwValue        : DWORD;
-    wCurrentRaw    : WORD;
-    bBadFrame      : BOOL;
     bPortConfigOk  : BOOL;
+	bSerialFrameComplete : BOOL;
+	bSerialAbortTransaction : BOOL;
+	eProtocolResult : E_GripperProtocolResult;
+	bProtocolBuildOk : BOOL;
 		
 	// 下标与 nActiveKind 一致：1=位置，2=电流，3=电机故障码。
 	// 0 表示该项没有尚未恢复的 Modbus 异常。
@@ -47,7 +37,6 @@ VAR
 	fbMoveTimeout  : TON;
 	fbResetTimeout : TON;
 
-	nTxLength      : UINT; // 当前请求实际长度：读取/06写=8；10写=13
 	bWriteActive   : BOOL; // 当前等待的是写入回执，而非读取回执
 	bInternalStop  : BOOL; // 运动超时/故障后的尽力停止，不对应新Cmd编号
 	bStopPending   : BOOL;
@@ -60,7 +49,6 @@ VAR
 	udiActiveId      : UDINT; // 已锁存的本次命令编号
 	eActiveCommand   : E_GripperCommand;
 	diActiveTarget   : DINT;  // 命令受理时锁存目标，执行中修改Set不影响本次
-	dwTarget         : DWORD;
 	
 	udRejectCode     : UDINT;
 	liPositionError  : LINT;
@@ -79,27 +67,29 @@ VAR
 END_VAR</Declaration>
     <Implementation>
       <ST><![CDATA[// =============================================================
-// 1. 检查基本配置，并周期调用TF6340串口功能块
+// 1. 映射现有唯一参数源，并周期调用公共串口层
 // =============================================================
+stSerialConfig.stPortConfig := ioGripper.Port;
+stSerialConfig.tAdsTimeout := GVL_CommunicationConfig.stGripper.tAdsTimeout;
+stSerialConfig.tReplyTimeout := ioGripper.Set.tReplyTimeout;
+
+fbSerialPort(
+    bEnable := bEnableComm,
+    stConfig := stSerialConfig,
+    aTxBuffer := fbProtocol.aTxBuffer,
+    uiTxLength := fbProtocol.uiTxLength,
+    bSend := (eStep = E_GripperCommStep.SendRequest),
+    bAbortTransaction := bSerialAbortTransaction,
+    bRxFrameComplete := bSerialFrameComplete,
+    bCheckCrc16 := TRUE
+);
+bSerialAbortTransaction := FALSE;
+bSerialFrameComplete := FALSE;
+
 bPortConfigOk :=
-    (ioGripper.Port.ComPort >= 1)
-    AND (ioGripper.Port.ComPort <= 255)
+    fbSerialPort.Runtime.bConfigValid
     AND (ioGripper.Set.nStationId >= 1)
     AND (ioGripper.Set.nStationId <= 247);
-
-fbSerial(
-    Connect   := bEnableComm AND bPortConfigOk,
-    SerialCfg := ioGripper.Port,
-    NetId     := '',
-    Timeout   := GVL_CommunicationConfig.stGripper.tAdsTimeout, // ADS操作超时；不同于电机报文应答超时
-    TxBuffer  := stTxBuffer,
-    RxBuffer  := stRxBuffer
-);
-
-fbReplyTimeout(
-    IN := (eStep = E_GripperCommStep.WaitReply),
-    PT := ioGripper.Set.tReplyTimeout
-);
 
 fbPollInterval(
     IN := (eStep = E_GripperCommStep.SelectRequest),
@@ -122,7 +112,7 @@ fbResetTimeout(
 fbFeedbackTimeout(
     IN := bEnableComm
           AND bPortConfigOk
-          AND fbSerial.PortOpened
+          AND fbSerialPort.Runtime.bPortOpened
           AND NOT bValidFramePulse,
     PT := ioGripper.Set.tFeedbackTimeout
 );
@@ -169,16 +159,15 @@ IF bStopRequested
     ioGripper.Feedback.udCommandErrorCode := TO_UDINT(E_GripperErrorCode.MachineStopping); // 整机停止中，拒绝新命令
 END_IF;
 // 未启用或串口未打开时，不发布“在线”与有效实时数据。
-IF NOT bEnableComm OR NOT bPortConfigOk OR NOT fbSerial.PortOpened THEN
+IF NOT bEnableComm OR NOT bPortConfigOk OR NOT fbSerialPort.Runtime.bPortOpened THEN
     ioGripper.Feedback.bOnline := FALSE;
 	M_InvalidateFeedback(stFeedback := ioGripper.Feedback);
-    IF fbSerial.Error THEN
+    IF fbSerialPort.Runtime.eError = E_SerialError.SerialBlockError THEN
         ioGripper.Feedback.bCommFault := TRUE;
-        ioGripper.Feedback.udCommErrorCode := fbSerial.ErrorID;
+        ioGripper.Feedback.udCommErrorCode := fbSerialPort.Runtime.udErrorId;
     END_IF;
 
     eStep := E_GripperCommStep.SelectRequest;
-    nRxLength := 0;
     nExpectedLen := 0;
 	
 	// 串口不可用时，本次动作不能宣告完成。
@@ -203,109 +192,44 @@ IF NOT bEnableComm OR NOT bPortConfigOk OR NOT fbSerial.PortOpened THEN
     RETURN;
 END_IF;
 
-IF fbSerial.Error THEN
-    // TF6340串口底层功能块错误。
-    uiLastCommErrorReason := TO_UINT(E_GripperCommErrorReason.SerialBlockError);
-
-    ioGripper.Feedback.bCommFault := TRUE;
-    ioGripper.Feedback.udCommErrorCode :=
-        fbSerial.ErrorID;
-
+// 公共层统一发布打开、发送、接收、超时和CRC异常。
+IF fbSerialPort.Runtime.bTransactionError THEN
+    CASE fbSerialPort.Runtime.eError OF
+        E_SerialError.SerialBlockError:
+            uiLastCommErrorReason := TO_UINT(E_GripperCommErrorReason.SerialBlockError);
+        E_SerialError.SendError:
+            uiLastCommErrorReason := TO_UINT(E_GripperCommErrorReason.SendError);
+        E_SerialError.ReplyTimeout:
+            uiLastCommErrorReason := TO_UINT(E_GripperCommErrorReason.ReplyTimeout);
+            udiReplyTimeoutCount := udiReplyTimeoutCount + 1;
+        E_SerialError.CrcMismatch:
+            uiLastCommErrorReason := TO_UINT(E_GripperCommErrorReason.CrcMismatch);
+            udiCrcErrorCount := udiCrcErrorCount + 1;
+        ELSE
+            uiLastCommErrorReason := TO_UINT(E_GripperCommErrorReason.BadFrameOrReceiveError);
+            udiBadFrameCount := udiBadFrameCount + 1;
+    END_CASE;
     eStep := E_GripperCommStep.CommError;
 END_IF;
-// =============================================================
-// 2. 接收并组装当前请求的应答
-//
-// 重要：
-// 只能在 WaitReply 状态调用 fbReceiveByte。
-// 如果在 SendRequest 或 SelectRequest 状态读取串口缓冲区，
-// 夹爪快速返回的应答可能被提前读取并丢弃，之后造成假超时。
-// =============================================================
-IF eStep = E_GripperCommStep.WaitReply THEN
 
-    // USB虚拟COM可能在一个PLC扫描周期送来一整帧，
-    // 因此本周期最多连续读取32字节。
-    FOR nIndex := 0 TO 31 DO
+// 帧边界属于夹爪Modbus协议；公共串口层只累计原始接收字节。
+IF (eStep = E_GripperCommStep.WaitReply)
+    AND fbSerialPort.Runtime.bNewData THEN
+    nExpectedLen := fbProtocol.M_GetExpectedReplyLength(
+        aRxBuffer := fbSerialPort.aRxBuffer,
+        uiRxLength := fbSerialPort.Runtime.uiRxLength
+    );
 
-        // 当前TF6340功能块接口只需要传入接收缓冲区。
-        fbReceiveByte(RxBuffer := stRxBuffer);
-
-        // Error是错误码，非0表示接收功能块发生错误。
-        IF fbReceiveByte.Error <> 0 THEN
-            bBadFrame := TRUE;
-            EXIT;
-        END_IF;
-
-        // 当前接收缓冲区已经没有更多字节。
-        IF NOT fbReceiveByte.ByteReceived THEN
-            EXIT;
-        END_IF;
-
-        // 本地接收数组长度固定为32字节，防止数组越界。
-        IF nRxLength >= 32 THEN
-            bBadFrame := TRUE;
-            EXIT;
-        END_IF;
-
-        // 保存当前收到的字节。
-        aRx[nRxLength] := fbReceiveByte.ReceivedByte;
-        nRxLength := nRxLength + 1;
-
-        // -----------------------------------------------------
-        // 根据功能码确定本次应答的完整长度
-        // -----------------------------------------------------
-
-        // 03功能码的Modbus异常应答：
-        // 站号、83、异常码、CRC低、CRC高，共5字节。
-        IF (nRxLength >= 2)
-            AND (aRx[1] = 16#83) THEN
-
-            nExpectedLen := 5;
-        END_IF;
-
-        // 03功能码正常应答：
-        // 站号、03、字节数、数据、CRC，共“字节数+5”字节。
-        IF (nRxLength >= 3)
-            AND (aRx[1] = 16#03) THEN
-
-            nExpectedLen := BYTE_TO_UINT(aRx[2]) + 5;
-        END_IF;
-
-        // 06和10功能码正常写入回执均为8字节。
-        IF (nRxLength >= 2)
-            AND ((aRx[1] = 16#06)
-              OR (aRx[1] = 16#10)) THEN
-
-            nExpectedLen := 8;
-        END_IF;
-
-        // 06/10功能码的Modbus异常应答均为5字节。
-        IF (nRxLength >= 2)
-            AND ((aRx[1] = 16#86)
-              OR (aRx[1] = 16#90)) THEN
-
-            nExpectedLen := 5;
-        END_IF;
-
-        // 应答长度超过本地数组，或者实际接收长度超过预期长度，
-        // 均按坏帧处理。
-        IF (nExpectedLen > 32)
-            OR ((nExpectedLen <> 0)
-                AND (nRxLength > nExpectedLen)) THEN
-
-            bBadFrame := TRUE;
-            EXIT;
-        END_IF;
-
-        // 完整帧已经收到，不需要继续调用接收功能块。
-        IF (nExpectedLen <> 0)
-            AND (nRxLength = nExpectedLen) THEN
-
-            EXIT;
-        END_IF;
-
-    END_FOR;
-
+    IF (nExpectedLen > 32)
+        OR ((nExpectedLen <> 0)
+            AND (fbSerialPort.Runtime.uiRxLength > nExpectedLen)) THEN
+        uiLastCommErrorReason := TO_UINT(E_GripperCommErrorReason.BadFrameOrReceiveError);
+        udiBadFrameCount := udiBadFrameCount + 1;
+        eStep := E_GripperCommStep.CommError;
+    ELSIF (nExpectedLen <> 0)
+        AND (fbSerialPort.Runtime.uiRxLength = nExpectedLen) THEN
+        bSerialFrameComplete := TRUE;
+    END_IF;
 END_IF;
 
 // =============================================================
@@ -396,156 +320,68 @@ CASE eStep OF
     END_IF;
 
     IF bWriteActive THEN
-        aTx[0] := ioGripper.Set.nStationId;
-
-        CASE eActiveCommand OF
-            E_GripperCommand.Open,
-            E_GripperCommand.Close:
-                // 10 6101 0002 04 + 32位有符号目标位置
-                aTx[1] := 16#10;
-                aTx[2] := 16#61;
-                aTx[3] := 16#01;
-                aTx[4] := 16#00;
-                aTx[5] := 16#02;
-                aTx[6] := 16#04;
-
-                dwTarget := DINT_TO_DWORD(diActiveTarget);
-                aTx[7]  := DWORD_TO_BYTE(SHR(dwTarget, 24));
-                aTx[8]  := DWORD_TO_BYTE(SHR(dwTarget, 16));
-                aTx[9]  := DWORD_TO_BYTE(SHR(dwTarget, 8));
-                aTx[10] := DWORD_TO_BYTE(dwTarget);
-                nTxLength := 13;
-
-            E_GripperCommand.Stop:
-                // 06 6040 010F：停止运动
-                aTx[1] := 16#06;
-                aTx[2] := 16#60;
-                aTx[3] := 16#40;
-                aTx[4] := 16#01;
-                aTx[5] := 16#0F;
-                nTxLength := 8;
-
-            E_GripperCommand.ResetFault:
-                // 06 6040 0080：故障复位
-                aTx[1] := 16#06;
-                aTx[2] := 16#60;
-                aTx[3] := 16#40;
-                aTx[4] := 16#00;
-                aTx[5] := 16#80;
-                nTxLength := 8;
-        END_CASE;
-
-        wCrc := F_GripperModbusCrc16(
-            pData := ADR(aTx),
-            nLength := nTxLength - 2
+        bProtocolBuildOk := fbProtocol.M_BuildCommand(
+            nStationId := ioGripper.Set.nStationId,
+            eCommand := eActiveCommand,
+            diTarget := diActiveTarget
         );
-        aTx[nTxLength - 2] := WORD_TO_BYTE(wCrc);
-        aTx[nTxLength - 1] := WORD_TO_BYTE(SHR(wCrc, 8));
-
-        nRxLength := 0;
         nExpectedLen := 0;
-        bBadFrame := FALSE;
-        eStep := E_GripperCommStep.SendRequest;
+        IF bProtocolBuildOk THEN
+            eStep := E_GripperCommStep.SendRequest;
+        ELSE
+            uiLastCommErrorReason := TO_UINT(E_GripperCommErrorReason.SendError);
+            eStep := E_GripperCommStep.CommError;
+        END_IF;
 
     ELSIF fbPollInterval.Q THEN
-        // 以下保持你原来的三项读取轮询，增加 nTxLength := 8。
         nActiveKind := nPollKind;
-        aTx[0] := ioGripper.Set.nStationId;
-        aTx[1] := 16#03;
-
-        CASE nActiveKind OF
-            1: // 0x6064：位置，两个寄存器
-                aTx[2] := 16#60; aTx[3] := 16#64;
-                aTx[4] := 16#00; aTx[5] := 16#02;
-            2: // 0x6078：电流，一个寄存器
-                aTx[2] := 16#60; aTx[3] := 16#78;
-                aTx[4] := 16#00; aTx[5] := 16#01;
-            3: // 0x603F：故障，两个寄存器
-                aTx[2] := 16#60; aTx[3] := 16#3F;
-                aTx[4] := 16#00; aTx[5] := 16#02;
-        END_CASE;
-
-        nTxLength := 8;
-        wCrc := F_GripperModbusCrc16(
-            pData := ADR(aTx),
-            nLength := 6
+        bProtocolBuildOk := fbProtocol.M_BuildPoll(
+            nStationId := ioGripper.Set.nStationId,
+            nPollKind := nActiveKind
         );
-        aTx[6] := WORD_TO_BYTE(wCrc);
-        aTx[7] := WORD_TO_BYTE(SHR(wCrc, 8));
-
-        nRxLength := 0;
         nExpectedLen := 0;
-        bBadFrame := FALSE;
-        eStep := E_GripperCommStep.SendRequest;
+        IF bProtocolBuildOk THEN
+            eStep := E_GripperCommStep.SendRequest;
+        ELSE
+            uiLastCommErrorReason := TO_UINT(E_GripperCommErrorReason.SendError);
+            eStep := E_GripperCommStep.CommError;
+        END_IF;
 
         nPollKind := nPollKind + 1;
         IF nPollKind > 3 THEN nPollKind := 1; 
 		END_IF;
     END_IF;
 
-	E_GripperCommStep.SendRequest: // 使用当前帧长度；Busy期间不得修改aTx
-		fbSend(
-			pSendData := ADR(aTx),
-			Length := UINT_TO_UDINT(nTxLength),
-			TxBuffer := stTxBuffer
-		);
-	
-	IF fbSend.Error <> 0 THEN
-		// TF6340发送功能块错误。
-		uiLastCommErrorReason := TO_UINT(E_GripperCommErrorReason.SendError);
-		eStep := E_GripperCommStep.CommError;
-	
-	ELSIF NOT fbSend.Busy THEN
-		eStep := E_GripperCommStep.WaitReply;
-	END_IF;
+	E_GripperCommStep.SendRequest:
+		IF fbSerialPort.Runtime.bSendDone THEN
+			eStep := E_GripperCommStep.WaitReply;
+		END_IF;
     E_GripperCommStep.WaitReply: // 等待并校验当前请求的完整应答
-		IF bBadFrame THEN
-			// 接收功能块错误、长度超限或缓冲区溢出
-			uiLastCommErrorReason := TO_UINT(E_GripperCommErrorReason.BadFrameOrReceiveError);
-			udiBadFrameCount := udiBadFrameCount + 1;
-			eStep := E_GripperCommStep.CommError;
-		
-		ELSIF fbReplyTimeout.Q THEN
-			// 在设定时间内没有收到完整应答
-			uiLastCommErrorReason := TO_UINT(E_GripperCommErrorReason.ReplyTimeout);
-			udiReplyTimeoutCount := udiReplyTimeoutCount + 1;
-			eStep := E_GripperCommStep.CommError;
-        ELSIF (nExpectedLen <> 0) AND (nRxLength = nExpectedLen) THEN
-            // 先核对站号和CRC。
-            wCrc := F_GripperModbusCrc16(
-                pData   := ADR(aRx),
-                nLength := nRxLength - 2
-            );
+		IF fbSerialPort.Runtime.bFrameReady THEN
+			eProtocolResult := fbProtocol.M_ParseReply(
+				nStationId := ioGripper.Set.nStationId,
+				bWrite := bWriteActive,
+				nActiveKind := nActiveKind,
+				aRxBuffer := fbSerialPort.aRxBuffer,
+				uiRxLength := fbSerialPort.Runtime.uiRxLength
+			);
 
-            wRxCrc :=
-                BYTE_TO_WORD(aRx[nRxLength - 2])
-                OR SHL(BYTE_TO_WORD(aRx[nRxLength - 1]), 8);
-
-			IF aRx[0] <> ioGripper.Set.nStationId THEN
+			IF eProtocolResult = E_GripperProtocolResult.StationMismatch THEN
 				// 返回帧站号不是当前夹爪
 				uiLastCommErrorReason := TO_UINT(E_GripperCommErrorReason.StationMismatch);
 				udiReplyMismatchCount := udiReplyMismatchCount + 1;
-				eStep := E_GripperCommStep.CommError;
-			
-			ELSIF wCrc <> wRxCrc THEN
-				// 返回帧CRC校验失败
-				uiLastCommErrorReason := TO_UINT(E_GripperCommErrorReason.CrcMismatch);
-				udiCrcErrorCount := udiCrcErrorCount + 1;
 				eStep := E_GripperCommStep.CommError;
 
 			ELSIF bWriteActive THEN
 			// 写请求不能走读取分支，否则会误用
 			// aModbusException[nActiveKind]。
-			IF
-				((aTx[1] = 16#10) AND (aRx[1] = 16#90))
-				OR ((aTx[1] = 16#06) AND (aRx[1] = 16#86))
-			THEN
+			IF eProtocolResult = E_GripperProtocolResult.ModbusException THEN
 			    // 已收到完整有效的Modbus异常回复，通信链路正常。
 				uiConsecutiveCommErrors := 0;
 				// 从站明确拒绝写请求：保留协议异常用于诊断，
 				// 但不把一次Modbus异常升级为通信离线。
 				ioGripper.Feedback.udCommErrorCode :=
-					TO_UDINT(E_GripperErrorCode.ModbusExceptionBase) + BYTE_TO_UDINT(aRx[2]);
+					TO_UDINT(E_GripperErrorCode.ModbusExceptionBase) + BYTE_TO_UDINT(fbProtocol.byExceptionCode);
 		
 				IF NOT bInternalStop THEN
 					ioGripper.Feedback.udCommandErrorCode := TO_UDINT(E_GripperErrorCode.CommunicationUnavailable);
@@ -560,12 +396,7 @@ CASE eStep OF
 				bInternalStop := FALSE;
 				eStep := E_GripperCommStep.SelectRequest;
 		
-			ELSIF (nRxLength = 8)
-				AND (aRx[1] = aTx[1])
-				AND (aRx[2] = aTx[2])
-				AND (aRx[3] = aTx[3])
-				AND (aRx[4] = aTx[4])
-				AND (aRx[5] = aTx[5]) THEN
+			ELSIF eProtocolResult = E_GripperProtocolResult.WriteAcknowledged THEN
 		
 				// 10回执核对地址及数量；06回执核对地址及写入值。
 				// 写回执不是位置/电流/故障反馈，因此不用于刷新在线看门狗。
@@ -655,21 +486,21 @@ CASE eStep OF
                 eStep := E_GripperCommStep.CommError;
 			END_IF;
 		
-		ELSIF aRx[1] = 16#83 THEN
+		ELSIF eProtocolResult = E_GripperProtocolResult.ModbusException THEN
 			    // 已收到完整有效的Modbus异常回复，链路没有中断。
 				uiConsecutiveCommErrors := 0;
 				// CRC 和站号已校验：电机在线，但拒绝了本项读取。
 				// 这是协议异常，不是 0x603F 所表示的电机故障。
-				aModbusException[nActiveKind] := aRx[2];
+				aModbusException[nActiveKind] := fbProtocol.byExceptionCode;
 				// 单项读取异常只使该项数据无效，不立即改变整机通信健康状态。
 				ioGripper.Feedback.udCommErrorCode :=
-					TO_UDINT(E_GripperErrorCode.ModbusExceptionBase) + BYTE_TO_UDINT(aRx[2]);
+					TO_UDINT(E_GripperErrorCode.ModbusExceptionBase) + BYTE_TO_UDINT(fbProtocol.byExceptionCode);
 			
 				// 单次异常不清除上一轮有效值，避免bHealthy瞬间变FALSE导致停机。
 				// 若持续没有任何有效反馈，统一由3秒在线看门狗清除全部有效位。
 				// 不修改bFault或udFaultCode；它们只能由成功读取0x603F更新。
 				eStep := E_GripperCommStep.SelectRequest;
-			ELSIF aRx[1] <> 16#03 THEN
+			ELSIF eProtocolResult = E_GripperProtocolResult.UnexpectedFunctionCode THEN
 				(*
 					当前发送的是03读取请求，
 					但收到的既不是03正常回复，也不是83异常回复。
@@ -688,12 +519,8 @@ CASE eStep OF
 			
 				eStep := E_GripperCommStep.CommError;
             ELSE
-                // 回复必须与当前请求的数据长度一致。
-				// 回复的数据字节数必须与本次读取请求一致。
-				IF
-					((nActiveKind = 2) AND (aRx[2] <> 2))
-					OR ((nActiveKind <> 2) AND (aRx[2] <> 4))
-				THEN
+				// 回复的数据字节数由协议层统一校验。
+				IF eProtocolResult = E_GripperProtocolResult.InvalidByteCount THEN
 					(*
 						nActiveKind=1：位置，期望4字节；
 						nActiveKind=2：电流，期望2字节；
@@ -709,37 +536,18 @@ CASE eStep OF
 					eStep := E_GripperCommStep.CommError;
 				
 				ELSE
-                    CASE nActiveKind OF
-                        1: // 32位有符号位置；报文高字节在前
-                            dwValue :=
-                                SHL(BYTE_TO_DWORD(aRx[3]), 24)
-                                OR SHL(BYTE_TO_DWORD(aRx[4]), 16)
-                                OR SHL(BYTE_TO_DWORD(aRx[5]), 8)
-                                OR BYTE_TO_DWORD(aRx[6]);
+					CASE eProtocolResult OF
+						E_GripperProtocolResult.PositionData:
+							ioGripper.Feedback.diActualPosition := fbProtocol.diPosition;
+							ioGripper.Feedback.bPositionValid := TRUE;
 
-                            ioGripper.Feedback.diActualPosition :=
-                                DWORD_TO_DINT(dwValue);
-                            ioGripper.Feedback.bPositionValid := TRUE;
+						E_GripperProtocolResult.CurrentData:
+							ioGripper.Feedback.iActualCurrent := fbProtocol.iCurrent;
+							ioGripper.Feedback.bCurrentValid := TRUE;
 
-                        2: // 16位有符号电流；工程单位0.01 A
-                            wCurrentRaw :=
-                                SHL(BYTE_TO_WORD(aRx[3]), 8)
-                                OR BYTE_TO_WORD(aRx[4]);
-
-                            ioGripper.Feedback.iActualCurrent :=
-                                WORD_TO_INT(wCurrentRaw);
-                            ioGripper.Feedback.bCurrentValid := TRUE;
-
-                        3: // 32位故障代码
-                            dwValue :=
-                                SHL(BYTE_TO_DWORD(aRx[3]), 24)
-                                OR SHL(BYTE_TO_DWORD(aRx[4]), 16)
-                                OR SHL(BYTE_TO_DWORD(aRx[5]), 8)
-                                OR BYTE_TO_DWORD(aRx[6]);
-
-                            ioGripper.Feedback.udFaultCode :=
-                                DWORD_TO_UDINT(dwValue);
-                            ioGripper.Feedback.bFault := (dwValue <> 0);
+						E_GripperProtocolResult.FaultData:
+							ioGripper.Feedback.udFaultCode := fbProtocol.udFaultCode;
+							ioGripper.Feedback.bFault := (fbProtocol.udFaultCode <> 0);
 							ioGripper.Feedback.bFaultCodeValid := TRUE;
 					END_CASE;
 					
@@ -758,6 +566,7 @@ CASE eStep OF
         END_IF;
 
 		E_GripperCommStep.CommError:
+			bSerialAbortTransaction := TRUE;
 
 			// 单次超时、坏帧、CRC、站号或回执不匹配只记录并丢弃。
 			// 是否真正失联由fbFeedbackTimeout统一判断，避免偶发串口抖动停机。
@@ -768,15 +577,14 @@ CASE eStep OF
 				udiDiscardedFrameCount := udiDiscardedFrameCount + 1;
 			END_IF;
 
-			IF fbSerial.Error THEN
-				ioGripper.Feedback.udCommErrorCode := fbSerial.ErrorID;
+			IF (fbSerialPort.Runtime.eError = E_SerialError.SerialBlockError)
+				AND (fbSerialPort.Runtime.udErrorId <> 0) THEN
+				ioGripper.Feedback.udCommErrorCode := fbSerialPort.Runtime.udErrorId;
 			ELSE
 				ioGripper.Feedback.udCommErrorCode := TO_UDINT(E_GripperErrorCode.CommunicationUnknown);
 			END_IF;
 
-			nRxLength := 0;
 			nExpectedLen := 0;
-			bBadFrame := FALSE;
 
 			IF bWriteActive THEN
 				CASE eActiveCommand OF
@@ -850,7 +658,7 @@ IF bMoveActive THEN
         bMoveActive := FALSE;
         ioGripper.Feedback.bBusy := FALSE;
         ioGripper.Feedback.udCommandErrorCode := TO_UDINT(E_GripperErrorCode.CommunicationUnavailable);
-        bStopPending := fbSerial.PortOpened;
+        bStopPending := fbSerialPort.Runtime.bPortOpened;
 
     ELSIF ioGripper.Feedback.bFaultCodeValid
         AND ioGripper.Feedback.bFault THEN
@@ -858,13 +666,13 @@ IF bMoveActive THEN
         bMoveActive := FALSE;
         ioGripper.Feedback.bBusy := FALSE;
         ioGripper.Feedback.udCommandErrorCode := TO_UDINT(E_GripperErrorCode.DeviceFaultOrResetTimeout);
-        bStopPending := fbSerial.PortOpened;
+        bStopPending := fbSerialPort.Runtime.bPortOpened;
 
     ELSIF fbMoveTimeout.Q THEN
         bMoveActive := FALSE;
         ioGripper.Feedback.bBusy := FALSE;
         ioGripper.Feedback.udCommandErrorCode := TO_UDINT(E_GripperErrorCode.MotionTimeout);
-        bStopPending := fbSerial.PortOpened;
+        bStopPending := fbSerialPort.Runtime.bPortOpened;
 
     ELSIF ioGripper.Feedback.bFaultCodeValid
         AND ioGripper.Feedback.bPositionValid THEN

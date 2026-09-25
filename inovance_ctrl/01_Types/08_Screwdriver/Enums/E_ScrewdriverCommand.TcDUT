@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_ScrewdriverCommand" Id="{D1A9113E-3D63-4F2A-8B44-8B87C19FA5F5}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_ScrewdriverCommand :
+(
+    None         := 0,
+    PcControl    := 10,
+    TightenStart := 20,
+    TightenStop  := 30,
+    LoosenStart  := 40,
+    LoosenStop   := 50
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

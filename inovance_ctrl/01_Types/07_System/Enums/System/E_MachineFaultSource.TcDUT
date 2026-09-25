@@ -1,0 +1,23 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_MachineFaultSource" Id="{e76eea96-d123-417b-918d-8a5b6e7f9571}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_MachineFaultSource :
+(
+    None                := 0,   // 当前没有整机锁存故障
+    HmiWatchdog         := 10,  // WPF心跳超时
+    AutoStart           := 20,  // 自动启动/轴就绪阶段失败
+	MachinePreparation 	:= 25,
+    AxisHoming          := 27,  // 单轴回零状态机失败或超时
+    Axis                := 30,  // 整机任一已配置NC轴报警
+    DamperGripper       := 40,  // COM3通信、设备或动作失败
+    AdjustGripper       := 45,  // COM4通信、设备或动作失败
+    TurntableProcess    := 50,  // 转台/夹紧协调流程失败
+	ScrewdriverProcess  := 55,  // 螺丝刀双轴定位或流程失败
+    AutoStop            := 60   // 受控停止、释放Stop或掉使能失败
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

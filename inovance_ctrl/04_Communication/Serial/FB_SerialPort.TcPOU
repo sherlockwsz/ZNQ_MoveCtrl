@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <POU Name="FB_SerialPort" Id="{6726CDA0-CAFF-49AE-B469-C5E8FAE70575}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_SerialPort
+VAR_INPUT
+    bEnable          : BOOL;
+    stConfig         : ST_SerialConfig;
+    aTxBuffer        : ARRAY[0..31] OF BYTE;
+    uiTxLength       : UINT;
+    bSend            : BOOL;
+    bAbortTransaction : BOOL; // 上层放弃当前帧时清空公共层事务，不改变端口连接
+    bRxFrameComplete : BOOL; // 由上层协议根据当前接收内容判定帧边界
+    bCheckCrc16      : BOOL; // TRUE时对完整帧执行标准Modbus CRC16校验
+END_VAR
+VAR_OUTPUT
+    aRxBuffer : ARRAY[0..31] OF BYTE;
+    Runtime   : ST_SerialRuntime;
+END_VAR
+VAR
+    fbSerial       : SerialLineControlADS;
+    fbSend         : SendData;
+    fbReceiveByte  : ReceiveByte;
+    fbReplyTimeout : TON;
+    stTxBuffer     : ComBuffer;
+    stRxBuffer     : ComBuffer;
+    eState         : E_SerialState := E_SerialState.Disabled;
+    nIndex         : INT;
+    nRxLength      : UINT;
+    wCalculatedCrc : WORD;
+    wReceivedCrc   : WORD;
+    bPortConfigOk  : BOOL;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// 公共串口层只管理端口生命周期和原始字节事务。
+// 设备站号、寄存器、位置/电流/力矩语义均由设备协议层处理。
+Runtime.bSendDone := FALSE;
+Runtime.bNewData := FALSE;
+Runtime.bFrameReady := FALSE;
+Runtime.bTransactionError := FALSE;
+Runtime.bReplyTimeout := FALSE;
+Runtime.bCrcError := FALSE;
+Runtime.bReceiveError := FALSE;
+
+bPortConfigOk :=
+    (stConfig.stPortConfig.ComPort >= 1)
+    AND (stConfig.stPortConfig.ComPort <= 255)
+    AND (stConfig.tAdsTimeout > T#0MS)
+    AND (stConfig.tReplyTimeout > T#0MS);
+Runtime.bConfigValid := bPortConfigOk;
+
+fbSerial(
+    Connect   := bEnable AND bPortConfigOk,
+    SerialCfg := stConfig.stPortConfig,
+    NetId     := '',
+    Timeout   := stConfig.tAdsTimeout,
+    TxBuffer  := stTxBuffer,
+    RxBuffer  := stRxBuffer
+);
+
+Runtime.bPortOpened := fbSerial.PortOpened;
+Runtime.udErrorId := 0;
+
+fbReplyTimeout(
+    IN := (eState = E_SerialState.Receiving),
+    PT := stConfig.tReplyTimeout
+);
+
+IF NOT bEnable THEN
+    eState := E_SerialState.Disabled;
+    nRxLength := 0;
+ELSIF NOT bPortConfigOk THEN
+    eState := E_SerialState.Error;
+    Runtime.eError := E_SerialError.InvalidConfig;
+ELSIF fbSerial.Error THEN
+    eState := E_SerialState.Error;
+    Runtime.eError := E_SerialError.SerialBlockError;
+    Runtime.udErrorId := fbSerial.ErrorID;
+    Runtime.bTransactionError := TRUE;
+ELSIF NOT fbSerial.PortOpened THEN
+    // Connect保持TRUE。TF6340端口恢复后自动回到Ready，构成统一重连路径。
+    eState := E_SerialState.Opening;
+    nRxLength := 0;
+ELSIF (eState = E_SerialState.Disabled)
+    OR (eState = E_SerialState.Opening)
+    OR (eState = E_SerialState.Error) THEN
+    eState := E_SerialState.Ready;
+    Runtime.eError := E_SerialError.None;
+END_IF;
+
+IF bAbortTransaction AND fbSerial.PortOpened THEN
+    eState := E_SerialState.Ready;
+    nRxLength := 0;
+    Runtime.eError := E_SerialError.None;
+END_IF;
+
+CASE eState OF
+    E_SerialState.Ready:
+        IF bSend THEN
+            IF (uiTxLength = 0) OR (uiTxLength > 32) THEN
+                eState := E_SerialState.Error;
+                Runtime.eError := E_SerialError.InvalidConfig;
+                Runtime.bTransactionError := TRUE;
+            ELSE
+                nRxLength := 0;
+                eState := E_SerialState.Sending;
+            END_IF;
+        END_IF;
+
+    E_SerialState.Sending:
+        fbSend(
+            pSendData := ADR(aTxBuffer),
+            Length    := UINT_TO_UDINT(uiTxLength),
+            TxBuffer  := stTxBuffer
+        );
+
+        IF fbSend.Error <> 0 THEN
+            eState := E_SerialState.Error;
+            Runtime.eError := E_SerialError.SendError;
+            Runtime.udErrorId := TO_UDINT(fbSend.Error);
+            Runtime.bTransactionError := TRUE;
+        ELSIF NOT fbSend.Busy THEN
+            eState := E_SerialState.Receiving;
+            Runtime.bSendDone := TRUE;
+        END_IF;
+
+    E_SerialState.Receiving:
+        FOR nIndex := 0 TO 31 DO
+            fbReceiveByte(RxBuffer := stRxBuffer);
+
+            IF fbReceiveByte.Error <> 0 THEN
+                eState := E_SerialState.Error;
+                Runtime.eError := E_SerialError.ReceiveError;
+                Runtime.udErrorId := TO_UDINT(fbReceiveByte.Error);
+                Runtime.bReceiveError := TRUE;
+                Runtime.bTransactionError := TRUE;
+                EXIT;
+            END_IF;
+
+            IF NOT fbReceiveByte.ByteReceived THEN
+                EXIT;
+            END_IF;
+
+            IF nRxLength >= 32 THEN
+                eState := E_SerialState.Error;
+                Runtime.eError := E_SerialError.BufferOverflow;
+                Runtime.bReceiveError := TRUE;
+                Runtime.bTransactionError := TRUE;
+                EXIT;
+            END_IF;
+
+            aRxBuffer[nRxLength] := fbReceiveByte.ReceivedByte;
+            nRxLength := nRxLength + 1;
+            Runtime.bNewData := TRUE;
+        END_FOR;
+
+        IF (eState = E_SerialState.Receiving) AND bRxFrameComplete THEN
+            IF bCheckCrc16 THEN
+                IF nRxLength < 3 THEN
+                    eState := E_SerialState.Error;
+                    Runtime.eError := E_SerialError.ReceiveError;
+                    Runtime.bReceiveError := TRUE;
+                    Runtime.bTransactionError := TRUE;
+                ELSE
+                    wCalculatedCrc := F_SerialCrc16(
+                        pData := ADR(aRxBuffer),
+                        nLength := nRxLength - 2
+                    );
+                    wReceivedCrc :=
+                        BYTE_TO_WORD(aRxBuffer[nRxLength - 2])
+                        OR SHL(BYTE_TO_WORD(aRxBuffer[nRxLength - 1]), 8);
+
+                    IF wCalculatedCrc <> wReceivedCrc THEN
+                        eState := E_SerialState.Error;
+                        Runtime.eError := E_SerialError.CrcMismatch;
+                        Runtime.bCrcError := TRUE;
+                        Runtime.bTransactionError := TRUE;
+                    ELSE
+                        Runtime.bFrameReady := TRUE;
+                        eState := E_SerialState.Ready;
+                    END_IF;
+                END_IF;
+            ELSE
+                Runtime.bFrameReady := TRUE;
+                eState := E_SerialState.Ready;
+            END_IF;
+        ELSIF (eState = E_SerialState.Receiving) AND fbReplyTimeout.Q THEN
+            eState := E_SerialState.Error;
+            Runtime.eError := E_SerialError.ReplyTimeout;
+            Runtime.bReplyTimeout := TRUE;
+            Runtime.bTransactionError := TRUE;
+        END_IF;
+END_CASE;
+
+Runtime.eState := eState;
+Runtime.uiRxLength := nRxLength;
+Runtime.bBusy :=
+    (eState = E_SerialState.Sending)
+    OR (eState = E_SerialState.Receiving);]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

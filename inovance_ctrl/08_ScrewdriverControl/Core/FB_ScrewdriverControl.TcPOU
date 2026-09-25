@@ -1,0 +1,522 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <POU Name="FB_ScrewdriverControl" Id="{A7CB5326-84EF-4CC7-9721-C153302EDB8E}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_ScrewdriverControl
+VAR_INPUT
+    bEnable : BOOL;
+END_VAR
+VAR_IN_OUT
+    ioScrewdriver : ST_ScrewdriverInterface;
+END_VAR
+VAR
+    fbSerialPort : FB_SerialPort;
+    fbProtocol   : FB_ScrewdriverProtocol;
+
+    eInternalState   : E_ScrewdriverState := E_ScrewdriverState.Disabled;
+    eDirection       : E_ScrewdriverDirection := E_ScrewdriverDirection.Unknown;
+    eActiveCommand   : E_ScrewdriverCommand := E_ScrewdriverCommand.None;
+    byLatchedStation : BYTE;
+    byRetryCount     : USINT;
+
+    bSerialFrameComplete   : BOOL;
+    bSerialAbortTransaction : BOOL;
+    bPortWasOpened          : BOOL;
+    bHadValidReply          : BOOL;
+    bStopPending            : BOOL;
+    bCanProcess             : BOOL;
+    bStartNewCommand        : BOOL;
+    bCommandSuccess         : BOOL;
+    bFailActive             : BOOL;
+    bFailureCommunication   : BOOL;
+    bFailureHandled         : BOOL;
+    bBuildOk                : BOOL;
+
+    eFailureError  : E_ScrewdriverError;
+    eProtocolResult : E_ScrewdriverProtocolResult;
+    uiExpectedLength : UINT;
+    nIndex           : INT;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// =============================================================
+// 双螺丝刀共用同一FB类型；每个FB实例持有独立串口、缓存和状态。
+// 本FB只负责设备通信控制，不参与任何现有自动流程或工艺完成判断。
+// =============================================================
+ioScrewdriver.Runtime.bCommandDone := FALSE;
+bStartNewCommand := FALSE;
+bCommandSuccess := FALSE;
+bFailActive := FALSE;
+bFailureCommunication := FALSE;
+bFailureHandled := FALSE;
+
+// 公共串口层只接收原始字节和管理端口生命周期。
+fbSerialPort(
+    bEnable := bEnable,
+    stConfig := ioScrewdriver.Port,
+    aTxBuffer := fbProtocol.aTxBuffer,
+    uiTxLength := fbProtocol.uiTxLength,
+    bSend := (eInternalState = E_ScrewdriverState.Sending),
+    bAbortTransaction := bSerialAbortTransaction,
+    bRxFrameComplete := bSerialFrameComplete,
+    bCheckCrc16 := TRUE
+);
+bSerialAbortTransaction := FALSE;
+bSerialFrameComplete := FALSE;
+
+ioScrewdriver.Runtime.nTxLength := fbProtocol.uiTxLength;
+ioScrewdriver.Runtime.nRxLength := fbSerialPort.Runtime.uiRxLength;
+FOR nIndex := 0 TO 31 DO
+    ioScrewdriver.Runtime.aLastRxBuffer[nIndex] := fbSerialPort.aRxBuffer[nIndex];
+END_FOR;
+
+// =============================================================
+// 端口可用性与通信会话管理
+// 当前版本按“必须有回显”设计；bExpectReply=FALSE保留给未来协议扩展。
+// =============================================================
+bCanProcess := FALSE;
+
+IF NOT bEnable THEN
+    eInternalState := E_ScrewdriverState.Disabled;
+    eActiveCommand := E_ScrewdriverCommand.None;
+    eDirection := E_ScrewdriverDirection.Unknown;
+    byRetryCount := 0;
+    bStopPending := FALSE;
+    bHadValidReply := FALSE;
+    ioScrewdriver.Runtime.bPcControlConfirmed := FALSE;
+    // 禁用期间不保留动作请求，避免下次使能后意外执行旧命令。
+    ioScrewdriver.Cmd.bPcControl := FALSE;
+    ioScrewdriver.Cmd.bTighten := FALSE;
+    ioScrewdriver.Cmd.bLoosen := FALSE;
+    ioScrewdriver.Cmd.bStop := FALSE;
+
+ELSIF NOT fbSerialPort.Runtime.bConfigValid
+    OR NOT ioScrewdriver.Set.bExpectReply THEN
+    eInternalState := E_ScrewdriverState.Fault;
+    ioScrewdriver.Runtime.bCommandError := TRUE;
+    ioScrewdriver.Runtime.eError := E_ScrewdriverError.InvalidSerialConfig;
+    ioScrewdriver.Runtime.bPcControlConfirmed := FALSE;
+    bHadValidReply := FALSE;
+    ioScrewdriver.Cmd.bPcControl := FALSE;
+    ioScrewdriver.Cmd.bTighten := FALSE;
+    ioScrewdriver.Cmd.bLoosen := FALSE;
+    ioScrewdriver.Cmd.bStop := FALSE;
+
+ELSIF NOT fbSerialPort.Runtime.bPortOpened THEN
+    IF bPortWasOpened THEN
+        ioScrewdriver.Runtime.bCommandError := TRUE;
+        ioScrewdriver.Runtime.eError := E_ScrewdriverError.ConnectionLost;
+    ELSIF fbSerialPort.Runtime.eError = E_SerialError.SerialBlockError THEN
+        ioScrewdriver.Runtime.bCommandError := TRUE;
+        ioScrewdriver.Runtime.eError := E_ScrewdriverError.PortOpenFailed;
+    END_IF;
+
+    eInternalState := E_ScrewdriverState.OpeningPort;
+    eActiveCommand := E_ScrewdriverCommand.None;
+    eDirection := E_ScrewdriverDirection.Unknown;
+    byRetryCount := 0;
+    bStopPending := FALSE;
+    bHadValidReply := FALSE;
+    ioScrewdriver.Runtime.bPcControlConfirmed := FALSE;
+
+    IF bPortWasOpened THEN
+        // 连接中断时放弃未确认请求；恢复后必须由上层重新明确发起。
+        ioScrewdriver.Cmd.bPcControl := FALSE;
+        ioScrewdriver.Cmd.bTighten := FALSE;
+        ioScrewdriver.Cmd.bLoosen := FALSE;
+        ioScrewdriver.Cmd.bStop := FALSE;
+    END_IF;
+
+ELSE
+    bCanProcess := TRUE;
+
+    IF NOT bPortWasOpened THEN
+        // 端口首次打开或重连后，设备方向和PC控制状态均不可假定。
+        eInternalState := E_ScrewdriverState.Ready;
+        eDirection := E_ScrewdriverDirection.Unknown;
+        eActiveCommand := E_ScrewdriverCommand.None;
+        byRetryCount := 0;
+        bHadValidReply := FALSE;
+        ioScrewdriver.Runtime.bPcControlConfirmed := FALSE;
+    END_IF;
+END_IF;
+
+bPortWasOpened := bEnable AND fbSerialPort.Runtime.bPortOpened;
+
+IF bCanProcess THEN
+    // Reset优先级最高。只清理状态并放弃当前事务，不自动发送任何设备指令。
+    IF ioScrewdriver.Cmd.bReset THEN
+        bSerialAbortTransaction := TRUE;
+        bStopPending := FALSE;
+        byRetryCount := 0;
+        eActiveCommand := E_ScrewdriverCommand.None;
+        eDirection := E_ScrewdriverDirection.Unknown;
+        eInternalState := E_ScrewdriverState.Ready;
+        bHadValidReply := FALSE;
+
+        ioScrewdriver.Cmd.bReset := FALSE;
+        ioScrewdriver.Cmd.bPcControl := FALSE;
+        ioScrewdriver.Cmd.bTighten := FALSE;
+        ioScrewdriver.Cmd.bLoosen := FALSE;
+        ioScrewdriver.Cmd.bStop := FALSE;
+
+        ioScrewdriver.Runtime.bCommandError := FALSE;
+        ioScrewdriver.Runtime.bCommandConflict := FALSE;
+        ioScrewdriver.Runtime.bPcControlConfirmed := FALSE;
+        ioScrewdriver.Runtime.eError := E_ScrewdriverError.None;
+        ioScrewdriver.Runtime.byModbusExceptionCode := 0;
+        bFailureHandled := TRUE;
+
+    ELSE
+        // 串口事务进行期间到来的Stop必须排队，不能截断正在发送的Modbus帧。
+        IF ioScrewdriver.Cmd.bStop
+            AND ((eInternalState = E_ScrewdriverState.Sending)
+                 OR (eInternalState = E_ScrewdriverState.WaitingReply))
+            AND (eActiveCommand <> E_ScrewdriverCommand.TightenStop)
+            AND (eActiveCommand <> E_ScrewdriverCommand.LoosenStop) THEN
+            bStopPending := TRUE;
+            ioScrewdriver.Cmd.bTighten := FALSE;
+            ioScrewdriver.Cmd.bLoosen := FALSE;
+        END_IF;
+
+        // 公共串口层报告的发送、接收、超时和CRC错误统一按配置重试。
+        IF fbSerialPort.Runtime.bTransactionError
+            AND ((eInternalState = E_ScrewdriverState.Sending)
+                 OR (eInternalState = E_ScrewdriverState.WaitingReply)) THEN
+
+            IF byRetryCount < ioScrewdriver.Set.nMaxRetry THEN
+                byRetryCount := byRetryCount + 1;
+                bSerialAbortTransaction := TRUE;
+                uiExpectedLength := 0;
+                eInternalState := E_ScrewdriverState.Sending;
+            ELSE
+                bFailActive := TRUE;
+                bFailureCommunication := TRUE;
+                CASE fbSerialPort.Runtime.eError OF
+                    E_SerialError.SendError:
+                        eFailureError := E_ScrewdriverError.SendFailed;
+                    E_SerialError.ReplyTimeout:
+                        eFailureError := E_ScrewdriverError.ReplyTimeout;
+                    E_SerialError.CrcMismatch:
+                        eFailureError := E_ScrewdriverError.CrcError;
+                    E_SerialError.SerialBlockError:
+                        eFailureError := E_ScrewdriverError.ConnectionLost;
+                ELSE
+                    eFailureError := E_ScrewdriverError.ReplyMismatch;
+                END_CASE;
+            END_IF;
+        END_IF;
+
+        // 帧边界由螺丝刀协议层判断。功能码06正常回显8字节，异常回显5字节。
+        IF NOT bFailActive
+            AND (eInternalState = E_ScrewdriverState.WaitingReply)
+            AND fbSerialPort.Runtime.bNewData THEN
+            uiExpectedLength := fbProtocol.M_GetExpectedReplyLength(
+                aRxBuffer := fbSerialPort.aRxBuffer,
+                uiRxLength := fbSerialPort.Runtime.uiRxLength
+            );
+
+            IF (uiExpectedLength > 32)
+                OR ((uiExpectedLength <> 0)
+                    AND (fbSerialPort.Runtime.uiRxLength > uiExpectedLength)) THEN
+                bSerialAbortTransaction := TRUE;
+                bFailActive := TRUE;
+                bFailureCommunication := TRUE;
+                eFailureError := E_ScrewdriverError.ReplyMismatch;
+            ELSIF (uiExpectedLength <> 0)
+                AND (fbSerialPort.Runtime.uiRxLength = uiExpectedLength) THEN
+                bSerialFrameComplete := TRUE;
+            END_IF;
+        END_IF;
+
+        IF NOT bFailActive
+            AND (eInternalState = E_ScrewdriverState.Sending)
+            AND fbSerialPort.Runtime.bSendDone THEN
+            eInternalState := E_ScrewdriverState.WaitingReply;
+        END_IF;
+
+        IF NOT bFailActive
+            AND (eInternalState = E_ScrewdriverState.WaitingReply)
+            AND fbSerialPort.Runtime.bFrameReady THEN
+
+            eProtocolResult := fbProtocol.M_ParseReply(
+                byStationId := byLatchedStation,
+                aRxBuffer := fbSerialPort.aRxBuffer,
+                uiRxLength := fbSerialPort.Runtime.uiRxLength
+            );
+
+            CASE eProtocolResult OF
+                E_ScrewdriverProtocolResult.Acknowledged:
+                    bCommandSuccess := TRUE;
+
+                E_ScrewdriverProtocolResult.ModbusException:
+                    // 设备返回了合法异常帧，证明串口链路和从站均在线。
+                    bHadValidReply := TRUE;
+                    ioScrewdriver.Runtime.byModbusExceptionCode := fbProtocol.byExceptionCode;
+                    bFailActive := TRUE;
+                    bFailureCommunication := FALSE;
+                    eFailureError := E_ScrewdriverError.ModbusException;
+
+                E_ScrewdriverProtocolResult.CrcError:
+                    bFailActive := TRUE;
+                    bFailureCommunication := TRUE;
+                    eFailureError := E_ScrewdriverError.CrcError;
+
+            ELSE
+                bFailActive := TRUE;
+                bFailureCommunication := TRUE;
+                eFailureError := E_ScrewdriverError.ReplyMismatch;
+            END_CASE;
+        END_IF;
+
+        // 正常回显确认后才更新方向及PC控制状态。
+        IF bCommandSuccess THEN
+            bHadValidReply := TRUE;
+            ioScrewdriver.Runtime.bCommandDone := TRUE;
+            ioScrewdriver.Runtime.bCommandError := FALSE;
+            ioScrewdriver.Runtime.bCommandConflict := FALSE;
+            ioScrewdriver.Runtime.eError := E_ScrewdriverError.None;
+            ioScrewdriver.Runtime.byModbusExceptionCode := 0;
+            ioScrewdriver.Runtime.eLastCommand := eActiveCommand;
+
+            CASE eActiveCommand OF
+                E_ScrewdriverCommand.PcControl:
+                    ioScrewdriver.Cmd.bPcControl := FALSE;
+                    ioScrewdriver.Runtime.bPcControlConfirmed := TRUE;
+
+                E_ScrewdriverCommand.TightenStart:
+                    ioScrewdriver.Cmd.bTighten := FALSE;
+                    eDirection := E_ScrewdriverDirection.Tightening;
+
+                E_ScrewdriverCommand.LoosenStart:
+                    ioScrewdriver.Cmd.bLoosen := FALSE;
+                    eDirection := E_ScrewdriverDirection.Loosening;
+
+                E_ScrewdriverCommand.TightenStop,
+                E_ScrewdriverCommand.LoosenStop:
+                    ioScrewdriver.Cmd.bStop := FALSE;
+                    ioScrewdriver.Cmd.bTighten := FALSE;
+                    ioScrewdriver.Cmd.bLoosen := FALSE;
+                    eDirection := E_ScrewdriverDirection.None;
+                    bStopPending := FALSE;
+            END_CASE;
+
+            eActiveCommand := E_ScrewdriverCommand.None;
+            byRetryCount := 0;
+
+            CASE eDirection OF
+                E_ScrewdriverDirection.Tightening:
+                    eInternalState := E_ScrewdriverState.RunningTighten;
+                E_ScrewdriverDirection.Loosening:
+                    eInternalState := E_ScrewdriverState.RunningLoosen;
+            ELSE
+                eInternalState := E_ScrewdriverState.Ready;
+            END_CASE;
+        END_IF;
+
+        // 失败出口统一清除本次请求。通信结果不等同于工艺完成。
+        IF bFailActive THEN
+            ioScrewdriver.Runtime.eLastCommand := eActiveCommand;
+            ioScrewdriver.Runtime.bCommandError := TRUE;
+            ioScrewdriver.Runtime.eError := eFailureError;
+
+            CASE eActiveCommand OF
+                E_ScrewdriverCommand.PcControl:
+                    ioScrewdriver.Cmd.bPcControl := FALSE;
+                E_ScrewdriverCommand.TightenStart:
+                    ioScrewdriver.Cmd.bTighten := FALSE;
+                E_ScrewdriverCommand.LoosenStart:
+                    ioScrewdriver.Cmd.bLoosen := FALSE;
+                E_ScrewdriverCommand.TightenStop,
+                E_ScrewdriverCommand.LoosenStop:
+                    ioScrewdriver.Cmd.bStop := FALSE;
+            END_CASE;
+
+            IF bFailureCommunication THEN
+                eDirection := E_ScrewdriverDirection.Unknown;
+                ioScrewdriver.Runtime.bPcControlConfirmed := FALSE;
+                bHadValidReply := FALSE;
+                bStopPending := FALSE;
+                ioScrewdriver.Cmd.bStop := FALSE;
+                eInternalState := E_ScrewdriverState.Fault;
+            ELSE
+                CASE eDirection OF
+                    E_ScrewdriverDirection.Tightening:
+                        eInternalState := E_ScrewdriverState.RunningTighten;
+                    E_ScrewdriverDirection.Loosening:
+                        eInternalState := E_ScrewdriverState.RunningLoosen;
+                ELSE
+                    eInternalState := E_ScrewdriverState.Ready;
+                END_CASE;
+            END_IF;
+
+            eActiveCommand := E_ScrewdriverCommand.None;
+            byRetryCount := 0;
+            bFailureHandled := TRUE;
+        END_IF;
+
+        // =========================================================
+        // 空闲/运行状态下选择新命令：Stop > PC控制 > 拧紧/拧松。
+        // =========================================================
+        IF NOT bFailureHandled
+            AND ((eInternalState = E_ScrewdriverState.Ready)
+                 OR (eInternalState = E_ScrewdriverState.RunningTighten)
+                 OR (eInternalState = E_ScrewdriverState.RunningLoosen)) THEN
+
+            // 对所有需要发帧的命令先验证站号；执行中使用锁存值。
+            IF (ioScrewdriver.Cmd.bStop
+                OR ioScrewdriver.Cmd.bPcControl
+                OR ioScrewdriver.Cmd.bTighten
+                OR ioScrewdriver.Cmd.bLoosen
+                OR bStopPending)
+                AND ((ioScrewdriver.Set.byStationId < 1)
+                     OR (ioScrewdriver.Set.byStationId > 247)) THEN
+
+                ioScrewdriver.Cmd.bStop := FALSE;
+                ioScrewdriver.Cmd.bPcControl := FALSE;
+                ioScrewdriver.Cmd.bTighten := FALSE;
+                ioScrewdriver.Cmd.bLoosen := FALSE;
+                bStopPending := FALSE;
+                ioScrewdriver.Runtime.bCommandError := TRUE;
+                ioScrewdriver.Runtime.eError := E_ScrewdriverError.InvalidStationId;
+                bFailureHandled := TRUE;
+
+            ELSIF ioScrewdriver.Cmd.bStop OR bStopPending THEN
+                // Stop与启动同时出现时只处理Stop，并清除启动请求。
+                ioScrewdriver.Cmd.bTighten := FALSE;
+                ioScrewdriver.Cmd.bLoosen := FALSE;
+
+                CASE eDirection OF
+                    E_ScrewdriverDirection.Tightening:
+                        eActiveCommand := E_ScrewdriverCommand.TightenStop;
+                        bStartNewCommand := TRUE;
+                    E_ScrewdriverDirection.Loosening:
+                        eActiveCommand := E_ScrewdriverCommand.LoosenStop;
+                        bStartNewCommand := TRUE;
+                    E_ScrewdriverDirection.None:
+                        ioScrewdriver.Cmd.bStop := FALSE;
+                        bStopPending := FALSE;
+                        ioScrewdriver.Runtime.bCommandError := TRUE;
+                        ioScrewdriver.Runtime.eError := E_ScrewdriverError.NoActiveMotion;
+                    E_ScrewdriverDirection.Unknown:
+                        ioScrewdriver.Cmd.bStop := FALSE;
+                        bStopPending := FALSE;
+                        ioScrewdriver.Runtime.bCommandError := TRUE;
+                        ioScrewdriver.Runtime.eError := E_ScrewdriverError.DirectionUnknown;
+                END_CASE;
+
+            ELSIF ioScrewdriver.Cmd.bPcControl THEN
+                IF (eDirection = E_ScrewdriverDirection.Tightening)
+                    OR (eDirection = E_ScrewdriverDirection.Loosening) THEN
+                    ioScrewdriver.Cmd.bPcControl := FALSE;
+                    ioScrewdriver.Runtime.bCommandError := TRUE;
+                    ioScrewdriver.Runtime.eError := E_ScrewdriverError.DirectionConflict;
+                ELSE
+                    eActiveCommand := E_ScrewdriverCommand.PcControl;
+                    bStartNewCommand := TRUE;
+                END_IF;
+
+            ELSIF ioScrewdriver.Cmd.bTighten AND ioScrewdriver.Cmd.bLoosen THEN
+                ioScrewdriver.Cmd.bTighten := FALSE;
+                ioScrewdriver.Cmd.bLoosen := FALSE;
+                ioScrewdriver.Runtime.bCommandError := TRUE;
+                ioScrewdriver.Runtime.bCommandConflict := TRUE;
+                ioScrewdriver.Runtime.eError := E_ScrewdriverError.CommandConflict;
+
+            ELSIF ioScrewdriver.Cmd.bTighten THEN
+                IF ioScrewdriver.Set.bRequirePcControl
+                    AND NOT ioScrewdriver.Runtime.bPcControlConfirmed THEN
+                    ioScrewdriver.Cmd.bTighten := FALSE;
+                    ioScrewdriver.Runtime.bCommandError := TRUE;
+                    ioScrewdriver.Runtime.eError := E_ScrewdriverError.PcControlRequired;
+                ELSIF eDirection = E_ScrewdriverDirection.Loosening THEN
+                    ioScrewdriver.Cmd.bTighten := FALSE;
+                    ioScrewdriver.Runtime.bCommandError := TRUE;
+                    ioScrewdriver.Runtime.eError := E_ScrewdriverError.DirectionConflict;
+                ELSIF eDirection = E_ScrewdriverDirection.Tightening THEN
+                    ioScrewdriver.Cmd.bTighten := FALSE;
+                    ioScrewdriver.Runtime.bCommandError := TRUE;
+                    ioScrewdriver.Runtime.eError := E_ScrewdriverError.AlreadyRunning;
+                ELSE
+                    eActiveCommand := E_ScrewdriverCommand.TightenStart;
+                    bStartNewCommand := TRUE;
+                END_IF;
+
+            ELSIF ioScrewdriver.Cmd.bLoosen THEN
+                IF ioScrewdriver.Set.bRequirePcControl
+                    AND NOT ioScrewdriver.Runtime.bPcControlConfirmed THEN
+                    ioScrewdriver.Cmd.bLoosen := FALSE;
+                    ioScrewdriver.Runtime.bCommandError := TRUE;
+                    ioScrewdriver.Runtime.eError := E_ScrewdriverError.PcControlRequired;
+                ELSIF eDirection = E_ScrewdriverDirection.Tightening THEN
+                    ioScrewdriver.Cmd.bLoosen := FALSE;
+                    ioScrewdriver.Runtime.bCommandError := TRUE;
+                    ioScrewdriver.Runtime.eError := E_ScrewdriverError.DirectionConflict;
+                ELSIF eDirection = E_ScrewdriverDirection.Loosening THEN
+                    ioScrewdriver.Cmd.bLoosen := FALSE;
+                    ioScrewdriver.Runtime.bCommandError := TRUE;
+                    ioScrewdriver.Runtime.eError := E_ScrewdriverError.AlreadyRunning;
+                ELSE
+                    eActiveCommand := E_ScrewdriverCommand.LoosenStart;
+                    bStartNewCommand := TRUE;
+                END_IF;
+            END_IF;
+        END_IF;
+
+        IF bStartNewCommand THEN
+            byLatchedStation := ioScrewdriver.Set.byStationId;
+            bBuildOk := fbProtocol.M_BuildCommand(
+                byStationId := byLatchedStation,
+                eCommand := eActiveCommand
+            );
+
+            IF bBuildOk THEN
+                byRetryCount := 0;
+                uiExpectedLength := 0;
+                ioScrewdriver.Runtime.byActiveStationId := byLatchedStation;
+                ioScrewdriver.Runtime.bCommandError := FALSE;
+                ioScrewdriver.Runtime.bCommandConflict := FALSE;
+                ioScrewdriver.Runtime.eError := E_ScrewdriverError.None;
+                ioScrewdriver.Runtime.byModbusExceptionCode := 0;
+
+                FOR nIndex := 0 TO 31 DO
+                    ioScrewdriver.Runtime.aLastTxBuffer[nIndex] := fbProtocol.aTxBuffer[nIndex];
+                END_FOR;
+                ioScrewdriver.Runtime.nTxLength := fbProtocol.uiTxLength;
+                eInternalState := E_ScrewdriverState.Sending;
+            ELSE
+                ioScrewdriver.Runtime.bCommandError := TRUE;
+                ioScrewdriver.Runtime.eError := E_ScrewdriverError.InvalidStationId;
+                eActiveCommand := E_ScrewdriverCommand.None;
+            END_IF;
+        END_IF;
+    END_IF;
+END_IF;
+
+// =============================================================
+// 连续状态发布。bCommandDone是回显确认脉冲，不是拧紧工艺完成信号。
+// =============================================================
+ioScrewdriver.Runtime.bBusy :=
+    (eInternalState = E_ScrewdriverState.Sending)
+    OR (eInternalState = E_ScrewdriverState.WaitingReply);
+ioScrewdriver.Runtime.bReady :=
+    bCanProcess
+    AND NOT ioScrewdriver.Runtime.bBusy
+    AND (eInternalState <> E_ScrewdriverState.Fault);
+ioScrewdriver.Runtime.bOnline :=
+    bHadValidReply AND fbSerialPort.Runtime.bPortOpened;
+ioScrewdriver.Runtime.bRunning :=
+    (eDirection = E_ScrewdriverDirection.Tightening)
+    OR (eDirection = E_ScrewdriverDirection.Loosening);
+ioScrewdriver.Runtime.eDirection := eDirection;
+ioScrewdriver.Runtime.eActiveCommand := eActiveCommand;
+ioScrewdriver.Runtime.byRetryCount := byRetryCount;
+
+IF ioScrewdriver.Runtime.bBusy
+    AND ((eActiveCommand = E_ScrewdriverCommand.TightenStop)
+         OR (eActiveCommand = E_ScrewdriverCommand.LoosenStop)) THEN
+    ioScrewdriver.Runtime.eState := E_ScrewdriverState.Stopping;
+ELSE
+    ioScrewdriver.Runtime.eState := eInternalState;
+END_IF;]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

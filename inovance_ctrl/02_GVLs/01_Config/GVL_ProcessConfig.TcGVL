@@ -4,8 +4,8 @@
     <Declaration><![CDATA[{attribute 'qualified_only'}
 VAR_GLOBAL CONSTANT
     stClamping : ST_ClampingProcessConfig := (stTorque := (fTargetTorquePercent := -10.0, fMaxAbsTorquePercent := 20.0, fTorqueRampPercentPerSecond := 10.0, fVelocityLimitHigh := 2.0, fVelocityLimitLow := -2.0, fReachedMinAbsTorquePercent := 8.0, tReachedStableTime := T#300MS, tTorqueBuildTimeout := T#3S, tModeSwitchTimeout := T#2S));
-    stVision : ST_VisionProcessConfig := (tDetectionDelay := T#2S, fAngleCorrection := 60.0);
-    stQrScan : ST_QrScanProcessConfig := (fRelativeAngle := 360.0);
+    stVision : ST_VisionProcessConfig := (tDetectionDelay := T#2S, fCameraAngle := 60.0);
+    stQrScan : ST_QrScanProcessConfig := (fOffsetAngle := 360.0);
     stGripper : ST_GripperProcessConfig := (tAcceptTimeout := T#3S, tResultTimeout := T#8S);
     stAdjustment : ST_AdjustmentProcessConfig := (tSimulation := T#3S);
     stScrewdriver : ST_ScrewdriverProcessConfig := (tPreTightenSimulation := T#2S, tFinalTightenSimulation := T#2S);

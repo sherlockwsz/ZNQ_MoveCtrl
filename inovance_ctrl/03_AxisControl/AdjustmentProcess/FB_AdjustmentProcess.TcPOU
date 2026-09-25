@@ -1,0 +1,406 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <POU Name="FB_AdjustmentProcess" Id="{6be3f419-7e42-4f1c-ad50-7db14f957959}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_AdjustmentProcess
+VAR_INPUT
+    bEnable          : BOOL;
+    bAbort           : BOOL;
+    bStopRequest     : BOOL;
+    bMachinePrepared : BOOL;
+    bStartRequest    : BOOL; // 协调器请求调整机构进入工作流程
+    bRetractPermit   : BOOL; // 协调器允许调整机构撤离
+    bDoneAck         : BOOL;
+END_VAR
+
+VAR_IN_OUT
+    ioAdjustGripperAction : FB_GripperAction;
+    ioAdjustGripper       : ST_GripperInterface;
+    stAxisX               : ST_AxisInterface;
+    stAxisY               : ST_AxisInterface;
+    stAxisZ               : ST_AxisInterface;
+END_VAR
+
+VAR_OUTPUT
+    bAdjustmentReady   : BOOL;
+    bAdjustmentDone    : BOOL;
+    bAdjustmentBusy    : BOOL;
+    bError             : BOOL;
+    bGripperError      : BOOL;
+    uiErrorAxis        : UINT;
+    udErrorCode        : UDINT;
+    eStep              : E_AdjustmentStep := E_AdjustmentStep.Idle;
+    bAdjustGripperActionExecute : BOOL;
+    eAdjustGripperActionCommand : E_GripperCommand := E_GripperCommand.None;
+END_VAR
+
+VAR
+    fXWork : LREAL;
+    fYWork : LREAL;
+    fZWork : LREAL;
+    fXStandby : LREAL;
+    fYStandby : LREAL;
+    fZSafe : LREAL;
+    fXVelocity : LREAL;
+    fYVelocity : LREAL;
+    fZVelocity : LREAL;
+    fPositionTolerance : LREAL;
+    tMoveTimeout : TIME;
+
+    fbAdjustment  : TON;
+    fbMoveTimeout : TON;
+    bTimerRestart : BOOL;
+    eTimedStep    : E_AdjustmentStep := E_AdjustmentStep.Idle;
+    bTimedMovement : BOOL;
+    uiMovingAxis   : UINT;
+
+    bXIssued : BOOL;
+    bYIssued : BOOL;
+    bZIssued : BOOL;
+    bXDone : BOOL;
+    bYDone : BOOL;
+    bZDone : BOOL;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// 沿用现有PositionConfig、MotionConfig、ProcessConfig参数源。
+fXWork := GVL_PositionConfig.stAdjustment.stWork.X;
+fYWork := GVL_PositionConfig.stAdjustment.stWork.Y;
+fZWork := GVL_PositionConfig.stAdjustment.stWork.Z;
+fXStandby := GVL_PositionConfig.stAdjustment.stReady.X;
+fYStandby := GVL_PositionConfig.stAdjustment.stReady.Y;
+fZSafe := GVL_PositionConfig.stAdjustment.stReady.Z;
+fXVelocity := GVL_MotionConfig.stAdjustment.stX.fVelocity;
+fYVelocity := GVL_MotionConfig.stAdjustment.stY.fVelocity;
+fZVelocity := GVL_MotionConfig.stAdjustment.stZ.fVelocity;
+fPositionTolerance := GVL_MotionConfig.stAdjustment.fPositionTolerance;
+tMoveTimeout := GVL_MotionConfig.stAdjustment.tMoveTimeout;
+
+fbAdjustment(
+    IN := bEnable
+          AND NOT bAbort
+          AND (eStep = E_AdjustmentStep.WaitAdjustment),
+    PT := GVL_ProcessConfig.stAdjustment.tSimulation
+);
+
+bTimerRestart := (eStep <> eTimedStep);
+eTimedStep := eStep;
+bTimedMovement :=
+    (eStep = E_AdjustmentStep.MoveXYToWork)
+    OR (eStep = E_AdjustmentStep.LowerZToWork)
+    OR (eStep = E_AdjustmentStep.LiftZToSafe)
+    OR (eStep = E_AdjustmentStep.ReturnXYToStandby);
+
+IF bTimedMovement THEN
+    CASE eStep OF
+        E_AdjustmentStep.LowerZToWork,
+        E_AdjustmentStep.LiftZToSafe:
+            uiMovingAxis := GVL_AxisIndex.AdjustmentZ;
+
+        E_AdjustmentStep.MoveXYToWork,
+        E_AdjustmentStep.ReturnXYToStandby:
+            IF NOT bXDone THEN
+                uiMovingAxis := GVL_AxisIndex.AdjustmentX;
+            ELSE
+                uiMovingAxis := GVL_AxisIndex.AdjustmentY;
+            END_IF;
+    END_CASE;
+END_IF;
+
+fbMoveTimeout(
+    IN := bEnable
+          AND NOT bAbort
+          AND bTimedMovement
+          AND NOT bTimerRestart,
+    PT := tMoveTimeout
+);
+
+stAxisX.AutoCmd.bMoveAbs := FALSE;
+stAxisY.AutoCmd.bMoveAbs := FALSE;
+stAxisZ.AutoCmd.bMoveAbs := FALSE;
+bAdjustGripperActionExecute := FALSE;
+eAdjustGripperActionCommand := E_GripperCommand.None;
+
+IF NOT bEnable OR bAbort THEN
+    // 与原协调器行为一致：准备完成后即使自动流程停止，仍调用唯一
+    // Action实例，以便撤销Execute或传递Cancel；准备前命令权仍归Preparation。
+    IF bMachinePrepared THEN
+        ioAdjustGripperAction(
+            bExecute := FALSE,
+            eCommand := E_GripperCommand.None,
+            bCancel := bStopRequest OR bAbort,
+            tAcceptTimeout := GVL_ProcessConfig.stGripper.tAcceptTimeout,
+            tResultTimeout := GVL_ProcessConfig.stGripper.tResultTimeout,
+            ioGripper := ioAdjustGripper
+        );
+    END_IF;
+
+    bAdjustmentReady := FALSE;
+    bAdjustmentDone := FALSE;
+    bAdjustmentBusy := FALSE;
+    bError := FALSE;
+    bGripperError := FALSE;
+    uiErrorAxis := 0;
+    udErrorCode := TO_UDINT(E_ScrewdriverErrorCode.None);
+    bXIssued := FALSE;
+    bYIssued := FALSE;
+    bZIssued := FALSE;
+    bXDone := FALSE;
+    bYDone := FALSE;
+    bZDone := FALSE;
+    eStep := E_AdjustmentStep.Idle;
+    RETURN;
+END_IF;
+
+// 收到预拧紧完成握手的同一扫描进入XY工作位状态。
+IF (eStep = E_AdjustmentStep.Idle) AND bStartRequest THEN
+    bXIssued := FALSE;
+    bYIssued := FALSE;
+    bXDone := FALSE;
+    bYDone := FALSE;
+    eStep := E_AdjustmentStep.MoveXYToWork;
+END_IF;
+
+// 二次拧紧完成后的首扫描进入退出状态。
+IF (eStep = E_AdjustmentStep.WaitAdjustment)
+    AND bAdjustmentReady
+    AND bRetractPermit
+THEN
+    eStep := E_AdjustmentStep.CloseGripper;
+END_IF;
+
+// 准备阶段结束后，COM4命令权归本FB；唯一Action实例不重复调用。
+IF bMachinePrepared THEN
+    IF eStep = E_AdjustmentStep.OpenGripper THEN
+        bAdjustGripperActionExecute := TRUE;
+        eAdjustGripperActionCommand := E_GripperCommand.Open;
+    ELSIF eStep = E_AdjustmentStep.CloseGripper THEN
+        bAdjustGripperActionExecute := TRUE;
+        eAdjustGripperActionCommand := E_GripperCommand.Close;
+    END_IF;
+
+    ioAdjustGripperAction(
+        bExecute := bAdjustGripperActionExecute,
+        eCommand := eAdjustGripperActionCommand,
+        bCancel := bStopRequest OR bAbort,
+        tAcceptTimeout := GVL_ProcessConfig.stGripper.tAcceptTimeout,
+        tResultTimeout := GVL_ProcessConfig.stGripper.tResultTimeout,
+        ioGripper := ioAdjustGripper
+    );
+END_IF;
+
+IF stAxisX.Alarm.bError
+    OR stAxisY.Alarm.bError
+    OR stAxisZ.Alarm.bError
+THEN
+    bError := TRUE;
+    bGripperError := FALSE;
+    eStep := E_AdjustmentStep.Error;
+
+    IF stAxisX.Alarm.bError THEN
+        uiErrorAxis := GVL_AxisIndex.AdjustmentX;
+        udErrorCode := stAxisX.Alarm.nErrorID;
+    ELSIF stAxisY.Alarm.bError THEN
+        uiErrorAxis := GVL_AxisIndex.AdjustmentY;
+        udErrorCode := stAxisY.Alarm.nErrorID;
+    ELSE
+        uiErrorAxis := GVL_AxisIndex.AdjustmentZ;
+        udErrorCode := stAxisZ.Alarm.nErrorID;
+    END_IF;
+END_IF;
+
+IF ioAdjustGripperAction.bError
+    AND ((eStep = E_AdjustmentStep.OpenGripper)
+         OR (eStep = E_AdjustmentStep.CloseGripper))
+THEN
+    bError := TRUE;
+    bGripperError := TRUE;
+    uiErrorAxis := 0;
+    IF ioAdjustGripperAction.udErrorCode <> 0 THEN
+        udErrorCode := ioAdjustGripperAction.udErrorCode;
+    ELSE
+        udErrorCode := TO_UDINT(E_ScrewdriverErrorCode.AdjustmentGripperFailed);
+    END_IF;
+    eStep := E_AdjustmentStep.Error;
+END_IF;
+
+IF fbMoveTimeout.Q AND NOT bError THEN
+    bError := TRUE;
+    bGripperError := FALSE;
+    uiErrorAxis := uiMovingAxis;
+    udErrorCode := TO_UDINT(E_ScrewdriverErrorCode.PositionTimeout);
+    eStep := E_AdjustmentStep.Error;
+END_IF;
+
+CASE eStep OF
+    E_AdjustmentStep.Idle:
+        bAdjustmentDone := FALSE;
+        bAdjustmentReady := FALSE;
+
+    E_AdjustmentStep.MoveXYToWork:
+        IF NOT bXDone THEN
+            bXDone := M_MoveAxisAbsolute(fTarget := fXWork, fVelocity := fXVelocity,
+                uiAxis := GVL_AxisIndex.AdjustmentX, ioIssued := bXIssued, ioAxis := stAxisX);
+        END_IF;
+
+        IF NOT bYDone THEN
+            bYDone := M_MoveAxisAbsolute(fTarget := fYWork, fVelocity := fYVelocity,
+                uiAxis := GVL_AxisIndex.AdjustmentY, ioIssued := bYIssued, ioAxis := stAxisY);
+        END_IF;
+
+        IF bXDone AND bYDone THEN
+            bZIssued := FALSE;
+            bZDone := FALSE;
+            eStep := E_AdjustmentStep.LowerZToWork;
+        END_IF;
+
+    E_AdjustmentStep.LowerZToWork:
+        bZDone := M_MoveAxisAbsolute(fTarget := fZWork, fVelocity := fZVelocity,
+            uiAxis := GVL_AxisIndex.AdjustmentZ, ioIssued := bZIssued, ioAxis := stAxisZ);
+
+        IF bZDone THEN
+            eStep := E_AdjustmentStep.OpenGripper;
+        END_IF;
+
+    E_AdjustmentStep.OpenGripper:
+        IF ioAdjustGripperAction.bDone THEN
+            eStep := E_AdjustmentStep.WaitAdjustment;
+        END_IF;
+
+    E_AdjustmentStep.WaitAdjustment:
+        IF fbAdjustment.Q THEN
+            // COM4保持Open；只发布二次拧紧许可，不提前Close。
+            bAdjustmentReady := TRUE;
+        END_IF;
+
+    E_AdjustmentStep.CloseGripper:
+        // AdjustmentZ仅等待COM4 Close完成，不依赖外部机构到位。
+        IF ioAdjustGripperAction.bDone THEN
+            bZIssued := FALSE;
+            bZDone := FALSE;
+            eStep := E_AdjustmentStep.LiftZToSafe;
+        END_IF;
+
+    E_AdjustmentStep.LiftZToSafe:
+        bZDone := M_MoveAxisAbsolute(fTarget := fZSafe, fVelocity := fZVelocity,
+            uiAxis := GVL_AxisIndex.AdjustmentZ, ioIssued := bZIssued, ioAxis := stAxisZ);
+
+        IF bZDone THEN
+            bXIssued := FALSE;
+            bYIssued := FALSE;
+            bXDone := FALSE;
+            bYDone := FALSE;
+            eStep := E_AdjustmentStep.ReturnXYToStandby;
+        END_IF;
+
+    E_AdjustmentStep.ReturnXYToStandby:
+        IF NOT bXDone THEN
+            bXDone := M_MoveAxisAbsolute(fTarget := fXStandby, fVelocity := fXVelocity,
+                uiAxis := GVL_AxisIndex.AdjustmentX, ioIssued := bXIssued, ioAxis := stAxisX);
+        END_IF;
+
+        IF NOT bYDone THEN
+            bYDone := M_MoveAxisAbsolute(fTarget := fYStandby, fVelocity := fYVelocity,
+                uiAxis := GVL_AxisIndex.AdjustmentY, ioIssued := bYIssued, ioAxis := stAxisY);
+        END_IF;
+
+        IF bXDone AND bYDone THEN
+            bAdjustmentDone := TRUE;
+            eStep := E_AdjustmentStep.WaitDoneAck;
+        END_IF;
+
+    E_AdjustmentStep.WaitDoneAck:
+        bAdjustmentDone := TRUE;
+        IF bDoneAck THEN
+            bAdjustmentDone := FALSE;
+            bAdjustmentReady := FALSE;
+            bXIssued := FALSE;
+            bYIssued := FALSE;
+            bZIssued := FALSE;
+            bXDone := FALSE;
+            bYDone := FALSE;
+            bZDone := FALSE;
+            eStep := E_AdjustmentStep.Idle;
+        END_IF;
+
+    E_AdjustmentStep.Error:
+        bAdjustmentDone := FALSE;
+        bError := TRUE;
+END_CASE;
+
+// 发布与当前最终状态一致的兼容诊断值。
+IF eStep = E_AdjustmentStep.OpenGripper THEN
+    bAdjustGripperActionExecute := TRUE;
+    eAdjustGripperActionCommand := E_GripperCommand.Open;
+ELSIF eStep = E_AdjustmentStep.CloseGripper THEN
+    bAdjustGripperActionExecute := TRUE;
+    eAdjustGripperActionCommand := E_GripperCommand.Close;
+ELSE
+    bAdjustGripperActionExecute := FALSE;
+    eAdjustGripperActionCommand := E_GripperCommand.None;
+END_IF;
+
+bAdjustmentBusy :=
+    (eStep <> E_AdjustmentStep.Idle)
+    AND (eStep <> E_AdjustmentStep.Error);]]></ST>
+    </Implementation>
+    <Method Name="M_MoveAxisAbsolute" Id="{d92a53a5-1112-4138-b128-19cd21bfd66f}">
+      <Declaration>METHOD PRIVATE M_MoveAxisAbsolute : BOOL
+VAR_INPUT
+    fTarget   : LREAL;
+    fVelocity : LREAL;
+    uiAxis    : UINT;
+END_VAR
+VAR_IN_OUT
+    ioIssued : BOOL;
+    ioAxis   : ST_AxisInterface;
+END_VAR</Declaration>
+      <Implementation>
+        <ST><![CDATA[M_MoveAxisAbsolute := FALSE;
+
+IF ioAxis.Alarm.bError THEN
+    ioIssued := FALSE;
+    RETURN;
+END_IF;
+
+IF ioAxis.State.bReady
+    AND NOT ioAxis.State.bBusy
+    AND NOT ioAxis.State.bActive
+    AND (ABS(ioAxis.Data.fActPosition - fTarget) <= fPositionTolerance)
+THEN
+    ioIssued := FALSE;
+    M_MoveAxisAbsolute := TRUE;
+    RETURN;
+END_IF;
+
+IF NOT ioIssued THEN
+    IF NOT ioAxis.State.bReady OR ioAxis.State.bBusy OR ioAxis.State.bActive THEN
+        RETURN;
+    END_IF;
+
+    ioAxis.AutoSet.Position.fAbsolutePosition := fTarget;
+    ioAxis.AutoSet.Position.fVelocity := fVelocity;
+    ioAxis.AutoCmd.bMoveAbs := TRUE;
+    ioIssued := TRUE;
+    RETURN;
+END_IF;
+
+IF ioAxis.State.bCmdRejected OR ioAxis.State.bCommandAborted THEN
+    bError := TRUE;
+    bGripperError := FALSE;
+    uiErrorAxis := uiAxis;
+    udErrorCode := TO_UDINT(E_ScrewdriverErrorCode.AdjustmentCommandFailed);
+    ioIssued := FALSE;
+    eStep := E_AdjustmentStep.Error;
+    RETURN;
+END_IF;
+
+IF ioAxis.State.bReady
+    AND NOT ioAxis.State.bBusy
+    AND (ABS(ioAxis.Data.fActPosition - fTarget) <= fPositionTolerance)
+THEN
+    ioIssued := FALSE;
+    M_MoveAxisAbsolute := TRUE;
+END_IF;]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

@@ -3294,7 +3294,7 @@ External Setpoint Generation:
 		</Motion>
 		<Plc>
 			<Project GUID="{EA67B656-2FC5-4A9C-A62D-78AA627F7844}" Name="inovance_ctrl" PrjFilePath="inovance_ctrl\inovance_ctrl.plcproj" TmcFilePath="inovance_ctrl\inovance_ctrl.tmc" ReloadTmc="true" AmsPort="851" FileArchiveSettings="#x000e" SymbolicMapping="true">
-				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcHash="{CBB343D7-F953-A51F-21AC-0AE8488F5AB9}" TmcPath="inovance_ctrl\inovance_ctrl.tmc">
+				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcHash="{DF3A7510-71F7-6C01-31EC-DF86E7F70757}" TmcPath="inovance_ctrl\inovance_ctrl.tmc">
 					<Name>inovance_ctrl Instance</Name>
 					<CLSID ClassFactory="TcPlc30">{08500001-0000-0000-F000-000000000064}</CLSID>
 					<Vars VarGrpType="2" AreaNo="1">
@@ -3399,10 +3399,6 @@ External Setpoint Generation:
 							<Type>UINT</Type>
 						</Var>
 						<Var>
-							<Name>GVL_ClampingPdo.udiDigitalInputs</Name>
-							<Type>UDINT</Type>
-						</Var>
-						<Var>
 							<Name>GVL_AxisRef.AxisRefs[1].NcToPlc</Name>
 							<Type GUID="{25521FAA-EA5F-4C7F-8864-BBCCDACD2E98}" Namespace="MC">NCTOPLC_AXIS_REF</Type>
 						</Var>
@@ -3457,6 +3453,10 @@ External Setpoint Generation:
 						<Var>
 							<Name>GVL_AxisRef.AxisRefs[14].NcToPlc</Name>
 							<Type GUID="{25521FAA-EA5F-4C7F-8864-BBCCDACD2E98}" Namespace="MC">NCTOPLC_AXIS_REF</Type>
+						</Var>
+						<Var>
+							<Name>GVL_ClampingPdo.udiDigitalInputs</Name>
+							<Type>UDINT</Type>
 						</Var>
 					</Vars>
 					<Contexts>

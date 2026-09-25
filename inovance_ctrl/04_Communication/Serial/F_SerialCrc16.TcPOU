@@ -1,22 +1,21 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
-  <POU Name="F_GripperModbusCrc16" Id="{f94c6002-0174-4b02-835f-07eb1c4dd21b}" SpecialFunc="None">
-    <Declaration><![CDATA[FUNCTION F_GripperModbusCrc16 : WORD
+  <POU Name="F_SerialCrc16" Id="{8D8FD1C5-6CC1-4111-B330-5478FCD6DAC6}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION F_SerialCrc16 : WORD
 VAR_INPUT
-	pData   : POINTER TO BYTE; // 待计算报文首地址
-    nLength : UINT;            // 参与CRC计算的字节数，不含末尾CRC
+    pData   : POINTER TO BYTE;
+    nLength : UINT;
 END_VAR
 VAR
-	nByte : UINT;
+    nByte : UINT;
     nBit  : INT;
     wCrc  : WORD := 16#FFFF;
-END_VAR
-]]></Declaration>
+END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[wCrc := 16#FFFF;
 
 IF (pData = 0) OR (nLength = 0) THEN
-    F_GripperModbusCrc16 := wCrc;
+    F_SerialCrc16 := wCrc;
     RETURN;
 END_IF;
 
@@ -32,7 +31,7 @@ FOR nByte := 0 TO nLength - 1 DO
     END_FOR;
 END_FOR;
 
-F_GripperModbusCrc16 := wCrc;]]></ST>
+F_SerialCrc16 := wCrc;]]></ST>
     </Implementation>
   </POU>
 </TcPlcObject>

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_SerialError" Id="{BC59AFA5-0AC9-4E88-9A7C-5F6CF987A75F}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+TYPE E_SerialError :
+(
+    None             := 0,
+    InvalidConfig    := 1,
+    SerialBlockError := 2,
+    SendError        := 3,
+    ReceiveError     := 4,
+    BufferOverflow   := 5,
+    ReplyTimeout     := 6,
+    CrcMismatch      := 7
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

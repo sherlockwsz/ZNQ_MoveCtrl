@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <POU Name="FB_GripperProtocol" Id="{D0967BCD-7635-4BE5-8865-6325B2A52431}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_GripperProtocol
+VAR_OUTPUT
+    aTxBuffer        : ARRAY[0..31] OF BYTE;
+    uiTxLength       : UINT;
+    byExceptionCode  : BYTE;
+    diPosition       : DINT;
+    iCurrent         : INT;
+    udFaultCode      : UDINT;
+END_VAR
+VAR
+    wCrc       : WORD;
+    dwValue    : DWORD;
+    wCurrentRaw : WORD;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// 报文构造和解析均由方法显式触发；FB本体不执行设备动作。]]></ST>
+    </Implementation>
+    <Method Name="M_BuildCommand" Id="{44AD9F9B-A2D8-4D7B-9828-C5D2E87FE896}">
+      <Declaration><![CDATA[METHOD PUBLIC M_BuildCommand : BOOL
+VAR_INPUT
+    nStationId : BYTE;
+    eCommand   : E_GripperCommand;
+    diTarget   : DINT;
+END_VAR
+VAR
+    dwTarget : DWORD;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_BuildCommand := TRUE;
+aTxBuffer[0] := nStationId;
+
+CASE eCommand OF
+    E_GripperCommand.Open,
+    E_GripperCommand.Close:
+        // 10 6101 0002 04 + 32位有符号目标位置
+        aTxBuffer[1] := 16#10;
+        aTxBuffer[2] := 16#61;
+        aTxBuffer[3] := 16#01;
+        aTxBuffer[4] := 16#00;
+        aTxBuffer[5] := 16#02;
+        aTxBuffer[6] := 16#04;
+        dwTarget := DINT_TO_DWORD(diTarget);
+        aTxBuffer[7]  := DWORD_TO_BYTE(SHR(dwTarget, 24));
+        aTxBuffer[8]  := DWORD_TO_BYTE(SHR(dwTarget, 16));
+        aTxBuffer[9]  := DWORD_TO_BYTE(SHR(dwTarget, 8));
+        aTxBuffer[10] := DWORD_TO_BYTE(dwTarget);
+        uiTxLength := 13;
+
+    E_GripperCommand.Stop:
+        // 06 6040 010F：停止运动
+        aTxBuffer[1] := 16#06;
+        aTxBuffer[2] := 16#60;
+        aTxBuffer[3] := 16#40;
+        aTxBuffer[4] := 16#01;
+        aTxBuffer[5] := 16#0F;
+        uiTxLength := 8;
+
+    E_GripperCommand.ResetFault:
+        // 06 6040 0080：故障复位
+        aTxBuffer[1] := 16#06;
+        aTxBuffer[2] := 16#60;
+        aTxBuffer[3] := 16#40;
+        aTxBuffer[4] := 16#00;
+        aTxBuffer[5] := 16#80;
+        uiTxLength := 8;
+
+ELSE
+    uiTxLength := 0;
+    M_BuildCommand := FALSE;
+END_CASE;
+
+IF M_BuildCommand THEN
+    wCrc := F_SerialCrc16(
+        pData := ADR(aTxBuffer),
+        nLength := uiTxLength - 2
+    );
+    aTxBuffer[uiTxLength - 2] := WORD_TO_BYTE(wCrc);
+    aTxBuffer[uiTxLength - 1] := WORD_TO_BYTE(SHR(wCrc, 8));
+END_IF;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_BuildPoll" Id="{2F7A174C-F454-460D-9600-DA9A126D62C1}">
+      <Declaration><![CDATA[METHOD PUBLIC M_BuildPoll : BOOL
+VAR_INPUT
+    nStationId : BYTE;
+    nPollKind  : INT;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_BuildPoll := TRUE;
+aTxBuffer[0] := nStationId;
+aTxBuffer[1] := 16#03;
+
+CASE nPollKind OF
+    1: // 0x6064：位置，两个寄存器
+        aTxBuffer[2] := 16#60; aTxBuffer[3] := 16#64;
+        aTxBuffer[4] := 16#00; aTxBuffer[5] := 16#02;
+    2: // 0x6078：电流，一个寄存器
+        aTxBuffer[2] := 16#60; aTxBuffer[3] := 16#78;
+        aTxBuffer[4] := 16#00; aTxBuffer[5] := 16#01;
+    3: // 0x603F：故障，两个寄存器
+        aTxBuffer[2] := 16#60; aTxBuffer[3] := 16#3F;
+        aTxBuffer[4] := 16#00; aTxBuffer[5] := 16#02;
+ELSE
+    M_BuildPoll := FALSE;
+END_CASE;
+
+IF M_BuildPoll THEN
+    uiTxLength := 8;
+    wCrc := F_SerialCrc16(
+        pData := ADR(aTxBuffer),
+        nLength := 6
+    );
+    aTxBuffer[6] := WORD_TO_BYTE(wCrc);
+    aTxBuffer[7] := WORD_TO_BYTE(SHR(wCrc, 8));
+ELSE
+    uiTxLength := 0;
+END_IF;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_GetExpectedReplyLength" Id="{B74F10DC-D0ED-4144-8FBA-17E3808B592F}">
+      <Declaration><![CDATA[METHOD PUBLIC M_GetExpectedReplyLength : UINT
+VAR_INPUT
+    aRxBuffer  : ARRAY[0..31] OF BYTE;
+    uiRxLength : UINT;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_GetExpectedReplyLength := 0;
+
+IF uiRxLength >= 2 THEN
+    CASE aRxBuffer[1] OF
+        16#83, 16#86, 16#90:
+            M_GetExpectedReplyLength := 5;
+        16#06, 16#10:
+            M_GetExpectedReplyLength := 8;
+    END_CASE;
+END_IF;
+
+IF (uiRxLength >= 3) AND (aRxBuffer[1] = 16#03) THEN
+    M_GetExpectedReplyLength := BYTE_TO_UINT(aRxBuffer[2]) + 5;
+END_IF;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ParseReply" Id="{D624FD90-F6C4-4E4B-8F7D-98ED7349EFDE}">
+      <Declaration><![CDATA[METHOD PUBLIC M_ParseReply : E_GripperProtocolResult
+VAR_INPUT
+    nStationId  : BYTE;
+    bWrite      : BOOL;
+    nActiveKind : INT;
+    aRxBuffer   : ARRAY[0..31] OF BYTE;
+    uiRxLength  : UINT;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_ParseReply := E_GripperProtocolResult.None;
+byExceptionCode := 0;
+
+IF aRxBuffer[0] <> nStationId THEN
+    M_ParseReply := E_GripperProtocolResult.StationMismatch;
+    RETURN;
+END_IF;
+
+IF bWrite THEN
+    IF ((aTxBuffer[1] = 16#10) AND (aRxBuffer[1] = 16#90))
+        OR ((aTxBuffer[1] = 16#06) AND (aRxBuffer[1] = 16#86)) THEN
+        byExceptionCode := aRxBuffer[2];
+        M_ParseReply := E_GripperProtocolResult.ModbusException;
+    ELSIF (uiRxLength = 8)
+        AND (aRxBuffer[1] = aTxBuffer[1])
+        AND (aRxBuffer[2] = aTxBuffer[2])
+        AND (aRxBuffer[3] = aTxBuffer[3])
+        AND (aRxBuffer[4] = aTxBuffer[4])
+        AND (aRxBuffer[5] = aTxBuffer[5]) THEN
+        M_ParseReply := E_GripperProtocolResult.WriteAcknowledged;
+    ELSE
+        M_ParseReply := E_GripperProtocolResult.WriteReplyMismatch;
+    END_IF;
+    RETURN;
+END_IF;
+
+IF aRxBuffer[1] = 16#83 THEN
+    byExceptionCode := aRxBuffer[2];
+    M_ParseReply := E_GripperProtocolResult.ModbusException;
+    RETURN;
+END_IF;
+
+IF aRxBuffer[1] <> 16#03 THEN
+    M_ParseReply := E_GripperProtocolResult.UnexpectedFunctionCode;
+    RETURN;
+END_IF;
+
+IF ((nActiveKind = 2) AND (aRxBuffer[2] <> 2))
+    OR ((nActiveKind <> 2) AND (aRxBuffer[2] <> 4)) THEN
+    M_ParseReply := E_GripperProtocolResult.InvalidByteCount;
+    RETURN;
+END_IF;
+
+CASE nActiveKind OF
+    1:
+        dwValue :=
+            SHL(BYTE_TO_DWORD(aRxBuffer[3]), 24)
+            OR SHL(BYTE_TO_DWORD(aRxBuffer[4]), 16)
+            OR SHL(BYTE_TO_DWORD(aRxBuffer[5]), 8)
+            OR BYTE_TO_DWORD(aRxBuffer[6]);
+        diPosition := DWORD_TO_DINT(dwValue);
+        M_ParseReply := E_GripperProtocolResult.PositionData;
+
+    2:
+        wCurrentRaw :=
+            SHL(BYTE_TO_WORD(aRxBuffer[3]), 8)
+            OR BYTE_TO_WORD(aRxBuffer[4]);
+        iCurrent := WORD_TO_INT(wCurrentRaw);
+        M_ParseReply := E_GripperProtocolResult.CurrentData;
+
+    3:
+        dwValue :=
+            SHL(BYTE_TO_DWORD(aRxBuffer[3]), 24)
+            OR SHL(BYTE_TO_DWORD(aRxBuffer[4]), 16)
+            OR SHL(BYTE_TO_DWORD(aRxBuffer[5]), 8)
+            OR BYTE_TO_DWORD(aRxBuffer[6]);
+        udFaultCode := DWORD_TO_UDINT(dwValue);
+        M_ParseReply := E_GripperProtocolResult.FaultData;
+END_CASE;]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

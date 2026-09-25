@@ -22,9 +22,13 @@ VAR_IN_OUT
 	// 复用MAIN中COM3唯一的自动动作实例。
     // 禁止在准备流程中重新创建FB_GripperAction实例。
     ioGripperAction : FB_GripperAction;
+	// 复用MAIN中COM4唯一的自动动作实例。
+    ioAdjustGripperAction : FB_GripperAction;
 
     // COM3夹爪统一接口。
     ioGripper : ST_GripperInterface;
+	// COM4调整夹爪统一接口。
+    ioAdjustGripper : ST_GripperInterface;
 END_VAR
 
 VAR_OUTPUT
@@ -87,6 +91,12 @@ VAR
 
     // COM3夹爪已经张开完成的锁存状态。
     bGripperOpenDone : BOOL;
+
+	// AdjustmentZ处于安全位置后执行COM4闭合。
+	bAdjustGripperCloseExecute : BOOL;
+	bAdjustGripperCloseDone : BOOL;
+	bAdjustGripperReady : BOOL;
+	liAdjustGripperPositionError : LINT;
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[//==============================================================
@@ -110,6 +120,31 @@ bErrorPulse := FALSE;
 // 默认不请求夹爪动作。
 // 只有MoveToStandby步骤尚未完成张开时才置TRUE。
 bGripperOpenExecute := FALSE;
+bAdjustGripperCloseExecute := FALSE;
+
+// COM4准备完成必须由真实状态共同确认，不能只依赖动作完成握手。
+liAdjustGripperPositionError :=
+    DINT_TO_LINT(ioAdjustGripper.Feedback.diActualPosition)
+    - DINT_TO_LINT(ioAdjustGripper.Set.diClosePosition);
+IF liAdjustGripperPositionError < 0 THEN
+    liAdjustGripperPositionError := -liAdjustGripperPositionError;
+END_IF;
+
+bAdjustGripperReady :=
+    ioAdjustGripper.Feedback.bOnline
+    AND NOT ioAdjustGripper.Feedback.bCommFault
+    AND ioAdjustGripper.Feedback.bFaultCodeValid
+    AND NOT ioAdjustGripper.Feedback.bFault
+    AND NOT ioAdjustGripper.State.bBusy
+    AND NOT ioAdjustGripper.Feedback.bBusy
+    AND ioAdjustGripper.Feedback.bPositionValid
+    AND ioAdjustGripper.Feedback.bCurrentValid
+    AND
+    (
+        liAdjustGripperPositionError
+        <= DINT_TO_LINT(ioAdjustGripper.Set.diPositionTolerance)
+    )
+    AND ioAdjustGripper.Feedback.bClosed;
 
 //==============================================================
 // 2. Preparation命令脉冲默认清除
@@ -397,10 +432,38 @@ ELSE
 
 			//==============================================================
 			// 调整机构准备：
-			// AdjustmentZ先回到100 mm，确认安全后，
-			// AdjustmentX/Y再同时回到0/10 mm。
+			// COM4先回到配置层定义的闭合位置并确认有效，
+			// 随后才允许AdjustmentZ回准备位置；Z到位后，
+			// AdjustmentX/Y再同时回到准备位置。
 			//==============================================================
-			IF NOT bAdjustmentZDone THEN
+			IF NOT bAdjustGripperCloseDone THEN
+				bAdjustGripperCloseExecute := TRUE;
+
+				IF ioAdjustGripperAction.bError THEN
+					bAdjustGripperCloseExecute := FALSE;
+					bError := TRUE;
+					bErrorPulse := TRUE;
+					uiErrorAxis := 0;
+
+					IF ioAdjustGripperAction.udErrorCode <> TO_UDINT(E_GripperErrorCode.None) THEN
+						udiErrorCode := ioAdjustGripperAction.udErrorCode;
+					ELSE
+						udiErrorCode := TO_UDINT(E_MachinePreparationErrorCode.AdjustGripperCloseFailed);
+					END_IF;
+
+					eStep := E_MachinePreparationStep.Error;
+
+				ELSIF ioAdjustGripperAction.bDone AND bAdjustGripperReady THEN
+					bAdjustGripperCloseDone := TRUE;
+					bAdjustGripperCloseExecute := FALSE;
+				END_IF;
+			END_IF;
+
+			// COM4闭合到50000并完成全部有效性确认后，AdjustmentZ才允许上升。
+			IF bAdjustGripperCloseDone
+				AND bAdjustGripperReady
+				AND NOT bAdjustmentZDone
+			THEN
 				bAdjustmentZDone := M_MoveAxisAbsolute(
 					fTarget := stConfig.fAdjustmentZStandby,
 					fVelocity := stConfig.fAdjustmentVelocity,
@@ -410,7 +473,7 @@ ELSE
 					ioAxis := aAxes[GVL_AxisIndex.AdjustmentZ]
 				);
 			END_IF;
-			
+
 			IF bAdjustmentZDone THEN
 				IF NOT bAdjustmentXDone THEN
 					bAdjustmentXDone := M_MoveAxisAbsolute(
@@ -491,6 +554,8 @@ ELSE
 				AND bAdjustmentXDone
 				AND bAdjustmentYDone
 				AND bAdjustmentZDone
+				AND bAdjustGripperCloseDone
+				AND bAdjustGripperReady
                 AND bScrewYDone
                 AND bScrewZDone
             THEN
@@ -509,6 +574,9 @@ ELSE
 				IF NOT bGripperOpenDone THEN
 					uiErrorAxis := 0;
 					udiErrorCode := TO_UDINT(E_MachinePreparationErrorCode.GripperOpenFailed);
+				ELSIF NOT bAdjustGripperCloseDone OR NOT bAdjustGripperReady THEN
+					uiErrorAxis := 0;
+					udiErrorCode := TO_UDINT(E_MachinePreparationErrorCode.AdjustGripperCloseFailed);
                 ELSIF NOT bTrayXDone THEN
                     uiErrorAxis := GVL_AxisIndex.TrayX;
                 ELSIF NOT bTrayZDone THEN
@@ -573,6 +641,7 @@ IF bAbort
     OR (eStep = E_MachinePreparationStep.Error)
 THEN
     bGripperOpenExecute := FALSE;
+    bAdjustGripperCloseExecute := FALSE;
 END_IF;
 
 IF bAbort
@@ -591,6 +660,22 @@ THEN
         tResultTimeout := GVL_ProcessConfig.stGripper.tResultTimeout,
 
         ioGripper := ioGripper
+    );
+END_IF;
+
+// COM4与COM3分别复用MAIN中的唯一Action实例；准备阶段拥有COM4命令权。
+IF bAbort
+    OR (eStep = E_MachinePreparationStep.WaitAxesReady)
+    OR (eStep = E_MachinePreparationStep.MoveToStandby)
+    OR (eStep = E_MachinePreparationStep.Error)
+THEN
+    ioAdjustGripperAction(
+        bExecute := bAdjustGripperCloseExecute,
+        eCommand := E_GripperCommand.Close,
+        bCancel := bAbort,
+        tAcceptTimeout := GVL_ProcessConfig.stGripper.tAcceptTimeout,
+        tResultTimeout := GVL_ProcessConfig.stGripper.tResultTimeout,
+        ioGripper := ioAdjustGripper
     );
 END_IF;
 
@@ -742,7 +827,11 @@ bAdjustmentZDone := FALSE;
 
 // 清除机构准备阶段的COM3状态。
 bGripperOpenExecute := FALSE;
-bGripperOpenDone := FALSE;]]></ST>
+bGripperOpenDone := FALSE;
+
+// 清除机构准备阶段的COM4状态。
+bAdjustGripperCloseExecute := FALSE;
+bAdjustGripperCloseDone := FALSE;]]></ST>
       </Implementation>
     </Method>
   </POU>

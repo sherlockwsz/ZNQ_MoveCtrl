@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <POU Name="PRG_ScrewdriverManager" Id="{931F1626-2951-4BD0-B3A5-31A71020D522}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM PRG_ScrewdriverManager
+VAR
+    fbScrewdriver1 : FB_ScrewdriverControl;
+    fbScrewdriver2 : FB_ScrewdriverControl;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// 两个运行实例共用同一FB类型，但端口、缓存、状态机和定时器完全独立。
+// 默认不使能，不接入当前自动流程；仅通过GVL提供在线调试入口。
+fbScrewdriver1(
+    bEnable := GVL_Screwdriver.bEnableScrewdriver1,
+    ioScrewdriver := GVL_Screwdriver.stScrewdriver1
+);
+
+fbScrewdriver2(
+    bEnable := GVL_Screwdriver.bEnableScrewdriver2,
+    ioScrewdriver := GVL_Screwdriver.stScrewdriver2
+);]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

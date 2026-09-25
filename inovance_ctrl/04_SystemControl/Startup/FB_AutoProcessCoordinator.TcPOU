@@ -1,7 +1,7 @@
-<?xml version='1.0' encoding='utf-8'?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
   <POU Name="FB_AutoProcessCoordinator" Id="{40395fc0-80f0-4ed1-95be-597e4ef209f6}" SpecialFunc="None">
-    <Declaration>FUNCTION_BLOCK FB_AutoProcessCoordinator
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_AutoProcessCoordinator
 VAR_INPUT
     // 来自 FB_AutoStartCoordinator；全部轴就绪后保持 TRUE。
     bStart : BOOL;
@@ -9,7 +9,7 @@ VAR_INPUT
     // 整机停止／流程中止。
     bAbort : BOOL;
 
-    // 用于取消正在执行的 COM3 夹爪动作。
+    // 用于取消正在执行的COM3/COM4夹爪动作。
     bStopRequest : BOOL;
 
     // 原 MAIN 中保留的在线坐标重初始化请求。
@@ -22,23 +22,28 @@ VAR_IN_OUT
     // 实例继续声明在 MAIN，保留原 ADS 符号路径。
     ioTrayProcess       : FB_TrayProcess;
     ioDamperProcess     : FB_DamperProcess;
-    ioTurntableProcess  : FB_TurntableProcess;
+    ioTurntableUnit     : FB_TurntableUnit;
     ioGripperAction     : FB_GripperAction;
+    ioAdjustGripperAction : FB_GripperAction;
 
     ioGripper : ST_GripperInterface;
+	ioAdjustGripper : ST_GripperInterface;
 	ioScrewdriverProcess : FB_ScrewdriverProcess;
+    ioAdjustmentProcess : FB_AdjustmentProcess;
     // 复用统一轴数组，不在协调器中重新定义轴。
     aAxes : ARRAY[1..GVL_Constants.cMaxAxisCount] OF ST_AxisInterface;
 END_VAR
 
 VAR_OUTPUT
-    bBusy : BOOL; // 三个运动流程或 COM3 动作正在执行
+    bBusy : BOOL; // 任一自动流程或夹爪动作正在执行
     bDone : BOOL; // 第五盘放回、Tray 最终复位完成
 
     // 本扫描检测到夹爪动作失败；交给 MAIN 锁存并启动 Stop 链路。
     bGripperActionFault : BOOL;
+	bAdjustGripperActionFault : BOOL;
 	bTurntableFault : BOOL;
     udGripperActionError : UDINT;
+	udAdjustGripperActionError : UDINT;
 	bScrewdriverFault : BOOL;
 	uiScrewdriverErrorAxis : UINT;
 	udScrewdriverError : UDINT;
@@ -49,17 +54,20 @@ VAR
     // COM3 动作本周期报错时，Damper 可在同周期收到 TRUE。
     bEffectiveAbort : BOOL;
 	stTurntableInputForThisScan : ST_DamperTurntableInput;
-END_VAR</Declaration>
+END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[// ============================================================
 // 调用顺序不可随意交换：
 // 1. Tray 读取 Damper 上一周期保持的请求；
 // 2. COM3 动作读取 Damper 上一周期保持的动作请求；
 // 3. Damper 读取本周期 Tray、COM3 的反馈；
-// 4. Turntable 读取本周期 Damper 生成的保持型请求。
+// 4. Adjustment读取Screwdriver上一周期保持的握手并管理COM4；
+// 5. Coordinator将本周期Adjustment反馈转换为Screwdriver通用许可；
+// 6. TurntableUnit读取本周期各流程生成的保持型请求。
 // ============================================================
 
 bGripperActionFault := FALSE;
+bAdjustGripperActionFault := FALSE;
 bEffectiveAbort := bAbort;
 
 // ------------------------------------------------------------
@@ -138,7 +146,7 @@ ioDamperProcess(
         ioTrayProcess.nCurrentLayer,
 
     stTurntableStatus :=
-        ioTurntableProcess.stStatus,
+        ioTurntableUnit.stStatus,
 
     stAxisX :=
         aAxes[GVL_AxisIndex.DamperX],
@@ -152,10 +160,39 @@ ioDamperProcess(
     stAxisRotation :=
         aAxes[GVL_AxisIndex.DamperRotation]
 );
+
 // ------------------------------------------------------------
-// 4.螺丝刀流程
-// 读取转台上一扫描保持的请求/确认。
-// 顺序：Damper → Screwdriver → Turntable；新反馈本扫描送给转台。
+// 4. 调整机构流程
+// 管理AdjustmentXYZ与COM4；只通过握手读取螺丝刀流程状态。
+// 放在螺丝刀流程之前，保持原有跨扫描动作时序。
+// ------------------------------------------------------------
+ioAdjustmentProcess(
+    bEnable := bStart,
+    bAbort := bEffectiveAbort,
+    bStopRequest := bStopRequest,
+    bMachinePrepared := bMachinePrepared,
+    bStartRequest := ioScrewdriverProcess.bPreTighteningDone,
+    bRetractPermit := ioScrewdriverProcess.bSecondTighteningDone,
+    bDoneAck := ioTurntableUnit.stStatus.bAdjustmentDoneAck,
+
+    ioAdjustGripperAction := ioAdjustGripperAction,
+    ioAdjustGripper := ioAdjustGripper,
+    stAxisX := aAxes[GVL_AxisIndex.AdjustmentX],
+    stAxisY := aAxes[GVL_AxisIndex.AdjustmentY],
+    stAxisZ := aAxes[GVL_AxisIndex.AdjustmentZ]
+);
+
+IF ioAdjustmentProcess.bGripperError
+    AND ioAdjustmentProcess.bError
+    AND NOT bAbort
+THEN
+    bAdjustGripperActionFault := TRUE;
+    udAdjustGripperActionError := ioAdjustmentProcess.udErrorCode;
+END_IF;
+
+// ------------------------------------------------------------
+// 5. 螺丝刀流程
+// 只管理ScrewdriverY/Z与两次拧紧；Adjustment信息通过握手反馈。
 // ------------------------------------------------------------
 
 ioScrewdriverProcess(
@@ -163,48 +200,66 @@ ioScrewdriverProcess(
     bAbort := bEffectiveAbort,
     bMachinePrepared := bMachinePrepared,
 
-    bRequest :=
-        ioTurntableProcess.stStatus.bAdjustmentRequest,
+    bCycleRequest :=
+        ioTurntableUnit.stStatus.bAdjustmentRequest,
 
-    bClampHolding :=
-        ioTurntableProcess.stStatus.bClampHolding,
+    bWorkpieceSecured :=
+        ioTurntableUnit.stStatus.bClampHolding,
 
-    bDoneAck :=
-        ioTurntableProcess.stStatus.bAdjustmentDoneAck,
+    bCycleDoneAck :=
+        ioTurntableUnit.stStatus.bAdjustmentDoneAck,
+
+    bProcessReady := ioAdjustmentProcess.bAdjustmentReady,
+    bProcessDone := ioAdjustmentProcess.bAdjustmentDone,
 
     // 螺丝刀机构
     stAxisY := aAxes[GVL_AxisIndex.ScrewdriverY],
-    stAxisZ := aAxes[GVL_AxisIndex.ScrewdriverZ],
-
-    // 同轴度调整机构
-    stAdjustmentX := aAxes[GVL_AxisIndex.AdjustmentX],
-    stAdjustmentY := aAxes[GVL_AxisIndex.AdjustmentY],
-    stAdjustmentZ := aAxes[GVL_AxisIndex.AdjustmentZ]
+    stAxisZ := aAxes[GVL_AxisIndex.ScrewdriverZ]
 );
+
+IF bAdjustGripperActionFault THEN
+    bEffectiveAbort := TRUE;
+END_IF;
 
 stTurntableInputForThisScan := ioDamperProcess.stTurntableInput;
 stTurntableInputForThisScan.bAdjustmentAccepted :=
-    ioScrewdriverProcess.bAccepted;
+    ioScrewdriverProcess.bRequestAccepted;
 stTurntableInputForThisScan.bAdjustmentStarted :=
-    ioScrewdriverProcess.bAdjustmentStarted;
+    (ioAdjustmentProcess.eStep = E_AdjustmentStep.WaitAdjustment)
+    AND NOT ioAdjustmentProcess.bAdjustmentReady;
 stTurntableInputForThisScan.bAdjustmentDone :=
-    ioScrewdriverProcess.bPartDone;
+    ioAdjustmentProcess.bAdjustmentDone
+    AND NOT ioScrewdriverProcess.bError
+	AND ioScrewdriverProcess.bScrewdriverSafe
+    AND
+    (
+        (ioScrewdriverProcess.eStep = E_ScrewdriverStep.LiftAfterSecondTighten)
+        OR (ioScrewdriverProcess.eStep = E_ScrewdriverStep.WaitDoneAck)
+    );
 
 // 当前模拟流程按合格反馈；今后可由真实调整结果替换。
 stTurntableInputForThisScan.bAdjustmentQualified := TRUE;
 
 bScrewdriverFault :=
-    bStart AND ioScrewdriverProcess.bError AND NOT bAbort;
-uiScrewdriverErrorAxis :=
-    ioScrewdriverProcess.uiErrorAxis;
-udScrewdriverError :=
-    ioScrewdriverProcess.udErrorCode;
+    bStart
+    AND (ioScrewdriverProcess.bError OR ioAdjustmentProcess.bError)
+    AND NOT bAbort;
+
+// 保持原有整机故障通道：Screwdriver自身故障优先，
+// Adjustment轴/流程故障仍由同一Supervisor输入发布。
+IF ioScrewdriverProcess.bError THEN
+    uiScrewdriverErrorAxis := ioScrewdriverProcess.uiErrorAxis;
+    udScrewdriverError := ioScrewdriverProcess.udErrorCode;
+ELSE
+    uiScrewdriverErrorAxis := ioAdjustmentProcess.uiErrorAxis;
+    udScrewdriverError := ioAdjustmentProcess.udErrorCode;
+END_IF;
 // ------------------------------------------------------------
-// 5. 转台与夹紧轴流程
+// 6. 转台与夹紧轴流程
 // 保持两个物理位置状态仍存于 MAIN.fbDamperProcess，
 // 避免改变现有 ADS/WPF 读取路径。
 // ------------------------------------------------------------
-ioTurntableProcess(
+ioTurntableUnit(
 	bMachinePrepared := bMachinePrepared,
     stInput := stTurntableInputForThisScan,
 
@@ -222,7 +277,7 @@ ioTurntableProcess(
 );
 bTurntableFault :=
     bStart
-    AND ioTurntableProcess.stStatus.bError
+    AND ioTurntableUnit.stStatus.bError
     AND NOT bAbort;
 // ------------------------------------------------------------
 // 5. 整机流程状态
@@ -232,9 +287,11 @@ bTurntableFault :=
 bBusy :=
     ioTrayProcess.bBusy
     OR ioDamperProcess.bBusy
-    OR ioTurntableProcess.stStatus.bBusy
+    OR ioTurntableUnit.stStatus.bBusy
     OR ioGripperAction.bBusy
-	OR ioScrewdriverProcess.bBusy;
+	OR ioAdjustGripperAction.bBusy
+	OR ioScrewdriverProcess.bBusy
+    OR ioAdjustmentProcess.bAdjustmentBusy;
 bDone := ioTrayProcess.bDone;]]></ST>
     </Implementation>
   </POU>

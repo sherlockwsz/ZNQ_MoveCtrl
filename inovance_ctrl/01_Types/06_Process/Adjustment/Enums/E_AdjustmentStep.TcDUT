@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_AdjustmentStep" Id="{d2db074d-e9dc-4ba1-bcd8-d449f6baf137}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_AdjustmentStep :
+(
+    Idle                    := 0,
+
+    MoveXYToWork            := 80,
+    LowerZToWork            := 90,
+    OpenGripper             := 95,
+    WaitAdjustment          := 100,
+    CloseGripper            := 140,
+    LiftZToSafe             := 150,
+    ReturnXYToStandby       := 160,
+    WaitDoneAck             := 170,
+
+    Error                   := 900
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

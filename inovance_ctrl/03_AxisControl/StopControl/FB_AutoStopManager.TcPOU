@@ -22,7 +22,7 @@ VAR_INPUT
     // 全轴停止最大等待时间。
     tStopTimeout : TIME := GVL_SafetyConfig.stStop.tTimeout;
 
-    // 非NC设备停止确认；当前用于COM3夹爪。
+    // 非NC设备停止确认；MAIN汇总COM3与COM4后接入。
     bExternalStopRequired : BOOL := FALSE;
     bExternalStopDone     : BOOL := TRUE;
     bExternalStopError    : BOOL := FALSE;

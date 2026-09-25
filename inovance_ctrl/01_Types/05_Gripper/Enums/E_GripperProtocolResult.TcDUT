@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_GripperProtocolResult" Id="{FF0ABA98-469D-48D4-BC8D-6772874B2BA7}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+TYPE E_GripperProtocolResult :
+(
+    None                   := 0,
+    WriteAcknowledged      := 10,
+    PositionData           := 20,
+    CurrentData            := 21,
+    FaultData              := 22,
+    ModbusException        := 30,
+    StationMismatch        := 40,
+    WriteReplyMismatch     := 41,
+    UnexpectedFunctionCode := 42,
+    InvalidByteCount       := 43
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

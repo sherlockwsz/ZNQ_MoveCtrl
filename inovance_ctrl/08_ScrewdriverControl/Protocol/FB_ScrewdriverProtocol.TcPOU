@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <POU Name="FB_ScrewdriverProtocol" Id="{FF08CDFB-0C3A-4758-BCB5-F694D0416A4F}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_ScrewdriverProtocol
+VAR_OUTPUT
+    aTxBuffer       : ARRAY[0..31] OF BYTE;
+    uiTxLength      : UINT;
+    byExceptionCode : BYTE;
+END_VAR
+VAR CONSTANT
+    cByWriteSingleRegister : BYTE := 16#06;
+    cWControlRegister      : WORD := 16#0030;
+    cWRunRegister          : WORD := 16#0031;
+    cWPcControl            : WORD := 16#3BBB;
+    cWTightenStart         : WORD := 16#2AAA;
+    cWTightenStop          : WORD := 16#2BBB;
+    cWLoosenStart          : WORD := 16#2CCC;
+    cWLoosenStop           : WORD := 16#2DDD;
+END_VAR
+VAR
+    wCrc : WORD;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// 纯协议层：仅负责Modbus RTU报文构造和回显解析。]]></ST>
+    </Implementation>
+    <Method Name="M_BuildCommand" Id="{20EF29C3-D653-47FE-8468-EFB9BCE897D8}">
+      <Declaration><![CDATA[METHOD PUBLIC M_BuildCommand : BOOL
+VAR_INPUT
+    byStationId : BYTE;
+    eCommand    : E_ScrewdriverCommand;
+END_VAR
+VAR
+    wRegister : WORD;
+    wValue    : WORD;
+    nIndex    : INT;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_BuildCommand := FALSE;
+uiTxLength := 0;
+
+FOR nIndex := 0 TO 7 DO
+    aTxBuffer[nIndex] := 0;
+END_FOR;
+
+IF (byStationId < 1) OR (byStationId > 247) THEN
+    RETURN;
+END_IF;
+
+CASE eCommand OF
+    E_ScrewdriverCommand.PcControl:
+        wRegister := cWControlRegister;
+        wValue := cWPcControl;
+
+    E_ScrewdriverCommand.TightenStart:
+        wRegister := cWRunRegister;
+        wValue := cWTightenStart;
+
+    E_ScrewdriverCommand.TightenStop:
+        wRegister := cWRunRegister;
+        wValue := cWTightenStop;
+
+    E_ScrewdriverCommand.LoosenStart:
+        wRegister := cWRunRegister;
+        wValue := cWLoosenStart;
+
+    E_ScrewdriverCommand.LoosenStop:
+        wRegister := cWRunRegister;
+        wValue := cWLoosenStop;
+
+ELSE
+    RETURN;
+END_CASE;
+
+aTxBuffer[0] := byStationId;
+aTxBuffer[1] := cByWriteSingleRegister;
+aTxBuffer[2] := WORD_TO_BYTE(SHR(wRegister, 8));
+aTxBuffer[3] := WORD_TO_BYTE(wRegister);
+aTxBuffer[4] := WORD_TO_BYTE(SHR(wValue, 8));
+aTxBuffer[5] := WORD_TO_BYTE(wValue);
+
+wCrc := F_SerialCrc16(
+    pData := ADR(aTxBuffer),
+    nLength := 6
+);
+aTxBuffer[6] := WORD_TO_BYTE(wCrc);
+aTxBuffer[7] := WORD_TO_BYTE(SHR(wCrc, 8));
+uiTxLength := 8;
+M_BuildCommand := TRUE;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_GetExpectedReplyLength" Id="{F06FF3AF-1876-4E49-8119-A33D0D08D1FB}">
+      <Declaration><![CDATA[METHOD PUBLIC M_GetExpectedReplyLength : UINT
+VAR_INPUT
+    aRxBuffer  : ARRAY[0..31] OF BYTE;
+    uiRxLength : UINT;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_GetExpectedReplyLength := 0;
+
+IF uiRxLength >= 2 THEN
+    IF (aRxBuffer[1] AND 16#80) <> 0 THEN
+        // Modbus异常响应：站号、异常功能码、异常码、CRC低、CRC高。
+        M_GetExpectedReplyLength := 5;
+    ELSE
+        // 功能码06正常回显与请求报文相同，共8字节。
+        M_GetExpectedReplyLength := 8;
+    END_IF;
+END_IF;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ParseReply" Id="{2FD6DB49-8CFC-4B5C-82B7-D2C603F65FA6}">
+      <Declaration><![CDATA[METHOD PUBLIC M_ParseReply : E_ScrewdriverProtocolResult
+VAR_INPUT
+    byStationId : BYTE;
+    aRxBuffer   : ARRAY[0..31] OF BYTE;
+    uiRxLength  : UINT;
+END_VAR
+VAR
+    nIndex      : INT;
+    wCalculated : WORD;
+    wReceived   : WORD;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_ParseReply := E_ScrewdriverProtocolResult.None;
+byExceptionCode := 0;
+
+IF (uiRxLength <> 5) AND (uiRxLength <> 8) THEN
+    M_ParseReply := E_ScrewdriverProtocolResult.InvalidLength;
+    RETURN;
+END_IF;
+
+wCalculated := F_SerialCrc16(
+    pData := ADR(aRxBuffer),
+    nLength := uiRxLength - 2
+);
+wReceived :=
+    BYTE_TO_WORD(aRxBuffer[uiRxLength - 2])
+    OR SHL(BYTE_TO_WORD(aRxBuffer[uiRxLength - 1]), 8);
+
+IF wCalculated <> wReceived THEN
+    M_ParseReply := E_ScrewdriverProtocolResult.CrcError;
+    RETURN;
+END_IF;
+
+IF aRxBuffer[0] <> byStationId THEN
+    M_ParseReply := E_ScrewdriverProtocolResult.StationMismatch;
+    RETURN;
+END_IF;
+
+IF aRxBuffer[1] = (cByWriteSingleRegister OR 16#80) THEN
+    IF uiRxLength = 5 THEN
+        byExceptionCode := aRxBuffer[2];
+        M_ParseReply := E_ScrewdriverProtocolResult.ModbusException;
+    ELSE
+        M_ParseReply := E_ScrewdriverProtocolResult.InvalidLength;
+    END_IF;
+    RETURN;
+END_IF;
+
+IF uiRxLength <> uiTxLength THEN
+    M_ParseReply := E_ScrewdriverProtocolResult.InvalidLength;
+    RETURN;
+END_IF;
+
+FOR nIndex := 0 TO 7 DO
+    IF aRxBuffer[nIndex] <> aTxBuffer[nIndex] THEN
+        M_ParseReply := E_ScrewdriverProtocolResult.ReplyMismatch;
+        RETURN;
+    END_IF;
+END_FOR;
+
+M_ParseReply := E_ScrewdriverProtocolResult.Acknowledged;]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

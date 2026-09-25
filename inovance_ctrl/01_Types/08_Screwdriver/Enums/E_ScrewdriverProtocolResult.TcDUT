@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_ScrewdriverProtocolResult" Id="{084398DA-A727-47F7-9410-27718BD979C6}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+TYPE E_ScrewdriverProtocolResult :
+(
+    None            := 0,
+    Acknowledged    := 10,
+    ModbusException := 20,
+    InvalidLength   := 30,
+    CrcError        := 31,
+    StationMismatch := 32,
+    ReplyMismatch   := 33
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

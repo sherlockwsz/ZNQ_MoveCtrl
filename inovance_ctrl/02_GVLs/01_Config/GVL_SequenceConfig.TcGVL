@@ -4,6 +4,7 @@
     <Declaration><![CDATA[{attribute 'qualified_only'}
 VAR_GLOBAL CONSTANT
     bSkipDamperGripperForSimulation : BOOL := FALSE;
+    bSkipAdjustGripperForSimulation : BOOL := FALSE;
 END_VAR]]></Declaration>
   </GVL>
 </TcPlcObject>

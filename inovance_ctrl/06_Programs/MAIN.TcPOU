@@ -28,9 +28,12 @@ VAR
 	// 当前只管理数据，不产生任何轴运动命令。
 	fbDamperProcess : FB_DamperProcess;
 	// 转台与夹紧轴协调流程。
-	fbTurntableProcess : FB_TurntableProcess;
+	// 保留实例名以维持现有ADS诊断路径，类型升级为统一机械单元。
+	fbTurntableProcess : FB_TurntableUnit;
 	fbScrewdriverProcess : FB_ScrewdriverProcess;
+	fbAdjustmentProcess : FB_AdjustmentProcess;
 	fbDamperGripperAction : FB_GripperAction; // COM3唯一的自动动作实例
+	fbAdjustGripperAction : FB_GripperAction; // COM4唯一的自动动作实例
 	fbAutoProcessCoordinator : FB_AutoProcessCoordinator;
 	// 在线调试时置TRUE产生一次上升沿，重新计算全部坐标。
 	// 使用后应恢复FALSE，再次使用时重新产生上升沿。
@@ -119,6 +122,15 @@ VAR
 	bDamperGripperAutoReady     : BOOL;
 	bDamperGripperRequired      : BOOL; // COM3正在参与启动、流程或动作
 	bDamperGripperStartRejected : BOOL; // 供在线诊断；人工确认后清除
+	bAdjustGripperActionFault : BOOL;
+	udAdjustGripperActionError : UDINT;
+	bAdjustGripperAutoReady : BOOL;
+	bAdjustGripperRequired : BOOL;
+	bAdjustGripperStartRejected : BOOL;
+	bExternalGrippersStopRequired : BOOL;
+	bExternalGrippersStopDone : BOOL;
+	bExternalGrippersStopError : BOOL;
+	udiExternalGrippersStopError : UDINT;
 	
 	fbMachinePreparation : FB_MachinePreparation;
 
@@ -214,6 +226,8 @@ END_IF;
 // 启动条件由夹爪管理层统一发布，MAIN不再重复读取底层有效位。
 bDamperGripperAutoReady :=
     GVL_DamperGripper.stDamperGripper.State.bAutoReady;
+bAdjustGripperAutoReady :=
+    GVL_DamperGripper.stAdjustGripper.State.bAutoReady;
 
 //==============================================================
 // 选中单轴回零
@@ -311,8 +325,10 @@ END_IF;
 				   OR (fbMachineModeManager.eMode = E_MachineMode.Homing),
 		bHmiOnline := fbHmiWatchdog.bOnline,
 		bControlAllowed := GVL_HMI.Comm.bControlAllowed,
-		bGripperReady := bDamperGripperAutoReady,
-		bGripperActionFault := bDamperGripperActionFault,
+		bGripperReady :=
+			bDamperGripperAutoReady AND bAdjustGripperAutoReady,
+		bGripperActionFault :=
+			bDamperGripperActionFault OR bAdjustGripperActionFault,
 		bProcessDone := bAutoProcessDone,
 		tEnableTimeout := GVL_SafetyConfig.stStartup.tEnableTimeout,
 		aAxes := GVL_AxisRuntime.Axes
@@ -323,7 +339,12 @@ END_IF;
 		bControlAuto := FALSE;
 	
 		IF fbAutoStart.uiErrorCode = TO_UINT(E_AutoStartErrorCode.GripperNotReady) THEN
-			bDamperGripperStartRejected := TRUE;
+			IF NOT bDamperGripperAutoReady THEN
+				bDamperGripperStartRejected := TRUE;
+			END_IF;
+			IF NOT bAdjustGripperAutoReady THEN
+				bAdjustGripperStartRejected := TRUE;
+			END_IF;
 		END_IF;
 	END_IF;
 	
@@ -416,7 +437,11 @@ fbMachinePreparation(
 
     // 与正式Damper流程复用同一个COM3自动动作实例。
     ioGripperAction := fbDamperGripperAction,
-    ioGripper := GVL_DamperGripper.stDamperGripper
+    ioGripper := GVL_DamperGripper.stDamperGripper,
+
+    // 与正式调整流程复用同一个COM4自动动作实例。
+    ioAdjustGripperAction := fbAdjustGripperAction,
+    ioAdjustGripper := GVL_DamperGripper.stAdjustGripper
 );
 bMachinePreparationBusy :=
     fbMachinePreparation.bBusy;
@@ -503,11 +528,14 @@ fbAutoProcessCoordinator(
 
     ioTrayProcess := fbTrayProcess,
     ioDamperProcess := fbDamperProcess,
-    ioTurntableProcess := fbTurntableProcess,
+    ioTurntableUnit := fbTurntableProcess,
     ioGripperAction := fbDamperGripperAction,
+    ioAdjustGripperAction := fbAdjustGripperAction,
 
     ioGripper := GVL_DamperGripper.stDamperGripper,
+	ioAdjustGripper := GVL_DamperGripper.stAdjustGripper,
 	ioScrewdriverProcess := fbScrewdriverProcess,
+	ioAdjustmentProcess := fbAdjustmentProcess,
     aAxes := GVL_AxisRuntime.Axes
 );
 
@@ -528,6 +556,13 @@ bDamperGripperRequired :=
 	OR fbMachinePreparation.bBusy
     OR fbAutoProcessCoordinator.bBusy
     OR fbDamperGripperAction.bBusy;
+
+bAdjustGripperRequired :=
+    fbAutoStart.bEnabling
+    OR fbAutoStart.bProcessStart
+    OR fbMachinePreparation.bBusy
+    OR fbAutoProcessCoordinator.bBusy
+    OR fbAdjustGripperAction.bBusy;
 
 // ============================================================
 // 整机自动运行故障监控与第一故障汇总
@@ -588,6 +623,13 @@ fbMachineSupervisor(
 	
 	udiDamperGripperError :=
 		fbAutoProcessCoordinator.udGripperActionError,
+	bAdjustGripperHealthOK :=
+		GVL_DamperGripper.stAdjustGripper.State.bHealthy,
+	bAdjustGripperRequired := bAdjustGripperRequired,
+	bAdjustGripperFault :=
+		fbAutoProcessCoordinator.bAdjustGripperActionFault,
+	udiAdjustGripperError :=
+		fbAutoProcessCoordinator.udAdjustGripperActionError,
     bTurntableFault := fbAutoProcessCoordinator.bTurntableFault,
     udiTurntableError := fbTurntableProcess.stStatus.nErrorID,
 	bScrewdriverFault :=
@@ -623,8 +665,19 @@ ELSIF trigResetMachineFault.Q AND NOT bMachineFault THEN
     udDamperGripperActionError := 0;
 END_IF;
 
+bAdjustGripperActionFault :=
+    bMachineFault
+    AND (eMachineFaultSource = E_MachineFaultSource.AdjustGripper);
+
+IF bAdjustGripperActionFault THEN
+    udAdjustGripperActionError := udiMachineFaultCode;
+ELSIF trigResetMachineFault.Q AND NOT bMachineFault THEN
+    udAdjustGripperActionError := 0;
+END_IF;
+
 IF trigResetMachineFault.Q AND NOT bMachineFault THEN
     bDamperGripperStartRejected := FALSE;
+	bAdjustGripperStartRejected := FALSE;
 END_IF;
 
 // 新运行故障统一进入现有受控Stop链路。
@@ -661,16 +714,43 @@ END_IF;
 // 必须放在FB_AxisManager之前，
 // 让轴管理器在同一扫描周期收到bStop。
 //==============================================================
+// 两台独立串口夹爪均须确认本轮Stop；仿真通道不要求真实回执。
+bExternalGrippersStopRequired :=
+    NOT GVL_SequenceConfig.bSkipDamperGripperForSimulation
+    OR NOT GVL_SequenceConfig.bSkipAdjustGripperForSimulation;
+bExternalGrippersStopDone :=
+    (GVL_SequenceConfig.bSkipDamperGripperForSimulation
+     OR GVL_DamperGripper.stDamperGripper.State.bStopAcknowledged)
+    AND
+    (GVL_SequenceConfig.bSkipAdjustGripperForSimulation
+     OR GVL_DamperGripper.stAdjustGripper.State.bStopAcknowledged);
+bExternalGrippersStopError :=
+    (NOT GVL_SequenceConfig.bSkipDamperGripperForSimulation
+     AND GVL_DamperGripper.stDamperGripper.State.bStopError)
+    OR
+    (NOT GVL_SequenceConfig.bSkipAdjustGripperForSimulation
+     AND GVL_DamperGripper.stAdjustGripper.State.bStopError);
+
+udiExternalGrippersStopError := 0;
+IF NOT GVL_SequenceConfig.bSkipDamperGripperForSimulation
+    AND GVL_DamperGripper.stDamperGripper.State.bStopError
+THEN
+    udiExternalGrippersStopError :=
+        GVL_DamperGripper.stDamperGripper.State.udStopErrorCode;
+ELSIF NOT GVL_SequenceConfig.bSkipAdjustGripperForSimulation
+    AND GVL_DamperGripper.stAdjustGripper.State.bStopError
+THEN
+    udiExternalGrippersStopError :=
+        GVL_DamperGripper.stAdjustGripper.State.udStopErrorCode;
+END_IF;
+
 fbAutoStopManager(
 	bExecute := bAbortProcesses,
 	tStopTimeout := GVL_SafetyConfig.stStop.tTimeout,
-	bExternalStopRequired := NOT GVL_SequenceConfig.bSkipDamperGripperForSimulation,
-	bExternalStopDone :=
-		GVL_DamperGripper.stDamperGripper.State.bStopAcknowledged,
-	bExternalStopError :=
-		GVL_DamperGripper.stDamperGripper.State.bStopError,
-	udiExternalStopError :=
-		GVL_DamperGripper.stDamperGripper.State.udStopErrorCode,
+	bExternalStopRequired := bExternalGrippersStopRequired,
+	bExternalStopDone := bExternalGrippersStopDone,
+	bExternalStopError := bExternalGrippersStopError,
+	udiExternalStopError := udiExternalGrippersStopError,
 	aAxes := GVL_AxisRuntime.Axes
 );
 
@@ -763,10 +843,10 @@ fbDamperGripperManager(
     ioGripper := GVL_DamperGripper.stDamperGripper
 );
 
-// COM4：调整流程夹爪预留；接口和管理逻辑已复用，当前不打开通信。
+// COM4：调整流程夹爪；独立串口、Manager和自动Action实例。
 fbAdjustGripperManager(
-    bEnableComm := FALSE,
-    bSimulationMode := FALSE,
+    bEnableComm := NOT GVL_SequenceConfig.bSkipAdjustGripperForSimulation,
+    bSimulationMode := GVL_SequenceConfig.bSkipAdjustGripperForSimulation,
     bStopRequested := bStopRequestRaw OR bAbortProcesses,
     bControlAllowed := GVL_HMI.Comm.bControlAllowed,
     eMachineMode := eMachineMode,
@@ -841,6 +921,12 @@ GVL_HMI.Comm.bControlAllowed :=
     bAnyAxisConfigured AND bAllAxesControlAllowed;
 GVL_HMI.Comm.bRequireEnableReset :=
     bAnyAxisRequireEnableReset;
+
+// =============================================================
+// 独立螺丝刀通信在线调试入口
+// 默认未使能，且不与当前自动流程、轴流程或工艺完成条件连接。
+// =============================================================
+PRG_ScrewdriverManager();
 	
 // =============================================================
 // 3.最后写入物理输出

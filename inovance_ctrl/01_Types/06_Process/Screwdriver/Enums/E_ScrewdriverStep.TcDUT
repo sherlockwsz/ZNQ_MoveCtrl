@@ -1,0 +1,38 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_ScrewdriverStep" Id="{606c08a8-6dbd-49dc-b77b-aa909f9a5086}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_ScrewdriverStep :
+(
+    Idle                       := 0,
+
+    // 首次初始化
+    InitializeSafeZ            := 10,
+    InitializeYZero            := 20,
+
+    // 预拧紧与避让
+    MoveYForPreTighten         := 30,
+    LowerForPreTighten         := 40,
+    WaitPreTighten             := 50,
+    LiftAfterPreTighten        := 60,
+    RetreatYToSafe             := 70,
+
+    // 等待协调器允许继续本机构流程
+    WaitProcessReady           := 80,
+
+    // 二次拧紧
+    MoveYForSecondTighten      := 110,
+    LowerForSecondTighten      := 120,
+    WaitSecondTighten          := 130,
+    LiftAfterSecondTighten     := 140,
+
+    // 本机构流程完成后等待周期确认
+    WaitDoneAck                := 170,
+
+    Error                      := 900
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

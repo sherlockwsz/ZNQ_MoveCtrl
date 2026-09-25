@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_SerialState" Id="{53FC6576-CBF1-42C2-972F-F611E79C4D75}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+TYPE E_SerialState :
+(
+    Disabled  := 0,
+    Opening   := 10,
+    Ready     := 20,
+    Sending   := 30,
+    Receiving := 40,
+    Error     := 90
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

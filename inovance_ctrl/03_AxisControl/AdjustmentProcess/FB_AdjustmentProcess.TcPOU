@@ -144,8 +144,7 @@ fbCoaxVision(
                     (eStep = E_AdjustmentStep.WaitMeasureResult)
                     OR (eStep = E_AdjustmentStep.WaitFinalMeasure)
                 ),
-    bCancel := bStopRequest OR bAbort,
-    bWithinTolerance := bVisionWithinTolerance
+    bCancel := bStopRequest OR bAbort
 );
 
 IF NOT bEnable OR bAbort THEN
@@ -298,10 +297,10 @@ CASE eStep OF
 
     E_AdjustmentStep.OpenGripper:
         IF ioAdjustGripperAction.bDone THEN
-            eStep := E_AdjustmentStep.CheckVisionMode;
+            eStep := E_AdjustmentStep.PrepareMeasurement;
         END_IF;
 
-    E_AdjustmentStep.CheckVisionMode:
+    E_AdjustmentStep.PrepareMeasurement:
         fCorrectionX := 0.0;
         fCorrectionY := 0.0;
         bVisionWithinTolerance := FALSE;

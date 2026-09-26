@@ -5,8 +5,6 @@
 VAR_INPUT
     bExecute : BOOL;
     bCancel : BOOL;
-    // 仅透传Adjustment业务评价用于兼容ADS诊断路径，不参与视觉事务判断。
-    bWithinTolerance : BOOL;
 END_VAR
 VAR_OUTPUT
     stResult : ST_CoaxVisionResult;
@@ -22,10 +20,9 @@ VAR
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[GVL_CoaxVision.stInterface.bUseCoaxVision :=
-    GVL_ProcessConfig.stAdjustment.eVisionMode = E_VisionMode.Camera;
-GVL_CoaxVision.stInterface.bWithinTolerance := bWithinTolerance;
+    GVL_ProcessConfig.stCoaxVision.eVisionMode = E_VisionMode.Camera;
 
-IF GVL_ProcessConfig.stAdjustment.eVisionMode = E_VisionMode.Simulation THEN
+IF GVL_ProcessConfig.stCoaxVision.eVisionMode = E_VisionMode.Simulation THEN
     // Simulation不占用ADS事务，但仍经过与Camera完全相同的stResult出口。
     fbRequest(
         bExecute := FALSE,
@@ -63,9 +60,9 @@ IF GVL_ProcessConfig.stAdjustment.eVisionMode = E_VisionMode.Simulation THEN
         eVisionError := E_VisionError.Cancelled;
     ELSE
         stResult.bValid := TRUE;
-        stResult.fCoaxiality := GVL_ProcessConfig.stAdjustment.fSimulatedCoaxiality;
-        stResult.fDeltaX := GVL_ProcessConfig.stAdjustment.fSimulatedDeltaX;
-        stResult.fDeltaY := GVL_ProcessConfig.stAdjustment.fSimulatedDeltaY;
+        stResult.fCoaxiality := GVL_ProcessConfig.stCoaxVision.fSimulatedCoaxiality;
+        stResult.fDeltaX := GVL_ProcessConfig.stCoaxVision.fSimulatedDeltaX;
+        stResult.fDeltaY := GVL_ProcessConfig.stCoaxVision.fSimulatedDeltaY;
         bBusy := FALSE;
         bDone := TRUE;
         bVisionFault := FALSE;

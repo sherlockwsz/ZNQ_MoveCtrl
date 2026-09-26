@@ -11,7 +11,7 @@ TYPE E_AdjustmentStep :
     MoveXYToWork            := 80,
     LowerZToWork            := 90,
     OpenGripper             := 95,
-    CheckVisionMode         := 100,
+    PrepareMeasurement      := 100,
     RequestMeasure          := 105,
     WaitMeasureResult       := 110,
     EvaluateAdjustment      := 115,

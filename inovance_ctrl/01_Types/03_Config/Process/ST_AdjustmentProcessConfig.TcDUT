@@ -3,11 +3,6 @@
   <DUT Name="ST_AdjustmentProcessConfig" Id="{03500fbb-864c-49b5-9597-9684309f44f6}">
     <Declaration><![CDATA[TYPE ST_AdjustmentProcessConfig :
 STRUCT
-    eVisionMode : E_VisionMode;
-    // Simulation模式的同轴度统一结果，不参与公共通信层。
-    fSimulatedCoaxiality : LREAL;
-    fSimulatedDeltaX : LREAL;
-    fSimulatedDeltaY : LREAL;
     fAdjustTolerance : LREAL;
     fQualifiedTolerance : LREAL;
     nMaxAdjustCount : UINT;

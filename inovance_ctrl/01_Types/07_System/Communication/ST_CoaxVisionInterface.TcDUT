@@ -21,8 +21,7 @@ STRUCT
     bResultInvalid : BOOL;
     bServiceFault : BOOL;
 
-    // PLC -> Vision / HMI诊断：业务评价与当前请求超时状态。
-    bWithinTolerance : BOOL;
+    // PLC -> Vision / HMI诊断：当前请求超时状态。
     bTimeout : BOOL;
 END_STRUCT
 END_TYPE]]></Declaration>

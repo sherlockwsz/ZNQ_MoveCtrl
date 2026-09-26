@@ -552,6 +552,9 @@
     <Compile Include="01_Types\03_Config\Process\ST_VisionProcessConfig.TcDUT">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="01_Types\03_Config\Process\ST_CoaxVisionProcessConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="01_Types\03_Config\Process\ST_QrScanProcessConfig.TcDUT">
       <SubType>Code</SubType>
     </Compile>

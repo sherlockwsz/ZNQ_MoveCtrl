@@ -3,8 +3,10 @@
   <DUT Name="ST_ScrewdriverProcessConfig" Id="{1232b83f-db07-4368-ba3a-b14a8f7af5f2}">
     <Declaration><![CDATA[TYPE ST_ScrewdriverProcessConfig :
 STRUCT
-    tPreTightenSimulation : TIME;
-    tFinalTightenSimulation : TIME;
+    tPreTightenDuration   : TIME;
+    tPreLoosenDuration   : TIME;
+    tFinalTightenDuration : TIME;
+    tReworkLoosenDuration : TIME;
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

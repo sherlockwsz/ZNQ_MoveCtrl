@@ -329,7 +329,8 @@ END_IF;
 								OR bBusy;
 	stTurntableInput.bAdjustmentAccepted := FALSE;
 	stTurntableInput.bAdjustmentDone := FALSE;
-	stTurntableInput.bAdjustmentQualified := TRUE;
+	// 最终质量只由FB_AdjustmentProcess经协调器写入，Damper不再提供固定合格值。
+	stTurntableInput.bAdjustmentQualified := FALSE;
 	stTurntableInput.bTransferCaptureOK := TRUE;
 	stTurntableInput.bAdjustmentCaptureOK := TRUE;
 	stTurntableInput.bReset := FALSE;

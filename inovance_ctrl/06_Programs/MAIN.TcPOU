@@ -131,6 +131,9 @@ VAR
 	bExternalGrippersStopDone : BOOL;
 	bExternalGrippersStopError : BOOL;
 	udiExternalGrippersStopError : UDINT;
+	bScrewdriverGroupStopRequired : BOOL;
+	bScrewdriverGroupStopDone : BOOL;
+	bScrewdriverGroupStopError : BOOL;
 	
 	fbMachinePreparation : FB_MachinePreparation;
 
@@ -521,6 +524,7 @@ END_IF;
 fbAutoProcessCoordinator(
     bStart := fbAutoStart.bProcessStart,
     bAbort := bAbortProcesses OR bStopRequestRaw,
+    bReset := trigResetMachineFault.Q,
     bStopRequest := bStopRequestRaw,
 	bMachinePrepared := fbMachinePreparation.bDone,
 	
@@ -714,22 +718,36 @@ END_IF;
 // 必须放在FB_AxisManager之前，
 // 让轴管理器在同一扫描周期收到bStop。
 //==============================================================
-// 两台独立串口夹爪均须确认本轮Stop；仿真通道不要求真实回执。
+// 非NC外部设备必须确认本轮Stop；仿真夹爪通道不要求真实回执。
+bScrewdriverGroupStopRequired :=
+    fbScrewdriverProcess.bScrewdriverStopRequired;
+bScrewdriverGroupStopDone :=
+    fbScrewdriverProcess.bScrewdriverStopDone;
+bScrewdriverGroupStopError :=
+    fbScrewdriverProcess.bScrewdriverStopError;
+
 bExternalGrippersStopRequired :=
     NOT GVL_SequenceConfig.bSkipDamperGripperForSimulation
-    OR NOT GVL_SequenceConfig.bSkipAdjustGripperForSimulation;
+    OR NOT GVL_SequenceConfig.bSkipAdjustGripperForSimulation
+    OR bScrewdriverGroupStopRequired;
 bExternalGrippersStopDone :=
     (GVL_SequenceConfig.bSkipDamperGripperForSimulation
      OR GVL_DamperGripper.stDamperGripper.State.bStopAcknowledged)
     AND
     (GVL_SequenceConfig.bSkipAdjustGripperForSimulation
-     OR GVL_DamperGripper.stAdjustGripper.State.bStopAcknowledged);
+     OR GVL_DamperGripper.stAdjustGripper.State.bStopAcknowledged)
+    AND
+    (NOT bScrewdriverGroupStopRequired
+     OR bScrewdriverGroupStopDone);
 bExternalGrippersStopError :=
     (NOT GVL_SequenceConfig.bSkipDamperGripperForSimulation
      AND GVL_DamperGripper.stDamperGripper.State.bStopError)
     OR
     (NOT GVL_SequenceConfig.bSkipAdjustGripperForSimulation
-     AND GVL_DamperGripper.stAdjustGripper.State.bStopError);
+     AND GVL_DamperGripper.stAdjustGripper.State.bStopError)
+    OR
+    (bScrewdriverGroupStopRequired
+     AND bScrewdriverGroupStopError);
 
 udiExternalGrippersStopError := 0;
 IF NOT GVL_SequenceConfig.bSkipDamperGripperForSimulation
@@ -742,6 +760,11 @@ ELSIF NOT GVL_SequenceConfig.bSkipAdjustGripperForSimulation
 THEN
     udiExternalGrippersStopError :=
         GVL_DamperGripper.stAdjustGripper.State.udStopErrorCode;
+ELSIF bScrewdriverGroupStopRequired
+    AND bScrewdriverGroupStopError
+THEN
+    udiExternalGrippersStopError :=
+        TO_UDINT(E_ScrewdriverErrorCode.ProcessFaultWithoutDetail);
 END_IF;
 
 fbAutoStopManager(
@@ -923,8 +946,8 @@ GVL_HMI.Comm.bRequireEnableReset :=
     bAnyAxisRequireEnableReset;
 
 // =============================================================
-// 独立螺丝刀通信在线调试入口
-// 默认未使能，且不与当前自动流程、轴流程或工艺完成条件连接。
+// COM5/COM6独立通信实例；自动工艺由FB_ScrewdriverProcess中的
+// FB_DualScrewdriverAction通过GVL接口同步发布命令。
 // =============================================================
 PRG_ScrewdriverManager();
 	

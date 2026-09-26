@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_CoaxVisionInterface" Id="{B2DFD943-5F67-402A-A2D8-C44F73FCA76F}">
+    <Declaration><![CDATA[TYPE ST_CoaxVisionInterface :
+STRUCT
+    // PLC -> Vision / 诊断：本机当前是否启用真实同轴度视觉。
+    bUseCoaxVision : BOOL;
+    // Vision -> PLC：Python Vision Service在线心跳状态。
+    bOnline : BOOL;
+
+    // PLC -> Vision：请求保持到结果被消费、Offline或Timeout。
+    bMeasureRequest : BOOL;
+    udiRequestId : UDINT;
+
+    // Vision -> PLC：结果只有在Valid且ResultId等于本次RequestId时才会被消费。
+    bResultValid : BOOL;
+    udiResultId : UDINT;
+    fCoaxiality : LREAL;
+    fDeltaX : LREAL;
+    fDeltaY : LREAL;
+
+    // PLC -> Vision / HMI诊断：针对当前阶段阈值的判断及超时状态。
+    bWithinTolerance : BOOL;
+    bTimeout : BOOL;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

@@ -96,6 +96,12 @@
     <Compile Include="01_Types\08_Screwdriver\Enums\E_ScrewdriverCommand.TcDUT">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="01_Types\08_Screwdriver\Enums\E_ScrewdriverActionMode.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\08_Screwdriver\Enums\E_DualScrewdriverActionStep.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="01_Types\08_Screwdriver\Enums\E_ScrewdriverDirection.TcDUT">
       <SubType>Code</SubType>
     </Compile>
@@ -412,6 +418,9 @@
     <Compile Include="08_ScrewdriverControl\Core\FB_ScrewdriverControl.TcPOU">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="08_ScrewdriverControl\Actions\FB_DualScrewdriverAction.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="08_ScrewdriverControl\Management\PRG_ScrewdriverManager.TcPOU">
       <SubType>Code</SubType>
     </Compile>
@@ -449,6 +458,10 @@
       <LinkAlways>true</LinkAlways>
     </Compile>
     <Compile Include="02_GVLs\01_Config\GVL_CommunicationConfig.TcGVL">
+      <SubType>Code</SubType>
+      <LinkAlways>true</LinkAlways>
+    </Compile>
+    <Compile Include="02_GVLs\04_Communication\GVL_CoaxVision.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
@@ -538,6 +551,9 @@
     <Compile Include="01_Types\03_Config\Communication\ST_HmiCommunicationConfig.TcDUT">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="01_Types\03_Config\Communication\ST_CoaxVisionCommunicationConfig.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="01_Types\03_Config\Communication\ST_GripperCommunicationConfig.TcDUT">
       <SubType>Code</SubType>
     </Compile>
@@ -545,6 +561,9 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="01_Types\03_Config\Communication\ST_SerialRuntime.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\07_System\Communication\ST_CoaxVisionInterface.TcDUT">
       <SubType>Code</SubType>
     </Compile>
   </ItemGroup>
@@ -645,6 +664,7 @@
     <Folder Include="07_GripperControl\Actions" />
     <Folder Include="07_GripperControl\Protocol" />
     <Folder Include="08_ScrewdriverControl" />
+    <Folder Include="08_ScrewdriverControl\Actions" />
     <Folder Include="08_ScrewdriverControl\Core" />
     <Folder Include="08_ScrewdriverControl\Protocol" />
     <Folder Include="08_ScrewdriverControl\Management" />

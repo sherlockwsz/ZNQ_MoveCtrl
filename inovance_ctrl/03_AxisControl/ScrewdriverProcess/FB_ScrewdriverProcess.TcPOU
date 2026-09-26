@@ -1,18 +1,23 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
   <POU Name="FB_ScrewdriverProcess" Id="{69c8edf6-10e2-4dec-a0f5-1fc8ed61fc43}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_ScrewdriverProcess
 VAR_INPUT
-    bEnable       : BOOL;
-    bAbort        : BOOL;
+    bEnable            : BOOL;
+    bAbort             : BOOL;
+    bReset             : BOOL;
     bCycleRequest      : BOOL; // 协调器保持型周期请求
     bWorkpieceSecured  : BOOL; // 工件已可靠固定
     bCycleDoneAck      : BOOL; // 协调器已处理本周期完成信号
-    bMachinePrepared : BOOL;
+    bMachinePrepared   : BOOL;
 
-    // 由协调器翻译外部工艺关系，本FB不理解其他机构的业务含义。
+    // 显式业务握手；请求方保持到相应Done返回。
+    bRequestSecondTighten : BOOL;
+    bRequestReworkLoosen  : BOOL;
+    bProcessDone          : BOOL;
+
+    // 保留原输入符号以兼容现有监控；协调器给它与显式二次拧紧请求相同的值。
     bProcessReady : BOOL;
-    bProcessDone  : BOOL;
 END_VAR
 
 VAR_IN_OUT
@@ -21,16 +26,21 @@ VAR_IN_OUT
 END_VAR
 
 VAR_OUTPUT
-    bRequestAccepted   : BOOL; // 请求受理；请求撤销后自动撤销
-    bScrewdriverSafe   : BOOL; // 二次拧紧后ScrewdriverZ已回安全位
-    bBusy              : BOOL;
-    bError             : BOOL;
-    uiErrorAxis        : UINT;
-    udErrorCode        : UDINT;
-    eStep              : E_ScrewdriverStep := E_ScrewdriverStep.Idle;
-    // 提供给FB_AutoProcessCoordinator的流程握手。
+    bRequestAccepted      : BOOL;
+    bScrewdriverSafe      : BOOL;
+    bBusy                 : BOOL;
+    bError                : BOOL;
+    uiErrorAxis           : UINT;
+    udErrorCode           : UDINT;
+    eStep                 : E_ScrewdriverStep := E_ScrewdriverStep.Idle;
     bPreTighteningDone    : BOOL;
     bSecondTighteningDone : BOOL;
+    bReworkLoosenDone     : BOOL;
+    bScrewdriverStopRequired : BOOL;
+    bScrewdriverStopDone  : BOOL;
+    bScrewdriverStopError : BOOL;
+    uiFaultScrewdriver    : UINT;
+    eScrewdriverActionStep : E_DualScrewdriverActionStep := E_DualScrewdriverActionStep.Idle;
 END_VAR
 
 VAR
@@ -43,9 +53,9 @@ VAR
     fZVelocity : LREAL;
     tScrewdriverMoveTimeout : TIME;
 
-    fbPreTighten   : TON;
-    fbFinalTighten : TON;
-    fbMoveTimeout  : TON;
+    fbDualScrewdriverAction : FB_DualScrewdriverAction;
+    fbMoveTimeout : TON;
+    eScrewdriverActionMode : E_ScrewdriverActionMode := E_ScrewdriverActionMode.None;
 
     bInitialized   : BOOL;
     bCycleAccepted : BOOL;
@@ -57,7 +67,7 @@ VAR
     eInternalStep  : E_ScrewdriverStep := E_ScrewdriverStep.Idle;
 END_VAR]]></Declaration>
     <Implementation>
-      <ST><![CDATA[// 每周期从原有唯一参数源更新执行缓存。
+      <ST><![CDATA[// 每周期从现有唯一参数源更新执行缓存。
 fYZero := GVL_PositionConfig.stScrewdriver.stReady.Y;
 fYWork := GVL_PositionConfig.stScrewdriver.stWork.Y;
 fZSafe := GVL_PositionConfig.stScrewdriver.stReady.Z;
@@ -67,21 +77,45 @@ fYVelocity := GVL_MotionConfig.stScrewdriver.stY.fVelocity;
 fZVelocity := GVL_MotionConfig.stScrewdriver.stZ.fVelocity;
 tScrewdriverMoveTimeout := GVL_MotionConfig.stScrewdriver.tMoveTimeout;
 
-fbPreTighten(
-    IN := bEnable
-          AND NOT bAbort
-          AND (eInternalStep = E_ScrewdriverStep.WaitPreTighten),
-    PT := GVL_ProcessConfig.stScrewdriver.tPreTightenSimulation
+// 高层步骤只选择工艺模式；COM5/COM6同步、运行确认、计时和Stop回显
+// 继续由现有双机动作FB跨扫描周期完成。
+IF eInternalStep = E_ScrewdriverStep.WaitPreTighten THEN
+    eScrewdriverActionMode := E_ScrewdriverActionMode.PreTighten;
+ELSIF eInternalStep = E_ScrewdriverStep.WaitSecondTighten THEN
+    eScrewdriverActionMode := E_ScrewdriverActionMode.FinalTighten;
+ELSIF eInternalStep = E_ScrewdriverStep.WaitReworkLoosen THEN
+    eScrewdriverActionMode := E_ScrewdriverActionMode.ReworkLoosen;
+ELSE
+    eScrewdriverActionMode := E_ScrewdriverActionMode.None;
+END_IF;
+
+fbDualScrewdriverAction(
+    bExecute :=
+        bEnable
+        AND NOT bAbort
+        AND
+        (
+            (eInternalStep = E_ScrewdriverStep.WaitPreTighten)
+            OR (eInternalStep = E_ScrewdriverStep.WaitSecondTighten)
+            OR (eInternalStep = E_ScrewdriverStep.WaitReworkLoosen)
+        ),
+    eMode := eScrewdriverActionMode,
+    bCancel := bAbort OR NOT bEnable,
+    bReset := bReset,
+    tPreTightenDuration := GVL_ProcessConfig.stScrewdriver.tPreTightenDuration,
+    tPreLoosenDuration := GVL_ProcessConfig.stScrewdriver.tPreLoosenDuration,
+    tFinalTightenDuration := GVL_ProcessConfig.stScrewdriver.tFinalTightenDuration,
+    tReworkLoosenDuration := GVL_ProcessConfig.stScrewdriver.tReworkLoosenDuration,
+    ioScrewdriver1 := GVL_Screwdriver.stScrewdriver1,
+    ioScrewdriver2 := GVL_Screwdriver.stScrewdriver2
 );
 
-fbFinalTighten(
-    IN := bEnable
-          AND NOT bAbort
-          AND (eInternalStep = E_ScrewdriverStep.WaitSecondTighten),
-    PT := GVL_ProcessConfig.stScrewdriver.tFinalTightenSimulation
-);
+bScrewdriverStopRequired := fbDualScrewdriverAction.bStopRequired;
+bScrewdriverStopDone := fbDualScrewdriverAction.bStopDone;
+bScrewdriverStopError := fbDualScrewdriverAction.bStopError;
+uiFaultScrewdriver := fbDualScrewdriverAction.uiFaultScrewdriver;
+eScrewdriverActionStep := fbDualScrewdriverAction.eStep;
 
-// 只监控本FB仍负责的ScrewdriverY/Z运动。
 bTimerRestart := (eInternalStep <> eTimedStep);
 eTimedStep := eInternalStep;
 bTimedMovement :=
@@ -93,35 +127,37 @@ bTimedMovement :=
     OR (eInternalStep = E_ScrewdriverStep.RetreatYToSafe)
     OR (eInternalStep = E_ScrewdriverStep.MoveYForSecondTighten)
     OR (eInternalStep = E_ScrewdriverStep.LowerForSecondTighten)
-    // 二次拧紧后必须真实回到Z安全位。
-    // 到达安全位后停止运动超时计时，避免等待Adjustment回位期间误报超时。
-    OR (
-        (eInternalStep = E_ScrewdriverStep.LiftAfterSecondTighten)
-        AND NOT bScrewdriverSafe
-    );
-	
+    OR (eInternalStep = E_ScrewdriverStep.LiftAfterSecondTighten)
+    OR (eInternalStep = E_ScrewdriverStep.RetreatYAfterSecondTighten)
+    OR (eInternalStep = E_ScrewdriverStep.MoveYForReworkLoosen)
+    OR (eInternalStep = E_ScrewdriverStep.LowerForReworkLoosen)
+    OR (eInternalStep = E_ScrewdriverStep.LiftAfterReworkLoosen)
+    OR (eInternalStep = E_ScrewdriverStep.RetreatYAfterReworkLoosen);
+
 IF bTimedMovement THEN
     CASE eInternalStep OF
         E_ScrewdriverStep.InitializeSafeZ,
         E_ScrewdriverStep.LowerForPreTighten,
         E_ScrewdriverStep.LiftAfterPreTighten,
         E_ScrewdriverStep.LowerForSecondTighten,
-		E_ScrewdriverStep.LiftAfterSecondTighten:
+        E_ScrewdriverStep.LiftAfterSecondTighten,
+        E_ScrewdriverStep.LowerForReworkLoosen,
+        E_ScrewdriverStep.LiftAfterReworkLoosen:
             uiMovingAxis := GVL_AxisIndex.ScrewdriverZ;
 
         E_ScrewdriverStep.InitializeYZero,
         E_ScrewdriverStep.MoveYForPreTighten,
         E_ScrewdriverStep.RetreatYToSafe,
-        E_ScrewdriverStep.MoveYForSecondTighten:
+        E_ScrewdriverStep.MoveYForSecondTighten,
+        E_ScrewdriverStep.RetreatYAfterSecondTighten,
+        E_ScrewdriverStep.MoveYForReworkLoosen,
+        E_ScrewdriverStep.RetreatYAfterReworkLoosen:
             uiMovingAxis := GVL_AxisIndex.ScrewdriverY;
     END_CASE;
 END_IF;
 
 fbMoveTimeout(
-    IN := bEnable
-          AND NOT bAbort
-          AND bTimedMovement
-          AND NOT bTimerRestart,
+    IN := bEnable AND NOT bAbort AND bTimedMovement AND NOT bTimerRestart,
     PT := tScrewdriverMoveTimeout
 );
 
@@ -139,6 +175,7 @@ IF NOT bEnable OR bAbort THEN
     bMoveIssued := FALSE;
     bPreTighteningDone := FALSE;
     bSecondTighteningDone := FALSE;
+    bReworkLoosenDone := FALSE;
     uiErrorAxis := 0;
     udErrorCode := TO_UDINT(E_ScrewdriverErrorCode.None);
     eInternalStep := E_ScrewdriverStep.Idle;
@@ -146,17 +183,22 @@ IF NOT bEnable OR bAbort THEN
     RETURN;
 END_IF;
 
-IF bMachinePrepared
-    AND NOT bInitialized
-    AND (eInternalStep = E_ScrewdriverStep.Idle)
-THEN
+IF bMachinePrepared AND NOT bInitialized AND (eInternalStep = E_ScrewdriverStep.Idle) THEN
     bInitialized := TRUE;
+END_IF;
+
+IF bReset AND (eInternalStep = E_ScrewdriverStep.Error) THEN
+    bError := FALSE;
+    uiErrorAxis := 0;
+    udErrorCode := TO_UDINT(E_ScrewdriverErrorCode.None);
+    bMoveIssued := FALSE;
+    bInitialized := FALSE;
+    eInternalStep := E_ScrewdriverStep.Idle;
 END_IF;
 
 IF stAxisY.Alarm.bError OR stAxisZ.Alarm.bError THEN
     bError := TRUE;
     eInternalStep := E_ScrewdriverStep.Error;
-
     IF stAxisY.Alarm.bError THEN
         uiErrorAxis := GVL_AxisIndex.ScrewdriverY;
         udErrorCode := stAxisY.Alarm.nErrorID;
@@ -164,6 +206,14 @@ IF stAxisY.Alarm.bError OR stAxisZ.Alarm.bError THEN
         uiErrorAxis := GVL_AxisIndex.ScrewdriverZ;
         udErrorCode := stAxisZ.Alarm.nErrorID;
     END_IF;
+END_IF;
+
+IF fbDualScrewdriverAction.bError AND NOT bError THEN
+    bError := TRUE;
+    uiErrorAxis := 0;
+    udErrorCode := fbDualScrewdriverAction.udErrorCode;
+    bMoveIssued := FALSE;
+    eInternalStep := E_ScrewdriverStep.Error;
 END_IF;
 
 IF fbMoveTimeout.Q AND NOT bError THEN
@@ -176,15 +226,18 @@ END_IF;
 
 CASE eInternalStep OF
     E_ScrewdriverStep.Idle:
-        bScrewdriverSafe := FALSE;
         bCycleAccepted := FALSE;
         bPreTighteningDone := FALSE;
         bSecondTighteningDone := FALSE;
+        bReworkLoosenDone := FALSE;
+        bScrewdriverSafe := bInitialized;
 
         IF NOT bInitialized THEN
+            bScrewdriverSafe := FALSE;
             eInternalStep := E_ScrewdriverStep.InitializeSafeZ;
         ELSIF bCycleRequest AND bWorkpieceSecured THEN
             bCycleAccepted := TRUE;
+            bScrewdriverSafe := FALSE;
             eInternalStep := E_ScrewdriverStep.MoveYForPreTighten;
         END_IF;
 
@@ -198,6 +251,7 @@ CASE eInternalStep OF
         IF M_MoveAxisAbsolute(fTarget := fYZero, fVelocity := fYVelocity,
             uiAxis := GVL_AxisIndex.ScrewdriverY, ioAxis := stAxisY) THEN
             bInitialized := TRUE;
+            bScrewdriverSafe := TRUE;
             eInternalStep := E_ScrewdriverStep.Idle;
         END_IF;
 
@@ -214,7 +268,7 @@ CASE eInternalStep OF
         END_IF;
 
     E_ScrewdriverStep.WaitPreTighten:
-        IF fbPreTighten.Q THEN
+        IF fbDualScrewdriverAction.bDone THEN
             eInternalStep := E_ScrewdriverStep.LiftAfterPreTighten;
         END_IF;
 
@@ -228,12 +282,22 @@ CASE eInternalStep OF
         IF M_MoveAxisAbsolute(fTarget := fYZero, fVelocity := fYVelocity,
             uiAxis := GVL_AxisIndex.ScrewdriverY, ioAxis := stAxisY) THEN
             bPreTighteningDone := TRUE;
-            eInternalStep := E_ScrewdriverStep.WaitProcessReady;
+            bScrewdriverSafe := TRUE;
+            eInternalStep := E_ScrewdriverStep.WaitProcessRequest;
         END_IF;
 
-    E_ScrewdriverStep.WaitProcessReady:
+    E_ScrewdriverStep.WaitProcessRequest:
         bPreTighteningDone := TRUE;
-        IF bProcessReady THEN
+        bScrewdriverSafe := TRUE;
+        IF bProcessDone THEN
+            eInternalStep := E_ScrewdriverStep.WaitDoneAck;
+        ELSIF bRequestReworkLoosen THEN
+            bReworkLoosenDone := FALSE;
+            bScrewdriverSafe := FALSE;
+            eInternalStep := E_ScrewdriverStep.MoveYForReworkLoosen;
+        ELSIF bRequestSecondTighten OR bProcessReady THEN
+            bSecondTighteningDone := FALSE;
+            bScrewdriverSafe := FALSE;
             eInternalStep := E_ScrewdriverStep.MoveYForSecondTighten;
         END_IF;
 
@@ -250,37 +314,78 @@ CASE eInternalStep OF
         END_IF;
 
     E_ScrewdriverStep.WaitSecondTighten:
-        IF fbFinalTighten.Q THEN
-            bSecondTighteningDone := TRUE;
+        IF fbDualScrewdriverAction.bDone THEN
             eInternalStep := E_ScrewdriverStep.LiftAfterSecondTighten;
         END_IF;
 
-	E_ScrewdriverStep.LiftAfterSecondTighten:
-		// 二次拧紧已经完成，允许Adjustment执行COM4夹紧及机构回位。
-		bSecondTighteningDone := TRUE;
-	
-		// ScrewdriverZ同步回到安全高度。
-		// M_MoveAxisAbsolute只有在实际位置进入允许误差范围后才返回TRUE。
-		bScrewdriverSafe := M_MoveAxisAbsolute(
-			fTarget := fZSafe,
-			fVelocity := fZVelocity,
-			uiAxis := GVL_AxisIndex.ScrewdriverZ,
-			ioAxis := stAxisZ
-		);
-	
-		// 必须同时满足：
-		// 1. Adjustment机构已经完成回位；
-		// 2. ScrewdriverZ已经真实到达安全位置；
-		// 才能结束当前调整周期，避免Turntable过早进入下一步。
-		IF bProcessDone AND bScrewdriverSafe THEN
-			eInternalStep := E_ScrewdriverStep.WaitDoneAck;
-		END_IF;
-	
+    E_ScrewdriverStep.LiftAfterSecondTighten:
+        IF M_MoveAxisAbsolute(fTarget := fZSafe, fVelocity := fZVelocity,
+            uiAxis := GVL_AxisIndex.ScrewdriverZ, ioAxis := stAxisZ) THEN
+            eInternalStep := E_ScrewdriverStep.RetreatYAfterSecondTighten;
+        END_IF;
+
+    E_ScrewdriverStep.RetreatYAfterSecondTighten:
+        IF M_MoveAxisAbsolute(fTarget := fYZero, fVelocity := fYVelocity,
+            uiAxis := GVL_AxisIndex.ScrewdriverY, ioAxis := stAxisY) THEN
+            bScrewdriverSafe := TRUE;
+            bSecondTighteningDone := TRUE;
+            eInternalStep := E_ScrewdriverStep.WaitSecondTightenAck;
+        END_IF;
+
+    E_ScrewdriverStep.WaitSecondTightenAck:
+        bScrewdriverSafe := TRUE;
+        bSecondTighteningDone := TRUE;
+        IF NOT (bRequestSecondTighten OR bProcessReady) THEN
+            bSecondTighteningDone := FALSE;
+            eInternalStep := E_ScrewdriverStep.WaitProcessRequest;
+        END_IF;
+
+    E_ScrewdriverStep.MoveYForReworkLoosen:
+        IF M_MoveAxisAbsolute(fTarget := fYWork, fVelocity := fYVelocity,
+            uiAxis := GVL_AxisIndex.ScrewdriverY, ioAxis := stAxisY) THEN
+            eInternalStep := E_ScrewdriverStep.LowerForReworkLoosen;
+        END_IF;
+
+    E_ScrewdriverStep.LowerForReworkLoosen:
+        IF M_MoveAxisAbsolute(fTarget := fZWork, fVelocity := fZVelocity,
+            uiAxis := GVL_AxisIndex.ScrewdriverZ, ioAxis := stAxisZ) THEN
+            eInternalStep := E_ScrewdriverStep.WaitReworkLoosen;
+        END_IF;
+
+    E_ScrewdriverStep.WaitReworkLoosen:
+        IF fbDualScrewdriverAction.bDone THEN
+            eInternalStep := E_ScrewdriverStep.LiftAfterReworkLoosen;
+        END_IF;
+
+    E_ScrewdriverStep.LiftAfterReworkLoosen:
+        IF M_MoveAxisAbsolute(fTarget := fZSafe, fVelocity := fZVelocity,
+            uiAxis := GVL_AxisIndex.ScrewdriverZ, ioAxis := stAxisZ) THEN
+            eInternalStep := E_ScrewdriverStep.RetreatYAfterReworkLoosen;
+        END_IF;
+
+    E_ScrewdriverStep.RetreatYAfterReworkLoosen:
+        IF M_MoveAxisAbsolute(fTarget := fYZero, fVelocity := fYVelocity,
+            uiAxis := GVL_AxisIndex.ScrewdriverY, ioAxis := stAxisY) THEN
+            bScrewdriverSafe := TRUE;
+            bReworkLoosenDone := TRUE;
+            eInternalStep := E_ScrewdriverStep.WaitReworkLoosenAck;
+        END_IF;
+
+    E_ScrewdriverStep.WaitReworkLoosenAck:
+        bScrewdriverSafe := TRUE;
+        bReworkLoosenDone := TRUE;
+        IF NOT bRequestReworkLoosen THEN
+            bReworkLoosenDone := FALSE;
+            eInternalStep := E_ScrewdriverStep.WaitProcessRequest;
+        END_IF;
+
     E_ScrewdriverStep.WaitDoneAck:
+        bScrewdriverSafe := TRUE;
         IF bCycleDoneAck THEN
             bScrewdriverSafe := FALSE;
             bPreTighteningDone := FALSE;
             bSecondTighteningDone := FALSE;
+            bReworkLoosenDone := FALSE;
             eInternalStep := E_ScrewdriverStep.Idle;
         END_IF;
 
@@ -291,7 +396,6 @@ END_CASE;
 
 bRequestAccepted := bCycleRequest AND bCycleAccepted;
 eStep := eInternalStep;
-
 bBusy :=
     (eInternalStep <> E_ScrewdriverStep.Idle)
     AND (eInternalStep <> E_ScrewdriverStep.Error);]]></ST>

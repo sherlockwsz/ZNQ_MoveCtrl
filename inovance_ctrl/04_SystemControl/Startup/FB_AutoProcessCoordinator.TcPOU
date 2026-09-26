@@ -9,6 +9,9 @@ VAR_INPUT
     // 整机停止／流程中止。
     bAbort : BOOL;
 
+    // 沿用整机统一故障复位脉冲，清理双螺丝刀动作及单机事务状态。
+    bReset : BOOL;
+
     // 用于取消正在执行的COM3/COM4夹爪动作。
     bStopRequest : BOOL;
 
@@ -62,7 +65,7 @@ END_VAR]]></Declaration>
 // 2. COM3 动作读取 Damper 上一周期保持的动作请求；
 // 3. Damper 读取本周期 Tray、COM3 的反馈；
 // 4. Adjustment读取Screwdriver上一周期保持的握手并管理COM4；
-// 5. Coordinator将本周期Adjustment反馈转换为Screwdriver通用许可；
+// 5. Coordinator只转接Adjustment与Screwdriver的保持型业务握手；
 // 6. TurntableUnit读取本周期各流程生成的保持型请求。
 // ============================================================
 
@@ -173,6 +176,8 @@ ioAdjustmentProcess(
     bMachinePrepared := bMachinePrepared,
     bStartRequest := ioScrewdriverProcess.bPreTighteningDone,
     bRetractPermit := ioScrewdriverProcess.bSecondTighteningDone,
+    bSecondTightenDone := ioScrewdriverProcess.bSecondTighteningDone,
+    bReworkLoosenDone := ioScrewdriverProcess.bReworkLoosenDone,
     bDoneAck := ioTurntableUnit.stStatus.bAdjustmentDoneAck,
 
     ioAdjustGripperAction := ioAdjustGripperAction,
@@ -192,12 +197,13 @@ END_IF;
 
 // ------------------------------------------------------------
 // 5. 螺丝刀流程
-// 只管理ScrewdriverY/Z与两次拧紧；Adjustment信息通过握手反馈。
+// 只管理ScrewdriverY/Z、两次拧紧及返工拧松；Adjustment信息通过握手反馈。
 // ------------------------------------------------------------
 
 ioScrewdriverProcess(
     bEnable := bStart,
     bAbort := bEffectiveAbort,
+    bReset := bReset,
     bMachinePrepared := bMachinePrepared,
 
     bCycleRequest :=
@@ -209,7 +215,9 @@ ioScrewdriverProcess(
     bCycleDoneAck :=
         ioTurntableUnit.stStatus.bAdjustmentDoneAck,
 
-    bProcessReady := ioAdjustmentProcess.bAdjustmentReady,
+    bRequestSecondTighten := ioAdjustmentProcess.bRequestSecondTighten,
+    bRequestReworkLoosen := ioAdjustmentProcess.bRequestReworkLoosen,
+    bProcessReady := ioAdjustmentProcess.bRequestSecondTighten,
     bProcessDone := ioAdjustmentProcess.bAdjustmentDone,
 
     // 螺丝刀机构
@@ -225,20 +233,19 @@ stTurntableInputForThisScan := ioDamperProcess.stTurntableInput;
 stTurntableInputForThisScan.bAdjustmentAccepted :=
     ioScrewdriverProcess.bRequestAccepted;
 stTurntableInputForThisScan.bAdjustmentStarted :=
-    (ioAdjustmentProcess.eStep = E_AdjustmentStep.WaitAdjustment)
-    AND NOT ioAdjustmentProcess.bAdjustmentReady;
+    ioAdjustmentProcess.bAdjustmentBusy
+    AND (ioAdjustmentProcess.eStep <> E_AdjustmentStep.MoveXYToWork)
+    AND (ioAdjustmentProcess.eStep <> E_AdjustmentStep.LowerZToWork)
+    AND (ioAdjustmentProcess.eStep <> E_AdjustmentStep.OpenGripper);
 stTurntableInputForThisScan.bAdjustmentDone :=
     ioAdjustmentProcess.bAdjustmentDone
     AND NOT ioScrewdriverProcess.bError
-	AND ioScrewdriverProcess.bScrewdriverSafe
-    AND
-    (
-        (ioScrewdriverProcess.eStep = E_ScrewdriverStep.LiftAfterSecondTighten)
-        OR (ioScrewdriverProcess.eStep = E_ScrewdriverStep.WaitDoneAck)
-    );
+	AND ioScrewdriverProcess.bScrewdriverSafe;
 
-// 当前模拟流程按合格反馈；今后可由真实调整结果替换。
-stTurntableInputForThisScan.bAdjustmentQualified := TRUE;
+// 最终质量状态只有FB_AdjustmentProcess维护：无相机模拟为Qualified，
+// 真实视觉由二次拧紧后的最终检测及返调上限决定。
+stTurntableInputForThisScan.bAdjustmentQualified :=
+    ioAdjustmentProcess.bAdjustmentQualified;
 
 bScrewdriverFault :=
     bStart

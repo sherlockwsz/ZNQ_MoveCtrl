@@ -11,7 +11,11 @@ TYPE E_ScrewdriverErrorCode :
     PositionTimeout            := 16#B601,
     ScrewdriverCommandFailed   := 16#B602,
     AdjustmentCommandFailed    := 16#B603,
-    AdjustmentGripperFailed    := 16#B604
+    AdjustmentGripperFailed    := 16#B604,
+    Screwdriver1ActionFailed   := 16#B605,
+    Screwdriver2ActionFailed   := 16#B606,
+    BothScrewdriversFailed     := 16#B607,
+    InvalidScrewdriverMode     := 16#B608
 ) UDINT;
 END_TYPE]]></Declaration>
   </DUT>

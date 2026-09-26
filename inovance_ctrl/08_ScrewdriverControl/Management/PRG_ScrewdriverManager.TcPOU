@@ -8,7 +8,7 @@ VAR
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[// 两个运行实例共用同一FB类型，但端口、缓存、状态机和定时器完全独立。
-// 默认不使能，不接入当前自动流程；仅通过GVL提供在线调试入口。
+// 上层FB_DualScrewdriverAction只通过两个GVL接口组合同步工艺条件。
 fbScrewdriver1(
     bEnable := GVL_Screwdriver.bEnableScrewdriver1,
     ioScrewdriver := GVL_Screwdriver.stScrewdriver1

@@ -1,0 +1,499 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <POU Name="FB_DualScrewdriverAction" Id="{F96BB81B-9E7E-42CF-8E03-FFE00B39DD1E}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_DualScrewdriverAction
+VAR_INPUT
+    bExecute              : BOOL;
+    eMode                 : E_ScrewdriverActionMode;
+    bCancel               : BOOL;
+    bReset                : BOOL;
+    tPreTightenDuration   : TIME;
+    tPreLoosenDuration    : TIME;
+    tFinalTightenDuration : TIME;
+    tReworkLoosenDuration : TIME;
+END_VAR
+VAR_IN_OUT
+    ioScrewdriver1 : ST_ScrewdriverInterface;
+    ioScrewdriver2 : ST_ScrewdriverInterface;
+END_VAR
+VAR_OUTPUT
+    bBusy              : BOOL;
+    bDone              : BOOL;
+    bError             : BOOL;
+    bStopRequired      : BOOL;
+    bStopDone          : BOOL;
+    bStopError         : BOOL;
+    uiFaultScrewdriver : UINT;
+    udErrorCode        : UDINT;
+    eStep              : E_DualScrewdriverActionStep := E_DualScrewdriverActionStep.Idle;
+END_VAR
+VAR
+    fbTightenTimer : TON;
+    fbLoosenTimer  : TON;
+
+    eLatchedMode          : E_ScrewdriverActionMode := E_ScrewdriverActionMode.None;
+    tActiveTightenDuration : TIME;
+    tActiveLoosenDuration : TIME;
+
+    bStarted1 : BOOL;
+    bStarted2 : BOOL;
+    bStopped1 : BOOL;
+    bStopped2 : BOOL;
+
+    bCancelStopRequired1 : BOOL;
+    bCancelStopRequired2 : BOOL;
+    bFaultStopIssued1    : BOOL;
+    bFaultStopIssued2    : BOOL;
+    bMotionMayBeActive   : BOOL;
+    bFault1              : BOOL;
+    bFault2              : BOOL;
+    bResetThisScan       : BOOL;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// 双机动作层只组合两套独立单机接口；串口、协议和重试仍由各自的
+// FB_ScrewdriverControl实例负责。
+fbTightenTimer(
+    IN := (eStep = E_DualScrewdriverActionStep.Tightening),
+    PT := tActiveTightenDuration
+);
+fbLoosenTimer(
+    IN := (eStep = E_DualScrewdriverActionStep.Loosening),
+    PT := tActiveLoosenDuration
+);
+
+bStopDone := FALSE;
+bStopError := FALSE;
+bResetThisScan := FALSE;
+
+// 统一复位只清理动作状态并通过现有单机Reset入口清除旧事务、旧回显和旧方向。
+IF bReset THEN
+    ioScrewdriver1.Cmd.bTighten := FALSE;
+    ioScrewdriver1.Cmd.bLoosen := FALSE;
+    ioScrewdriver1.Cmd.bStop := FALSE;
+    ioScrewdriver1.Cmd.bPcControl := FALSE;
+    ioScrewdriver1.Cmd.bReset := TRUE;
+
+    ioScrewdriver2.Cmd.bTighten := FALSE;
+    ioScrewdriver2.Cmd.bLoosen := FALSE;
+    ioScrewdriver2.Cmd.bStop := FALSE;
+    ioScrewdriver2.Cmd.bPcControl := FALSE;
+    ioScrewdriver2.Cmd.bReset := TRUE;
+
+    eLatchedMode := E_ScrewdriverActionMode.None;
+    bStarted1 := FALSE;
+    bStarted2 := FALSE;
+    bStopped1 := FALSE;
+    bStopped2 := FALSE;
+    bCancelStopRequired1 := FALSE;
+    bCancelStopRequired2 := FALSE;
+    bFaultStopIssued1 := FALSE;
+    bFaultStopIssued2 := FALSE;
+    uiFaultScrewdriver := 0;
+    udErrorCode := TO_UDINT(E_ScrewdriverErrorCode.None);
+    eStep := E_DualScrewdriverActionStep.Idle;
+    bResetThisScan := TRUE;
+END_IF;
+
+IF NOT bResetThisScan THEN
+    // Stop/Abort不复用动作完成路径。若启动命令可能已经发出，则两把都必须
+    // 各自获得本轮Stop的新回显后才发布bStopDone。
+    bMotionMayBeActive :=
+        (eStep = E_DualScrewdriverActionStep.StartTighten)
+        OR (eStep = E_DualScrewdriverActionStep.WaitBothTightening)
+        OR (eStep = E_DualScrewdriverActionStep.Tightening)
+        OR (eStep = E_DualScrewdriverActionStep.SendStopAfterTighten)
+        OR (eStep = E_DualScrewdriverActionStep.WaitBothStoppedAfterTighten)
+        OR (eStep = E_DualScrewdriverActionStep.StartLoosen)
+        OR (eStep = E_DualScrewdriverActionStep.WaitBothLoosening)
+        OR (eStep = E_DualScrewdriverActionStep.Loosening)
+        OR (eStep = E_DualScrewdriverActionStep.SendStopAfterLoosen)
+        OR (eStep = E_DualScrewdriverActionStep.WaitBothStoppedAfterLoosen);
+
+    IF bCancel
+        AND (eStep <> E_DualScrewdriverActionStep.Idle)
+        AND (eStep <> E_DualScrewdriverActionStep.Done)
+        AND (eStep <> E_DualScrewdriverActionStep.CancelStopping)
+        AND (eStep <> E_DualScrewdriverActionStep.Fault)
+    THEN
+        bCancelStopRequired1 :=
+            NOT bStopped1
+            AND (ioScrewdriver1.Runtime.bRunning OR bMotionMayBeActive);
+        bCancelStopRequired2 :=
+            NOT bStopped2
+            AND (ioScrewdriver2.Runtime.bRunning OR bMotionMayBeActive);
+        bStopped1 := bStopped1 OR NOT bCancelStopRequired1;
+        bStopped2 := bStopped2 OR NOT bCancelStopRequired2;
+        eStep := E_DualScrewdriverActionStep.CancelStopping;
+    ELSIF bCancel AND (eStep = E_DualScrewdriverActionStep.Done) THEN
+        eStep := E_DualScrewdriverActionStep.Idle;
+    END_IF;
+
+    // 只在本动作活动期间升级单机故障；Idle保留原有在线调试入口。
+    bFault1 :=
+        ioScrewdriver1.Runtime.bCommandError
+        OR (ioScrewdriver1.Runtime.eState = E_ScrewdriverState.Fault)
+        OR (ioScrewdriver1.Runtime.eState = E_ScrewdriverState.Disabled);
+    bFault2 :=
+        ioScrewdriver2.Runtime.bCommandError
+        OR (ioScrewdriver2.Runtime.eState = E_ScrewdriverState.Fault)
+        OR (ioScrewdriver2.Runtime.eState = E_ScrewdriverState.Disabled);
+
+    IF NOT bCancel
+        AND (eStep <> E_DualScrewdriverActionStep.Idle)
+        AND (eStep <> E_DualScrewdriverActionStep.ResetInterfaces)
+        AND (eStep <> E_DualScrewdriverActionStep.Done)
+        AND (eStep <> E_DualScrewdriverActionStep.CancelStopping)
+        AND (eStep <> E_DualScrewdriverActionStep.Fault)
+        AND (bFault1 OR bFault2)
+    THEN
+        IF bFault1 AND bFault2 THEN
+            uiFaultScrewdriver := 3;
+            udErrorCode := TO_UDINT(E_ScrewdriverErrorCode.BothScrewdriversFailed);
+        ELSIF bFault1 THEN
+            uiFaultScrewdriver := 1;
+            udErrorCode := TO_UDINT(E_ScrewdriverErrorCode.Screwdriver1ActionFailed);
+        ELSE
+            uiFaultScrewdriver := 2;
+            udErrorCode := TO_UDINT(E_ScrewdriverErrorCode.Screwdriver2ActionFailed);
+        END_IF;
+
+        // 已由本轮正常Stop确认停机的实例不重复发送，另一实例仍必须Stop。
+        bFaultStopIssued1 := bStopped1;
+        bFaultStopIssued2 := bStopped2;
+        eStep := E_DualScrewdriverActionStep.Fault;
+    END_IF;
+
+    CASE eStep OF
+        E_DualScrewdriverActionStep.Idle:
+            bStarted1 := FALSE;
+            bStarted2 := FALSE;
+            bStopped1 := FALSE;
+            bStopped2 := FALSE;
+            bCancelStopRequired1 := FALSE;
+            bCancelStopRequired2 := FALSE;
+            bFaultStopIssued1 := FALSE;
+            bFaultStopIssued2 := FALSE;
+
+            IF bExecute AND NOT bCancel THEN
+                IF (eMode = E_ScrewdriverActionMode.PreTighten)
+                    OR (eMode = E_ScrewdriverActionMode.FinalTighten)
+                    OR (eMode = E_ScrewdriverActionMode.ReworkLoosen) THEN
+                    eLatchedMode := eMode;
+                    IF eMode = E_ScrewdriverActionMode.PreTighten THEN
+                        tActiveTightenDuration := tPreTightenDuration;
+                        tActiveLoosenDuration := tPreLoosenDuration;
+                    ELSIF eMode = E_ScrewdriverActionMode.FinalTighten THEN
+                        tActiveTightenDuration := tFinalTightenDuration;
+                    ELSE
+                        tActiveLoosenDuration := tReworkLoosenDuration;
+                    END_IF;
+                    uiFaultScrewdriver := 0;
+                    udErrorCode := TO_UDINT(E_ScrewdriverErrorCode.None);
+                    eStep := E_DualScrewdriverActionStep.ResetInterfaces;
+                ELSE
+                    uiFaultScrewdriver := 0;
+                    udErrorCode := TO_UDINT(E_ScrewdriverErrorCode.InvalidScrewdriverMode);
+                    eStep := E_DualScrewdriverActionStep.Fault;
+                END_IF;
+            END_IF;
+
+        E_DualScrewdriverActionStep.ResetInterfaces:
+            // 每个Execute周期都从干净的单机事务状态开始，旧Ack不能进入本轮。
+            ioScrewdriver1.Cmd.bTighten := FALSE;
+            ioScrewdriver1.Cmd.bLoosen := FALSE;
+            ioScrewdriver1.Cmd.bStop := FALSE;
+            ioScrewdriver1.Cmd.bPcControl := FALSE;
+            ioScrewdriver1.Cmd.bReset := TRUE;
+
+            ioScrewdriver2.Cmd.bTighten := FALSE;
+            ioScrewdriver2.Cmd.bLoosen := FALSE;
+            ioScrewdriver2.Cmd.bStop := FALSE;
+            ioScrewdriver2.Cmd.bPcControl := FALSE;
+            ioScrewdriver2.Cmd.bReset := TRUE;
+
+            bStarted1 := FALSE;
+            bStarted2 := FALSE;
+            bStopped1 := FALSE;
+            bStopped2 := FALSE;
+            eStep := E_DualScrewdriverActionStep.WaitInterfacesReady;
+
+        E_DualScrewdriverActionStep.WaitInterfacesReady:
+            IF ioScrewdriver1.Runtime.bReady AND ioScrewdriver2.Runtime.bReady THEN
+                IF (ioScrewdriver1.Set.bRequirePcControl
+                    AND NOT ioScrewdriver1.Runtime.bPcControlConfirmed)
+                    OR (ioScrewdriver2.Set.bRequirePcControl
+                        AND NOT ioScrewdriver2.Runtime.bPcControlConfirmed) THEN
+                    eStep := E_DualScrewdriverActionStep.StartPcControl;
+                ELSE
+                    IF eLatchedMode = E_ScrewdriverActionMode.ReworkLoosen THEN
+                        eStep := E_DualScrewdriverActionStep.StartLoosen;
+                    ELSE
+                        eStep := E_DualScrewdriverActionStep.StartTighten;
+                    END_IF;
+                END_IF;
+            END_IF;
+
+        E_DualScrewdriverActionStep.StartPcControl:
+            // 两个需要PC控制的实例在同一扫描周期发出请求。
+            ioScrewdriver1.Cmd.bPcControl :=
+                ioScrewdriver1.Set.bRequirePcControl
+                AND NOT ioScrewdriver1.Runtime.bPcControlConfirmed;
+            ioScrewdriver2.Cmd.bPcControl :=
+                ioScrewdriver2.Set.bRequirePcControl
+                AND NOT ioScrewdriver2.Runtime.bPcControlConfirmed;
+            eStep := E_DualScrewdriverActionStep.WaitBothPcControl;
+
+        E_DualScrewdriverActionStep.WaitBothPcControl:
+            IF (NOT ioScrewdriver1.Set.bRequirePcControl
+                OR ioScrewdriver1.Runtime.bPcControlConfirmed)
+                AND (NOT ioScrewdriver2.Set.bRequirePcControl
+                    OR ioScrewdriver2.Runtime.bPcControlConfirmed) THEN
+                IF eLatchedMode = E_ScrewdriverActionMode.ReworkLoosen THEN
+                    eStep := E_DualScrewdriverActionStep.StartLoosen;
+                ELSE
+                    eStep := E_DualScrewdriverActionStep.StartTighten;
+                END_IF;
+            END_IF;
+
+        E_DualScrewdriverActionStep.StartTighten:
+            // 同一扫描周期同时发布COM5/COM6 Tighten。
+            ioScrewdriver1.Cmd.bPcControl := FALSE;
+            ioScrewdriver1.Cmd.bLoosen := FALSE;
+            ioScrewdriver1.Cmd.bStop := FALSE;
+            ioScrewdriver1.Cmd.bTighten := TRUE;
+            ioScrewdriver2.Cmd.bPcControl := FALSE;
+            ioScrewdriver2.Cmd.bLoosen := FALSE;
+            ioScrewdriver2.Cmd.bStop := FALSE;
+            ioScrewdriver2.Cmd.bTighten := TRUE;
+            bStarted1 := FALSE;
+            bStarted2 := FALSE;
+            eStep := E_DualScrewdriverActionStep.WaitBothTightening;
+
+        E_DualScrewdriverActionStep.WaitBothTightening:
+            // bCommandDone是一周期新回显脉冲；与本次命令及方向共同锁存。
+            IF ioScrewdriver1.Runtime.bCommandDone
+                AND (ioScrewdriver1.Runtime.eLastCommand = E_ScrewdriverCommand.TightenStart)
+                AND ioScrewdriver1.Runtime.bRunning
+                AND (ioScrewdriver1.Runtime.eDirection = E_ScrewdriverDirection.Tightening) THEN
+                bStarted1 := TRUE;
+            END_IF;
+            IF ioScrewdriver2.Runtime.bCommandDone
+                AND (ioScrewdriver2.Runtime.eLastCommand = E_ScrewdriverCommand.TightenStart)
+                AND ioScrewdriver2.Runtime.bRunning
+                AND (ioScrewdriver2.Runtime.eDirection = E_ScrewdriverDirection.Tightening) THEN
+                bStarted2 := TRUE;
+            END_IF;
+            IF bStarted1 AND bStarted2 THEN
+                eStep := E_DualScrewdriverActionStep.Tightening;
+            END_IF;
+
+        E_DualScrewdriverActionStep.Tightening:
+            // 只有双机新回显均已确认后才进入本状态并启动完整工艺计时。
+            IF fbTightenTimer.Q THEN
+                eStep := E_DualScrewdriverActionStep.SendStopAfterTighten;
+            END_IF;
+
+        E_DualScrewdriverActionStep.SendStopAfterTighten:
+            ioScrewdriver1.Cmd.bPcControl := FALSE;
+            ioScrewdriver1.Cmd.bTighten := FALSE;
+            ioScrewdriver1.Cmd.bLoosen := FALSE;
+            ioScrewdriver1.Cmd.bStop := TRUE;
+            ioScrewdriver2.Cmd.bPcControl := FALSE;
+            ioScrewdriver2.Cmd.bTighten := FALSE;
+            ioScrewdriver2.Cmd.bLoosen := FALSE;
+            ioScrewdriver2.Cmd.bStop := TRUE;
+            bStopped1 := FALSE;
+            bStopped2 := FALSE;
+            eStep := E_DualScrewdriverActionStep.WaitBothStoppedAfterTighten;
+
+        E_DualScrewdriverActionStep.WaitBothStoppedAfterTighten:
+            IF ioScrewdriver1.Runtime.bCommandDone
+                AND (ioScrewdriver1.Runtime.eLastCommand = E_ScrewdriverCommand.TightenStop)
+                AND NOT ioScrewdriver1.Runtime.bRunning THEN
+                bStopped1 := TRUE;
+            END_IF;
+            IF ioScrewdriver2.Runtime.bCommandDone
+                AND (ioScrewdriver2.Runtime.eLastCommand = E_ScrewdriverCommand.TightenStop)
+                AND NOT ioScrewdriver2.Runtime.bRunning THEN
+                bStopped2 := TRUE;
+            END_IF;
+            IF bStopped1 AND bStopped2 THEN
+                IF eLatchedMode = E_ScrewdriverActionMode.PreTighten THEN
+                    eStep := E_DualScrewdriverActionStep.StartLoosen;
+                ELSE
+                    eStep := E_DualScrewdriverActionStep.Done;
+                END_IF;
+            END_IF;
+
+        E_DualScrewdriverActionStep.StartLoosen:
+            // 预拧紧回松或返工拧松均在同一扫描周期同时发布COM5/COM6 Loosen。
+            ioScrewdriver1.Cmd.bPcControl := FALSE;
+            ioScrewdriver1.Cmd.bTighten := FALSE;
+            ioScrewdriver1.Cmd.bStop := FALSE;
+            ioScrewdriver1.Cmd.bLoosen := TRUE;
+            ioScrewdriver2.Cmd.bPcControl := FALSE;
+            ioScrewdriver2.Cmd.bTighten := FALSE;
+            ioScrewdriver2.Cmd.bStop := FALSE;
+            ioScrewdriver2.Cmd.bLoosen := TRUE;
+            bStarted1 := FALSE;
+            bStarted2 := FALSE;
+            bStopped1 := FALSE;
+            bStopped2 := FALSE;
+            eStep := E_DualScrewdriverActionStep.WaitBothLoosening;
+
+        E_DualScrewdriverActionStep.WaitBothLoosening:
+            IF ioScrewdriver1.Runtime.bCommandDone
+                AND (ioScrewdriver1.Runtime.eLastCommand = E_ScrewdriverCommand.LoosenStart)
+                AND ioScrewdriver1.Runtime.bRunning
+                AND (ioScrewdriver1.Runtime.eDirection = E_ScrewdriverDirection.Loosening) THEN
+                bStarted1 := TRUE;
+            END_IF;
+            IF ioScrewdriver2.Runtime.bCommandDone
+                AND (ioScrewdriver2.Runtime.eLastCommand = E_ScrewdriverCommand.LoosenStart)
+                AND ioScrewdriver2.Runtime.bRunning
+                AND (ioScrewdriver2.Runtime.eDirection = E_ScrewdriverDirection.Loosening) THEN
+                bStarted2 := TRUE;
+            END_IF;
+            IF bStarted1 AND bStarted2 THEN
+                eStep := E_DualScrewdriverActionStep.Loosening;
+            END_IF;
+
+        E_DualScrewdriverActionStep.Loosening:
+            IF fbLoosenTimer.Q THEN
+                eStep := E_DualScrewdriverActionStep.SendStopAfterLoosen;
+            END_IF;
+
+        E_DualScrewdriverActionStep.SendStopAfterLoosen:
+            ioScrewdriver1.Cmd.bPcControl := FALSE;
+            ioScrewdriver1.Cmd.bTighten := FALSE;
+            ioScrewdriver1.Cmd.bLoosen := FALSE;
+            ioScrewdriver1.Cmd.bStop := TRUE;
+            ioScrewdriver2.Cmd.bPcControl := FALSE;
+            ioScrewdriver2.Cmd.bTighten := FALSE;
+            ioScrewdriver2.Cmd.bLoosen := FALSE;
+            ioScrewdriver2.Cmd.bStop := TRUE;
+            bStopped1 := FALSE;
+            bStopped2 := FALSE;
+            eStep := E_DualScrewdriverActionStep.WaitBothStoppedAfterLoosen;
+
+        E_DualScrewdriverActionStep.WaitBothStoppedAfterLoosen:
+            IF ioScrewdriver1.Runtime.bCommandDone
+                AND (ioScrewdriver1.Runtime.eLastCommand = E_ScrewdriverCommand.LoosenStop)
+                AND NOT ioScrewdriver1.Runtime.bRunning THEN
+                bStopped1 := TRUE;
+            END_IF;
+            IF ioScrewdriver2.Runtime.bCommandDone
+                AND (ioScrewdriver2.Runtime.eLastCommand = E_ScrewdriverCommand.LoosenStop)
+                AND NOT ioScrewdriver2.Runtime.bRunning THEN
+                bStopped2 := TRUE;
+            END_IF;
+            IF bStopped1 AND bStopped2 THEN
+                eStep := E_DualScrewdriverActionStep.Done;
+            END_IF;
+
+        E_DualScrewdriverActionStep.Done:
+            IF NOT bExecute THEN
+                eLatchedMode := E_ScrewdriverActionMode.None;
+                eStep := E_DualScrewdriverActionStep.Idle;
+            END_IF;
+
+        E_DualScrewdriverActionStep.CancelStopping:
+            ioScrewdriver1.Cmd.bPcControl := FALSE;
+            ioScrewdriver1.Cmd.bTighten := FALSE;
+            ioScrewdriver1.Cmd.bLoosen := FALSE;
+            ioScrewdriver2.Cmd.bPcControl := FALSE;
+            ioScrewdriver2.Cmd.bTighten := FALSE;
+            ioScrewdriver2.Cmd.bLoosen := FALSE;
+
+            IF ioScrewdriver1.Runtime.bCommandDone
+                AND ((ioScrewdriver1.Runtime.eLastCommand = E_ScrewdriverCommand.TightenStop)
+                    OR (ioScrewdriver1.Runtime.eLastCommand = E_ScrewdriverCommand.LoosenStop))
+                AND NOT ioScrewdriver1.Runtime.bRunning THEN
+                bStopped1 := TRUE;
+            END_IF;
+            IF ioScrewdriver2.Runtime.bCommandDone
+                AND ((ioScrewdriver2.Runtime.eLastCommand = E_ScrewdriverCommand.TightenStop)
+                    OR (ioScrewdriver2.Runtime.eLastCommand = E_ScrewdriverCommand.LoosenStop))
+                AND NOT ioScrewdriver2.Runtime.bRunning THEN
+                bStopped2 := TRUE;
+            END_IF;
+
+            IF bCancelStopRequired1 AND NOT bStopped1 THEN
+                ioScrewdriver1.Cmd.bStop := TRUE;
+            ELSE
+                ioScrewdriver1.Cmd.bStop := FALSE;
+            END_IF;
+            IF bCancelStopRequired2 AND NOT bStopped2 THEN
+                ioScrewdriver2.Cmd.bStop := TRUE;
+            ELSE
+                ioScrewdriver2.Cmd.bStop := FALSE;
+            END_IF;
+
+            bStopError :=
+                (ioScrewdriver1.Runtime.bCommandError
+                    AND ((ioScrewdriver1.Runtime.eLastCommand = E_ScrewdriverCommand.TightenStop)
+                        OR (ioScrewdriver1.Runtime.eLastCommand = E_ScrewdriverCommand.LoosenStop)))
+                OR (ioScrewdriver2.Runtime.bCommandError
+                    AND ((ioScrewdriver2.Runtime.eLastCommand = E_ScrewdriverCommand.TightenStop)
+                        OR (ioScrewdriver2.Runtime.eLastCommand = E_ScrewdriverCommand.LoosenStop)));
+            bStopDone := bStopped1 AND bStopped2 AND NOT bStopError;
+
+            IF bStopDone AND NOT bCancel THEN
+                eLatchedMode := E_ScrewdriverActionMode.None;
+                eStep := E_DualScrewdriverActionStep.Idle;
+            END_IF;
+
+        E_DualScrewdriverActionStep.Fault:
+            // 任一把故障都至少对两把各发布一次Stop尝试。
+            ioScrewdriver1.Cmd.bPcControl := FALSE;
+            ioScrewdriver1.Cmd.bTighten := FALSE;
+            ioScrewdriver1.Cmd.bLoosen := FALSE;
+            ioScrewdriver2.Cmd.bPcControl := FALSE;
+            ioScrewdriver2.Cmd.bTighten := FALSE;
+            ioScrewdriver2.Cmd.bLoosen := FALSE;
+
+            IF NOT bFaultStopIssued1 THEN
+                ioScrewdriver1.Cmd.bStop := TRUE;
+                bFaultStopIssued1 := TRUE;
+            END_IF;
+            IF NOT bFaultStopIssued2 THEN
+                ioScrewdriver2.Cmd.bStop := TRUE;
+                bFaultStopIssued2 := TRUE;
+            END_IF;
+
+            IF ioScrewdriver1.Runtime.bCommandDone
+                AND ((ioScrewdriver1.Runtime.eLastCommand = E_ScrewdriverCommand.TightenStop)
+                    OR (ioScrewdriver1.Runtime.eLastCommand = E_ScrewdriverCommand.LoosenStop))
+                AND NOT ioScrewdriver1.Runtime.bRunning THEN
+                bStopped1 := TRUE;
+            END_IF;
+            IF ioScrewdriver2.Runtime.bCommandDone
+                AND ((ioScrewdriver2.Runtime.eLastCommand = E_ScrewdriverCommand.TightenStop)
+                    OR (ioScrewdriver2.Runtime.eLastCommand = E_ScrewdriverCommand.LoosenStop))
+                AND NOT ioScrewdriver2.Runtime.bRunning THEN
+                bStopped2 := TRUE;
+            END_IF;
+            bStopDone := bStopped1 AND bStopped2;
+            bStopError :=
+                (ioScrewdriver1.Runtime.bCommandError
+                    AND ((ioScrewdriver1.Runtime.eLastCommand = E_ScrewdriverCommand.TightenStop)
+                        OR (ioScrewdriver1.Runtime.eLastCommand = E_ScrewdriverCommand.LoosenStop)))
+                OR (ioScrewdriver2.Runtime.bCommandError
+                    AND ((ioScrewdriver2.Runtime.eLastCommand = E_ScrewdriverCommand.TightenStop)
+                        OR (ioScrewdriver2.Runtime.eLastCommand = E_ScrewdriverCommand.LoosenStop)));
+    END_CASE;
+END_IF;
+
+bDone := (eStep = E_DualScrewdriverActionStep.Done);
+bError := (eStep = E_DualScrewdriverActionStep.Fault);
+bStopRequired :=
+    ((eStep = E_DualScrewdriverActionStep.CancelStopping)
+        AND (bCancelStopRequired1 OR bCancelStopRequired2))
+    OR (eStep = E_DualScrewdriverActionStep.Fault);
+bBusy :=
+    (eStep <> E_DualScrewdriverActionStep.Idle)
+    AND (eStep <> E_DualScrewdriverActionStep.Done)
+    AND (eStep <> E_DualScrewdriverActionStep.Fault);]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

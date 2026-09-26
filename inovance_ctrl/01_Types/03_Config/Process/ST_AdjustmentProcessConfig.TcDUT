@@ -4,6 +4,11 @@
     <Declaration><![CDATA[TYPE ST_AdjustmentProcessConfig :
 STRUCT
     tSimulation : TIME;
+    bUseCoaxVision : BOOL;
+    fAdjustTolerance : LREAL;
+    fQualifiedTolerance : LREAL;
+    nMaxAdjustCount : UINT;
+    nMaxReworkCount : UINT;
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

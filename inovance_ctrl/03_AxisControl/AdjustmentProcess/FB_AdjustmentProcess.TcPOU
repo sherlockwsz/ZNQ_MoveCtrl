@@ -7,9 +7,15 @@ VAR_INPUT
     bAbort           : BOOL;
     bStopRequest     : BOOL;
     bMachinePrepared : BOOL;
-    bStartRequest    : BOOL; // 协调器请求调整机构进入工作流程
-    bRetractPermit   : BOOL; // 协调器允许调整机构撤离
+    bStartRequest    : BOOL;
     bDoneAck         : BOOL;
+
+    // 与Screwdriver流程之间的保持型业务握手。
+    bSecondTightenDone : BOOL;
+    bReworkLoosenDone  : BOOL;
+
+    // 保留原输入符号以兼容现有监控；协调器给它与二次拧紧Done相同的值。
+    bRetractPermit : BOOL;
 END_VAR
 
 VAR_IN_OUT
@@ -21,9 +27,19 @@ VAR_IN_OUT
 END_VAR
 
 VAR_OUTPUT
-    bAdjustmentReady   : BOOL;
+    bAdjustmentReady   : BOOL; // 兼容诊断：与二次拧紧请求保持一致
     bAdjustmentDone    : BOOL;
     bAdjustmentBusy    : BOOL;
+    bAdjustmentQualified : BOOL;
+    bRequestSecondTighten : BOOL;
+    bRequestReworkLoosen  : BOOL;
+    bVisionTimeout     : BOOL;
+    bVisionFault       : BOOL;
+    fVisionCoaxiality  : LREAL;
+    fCorrectionX       : LREAL;
+    fCorrectionY       : LREAL;
+    nAdjustCount       : UINT;
+    nReworkCount       : UINT;
     bError             : BOOL;
     bGripperError      : BOOL;
     uiErrorAxis        : UINT;
@@ -46,12 +62,18 @@ VAR
     fPositionTolerance : LREAL;
     tMoveTimeout : TIME;
 
-    fbAdjustment  : TON;
+    fAdjustTargetX : LREAL;
+    fAdjustTargetY : LREAL;
+    udiVisionRequestId : UDINT;
+    udiExpectedResultId : UDINT;
+    bVisionWithinTolerance : BOOL;
+
     fbMoveTimeout : TON;
+    fbVisionTimeout : TON;
     bTimerRestart : BOOL;
-    eTimedStep    : E_AdjustmentStep := E_AdjustmentStep.Idle;
+    eTimedStep : E_AdjustmentStep := E_AdjustmentStep.Idle;
     bTimedMovement : BOOL;
-    uiMovingAxis   : UINT;
+    uiMovingAxis : UINT;
 
     bXIssued : BOOL;
     bYIssued : BOOL;
@@ -61,7 +83,8 @@ VAR
     bZDone : BOOL;
 END_VAR]]></Declaration>
     <Implementation>
-      <ST><![CDATA[// 沿用现有PositionConfig、MotionConfig、ProcessConfig参数源。
+      <ST><![CDATA[// 沿用现有PositionConfig和MotionConfig；视觉工艺、次数和超时分别来自
+// ProcessConfig与CommunicationConfig，FB内部不保存第二套参数源。
 fXWork := GVL_PositionConfig.stAdjustment.stWork.X;
 fYWork := GVL_PositionConfig.stAdjustment.stWork.Y;
 fZWork := GVL_PositionConfig.stAdjustment.stWork.Z;
@@ -74,18 +97,12 @@ fZVelocity := GVL_MotionConfig.stAdjustment.stZ.fVelocity;
 fPositionTolerance := GVL_MotionConfig.stAdjustment.fPositionTolerance;
 tMoveTimeout := GVL_MotionConfig.stAdjustment.tMoveTimeout;
 
-fbAdjustment(
-    IN := bEnable
-          AND NOT bAbort
-          AND (eStep = E_AdjustmentStep.WaitAdjustment),
-    PT := GVL_ProcessConfig.stAdjustment.tSimulation
-);
-
 bTimerRestart := (eStep <> eTimedStep);
 eTimedStep := eStep;
 bTimedMovement :=
     (eStep = E_AdjustmentStep.MoveXYToWork)
     OR (eStep = E_AdjustmentStep.LowerZToWork)
+    OR (eStep = E_AdjustmentStep.WaitCorrectionXY)
     OR (eStep = E_AdjustmentStep.LiftZToSafe)
     OR (eStep = E_AdjustmentStep.ReturnXYToStandby);
 
@@ -96,6 +113,7 @@ IF bTimedMovement THEN
             uiMovingAxis := GVL_AxisIndex.AdjustmentZ;
 
         E_AdjustmentStep.MoveXYToWork,
+        E_AdjustmentStep.WaitCorrectionXY,
         E_AdjustmentStep.ReturnXYToStandby:
             IF NOT bXDone THEN
                 uiMovingAxis := GVL_AxisIndex.AdjustmentX;
@@ -106,11 +124,19 @@ IF bTimedMovement THEN
 END_IF;
 
 fbMoveTimeout(
+    IN := bEnable AND NOT bAbort AND bTimedMovement AND NOT bTimerRestart,
+    PT := tMoveTimeout
+);
+
+fbVisionTimeout(
     IN := bEnable
           AND NOT bAbort
-          AND bTimedMovement
-          AND NOT bTimerRestart,
-    PT := tMoveTimeout
+          AND
+          (
+              (eStep = E_AdjustmentStep.WaitMeasureResult)
+              OR (eStep = E_AdjustmentStep.WaitFinalMeasure)
+          ),
+    PT := GVL_CommunicationConfig.stCoaxVision.tResultTimeout
 );
 
 stAxisX.AutoCmd.bMoveAbs := FALSE;
@@ -119,9 +145,11 @@ stAxisZ.AutoCmd.bMoveAbs := FALSE;
 bAdjustGripperActionExecute := FALSE;
 eAdjustGripperActionCommand := E_GripperCommand.None;
 
+// bUseCoaxVision只有ProcessConfig一个参数源；ADS接口字段仅发布当前值。
+GVL_CoaxVision.stInterface.bUseCoaxVision :=
+    GVL_ProcessConfig.stAdjustment.bUseCoaxVision;
+
 IF NOT bEnable OR bAbort THEN
-    // 与原协调器行为一致：准备完成后即使自动流程停止，仍调用唯一
-    // Action实例，以便撤销Execute或传递Cancel；准备前命令权仍归Preparation。
     IF bMachinePrepared THEN
         ioAdjustGripperAction(
             bExecute := FALSE,
@@ -136,6 +164,15 @@ IF NOT bEnable OR bAbort THEN
     bAdjustmentReady := FALSE;
     bAdjustmentDone := FALSE;
     bAdjustmentBusy := FALSE;
+    bAdjustmentQualified := FALSE;
+    bRequestSecondTighten := FALSE;
+    bRequestReworkLoosen := FALSE;
+    bVisionTimeout := FALSE;
+    bVisionFault := FALSE;
+    fCorrectionX := 0.0;
+    fCorrectionY := 0.0;
+    nAdjustCount := 0;
+    nReworkCount := 0;
     bError := FALSE;
     bGripperError := FALSE;
     uiErrorAxis := 0;
@@ -146,12 +183,26 @@ IF NOT bEnable OR bAbort THEN
     bXDone := FALSE;
     bYDone := FALSE;
     bZDone := FALSE;
+    GVL_CoaxVision.stInterface.bMeasureRequest := FALSE;
+    GVL_CoaxVision.stInterface.udiRequestId := udiVisionRequestId;
+    GVL_CoaxVision.stInterface.bWithinTolerance := FALSE;
+    GVL_CoaxVision.stInterface.bTimeout := FALSE;
     eStep := E_AdjustmentStep.Idle;
     RETURN;
 END_IF;
 
-// 收到预拧紧完成握手的同一扫描进入XY工作位状态。
 IF (eStep = E_AdjustmentStep.Idle) AND bStartRequest THEN
+    bAdjustmentQualified := FALSE;
+    bVisionTimeout := FALSE;
+    bVisionFault := FALSE;
+    bVisionWithinTolerance := FALSE;
+    fVisionCoaxiality := 0.0;
+    fCorrectionX := 0.0;
+    fCorrectionY := 0.0;
+    fAdjustTargetX := fXWork;
+    fAdjustTargetY := fYWork;
+    nAdjustCount := 0;
+    nReworkCount := 0;
     bXIssued := FALSE;
     bYIssued := FALSE;
     bXDone := FALSE;
@@ -159,15 +210,7 @@ IF (eStep = E_AdjustmentStep.Idle) AND bStartRequest THEN
     eStep := E_AdjustmentStep.MoveXYToWork;
 END_IF;
 
-// 二次拧紧完成后的首扫描进入退出状态。
-IF (eStep = E_AdjustmentStep.WaitAdjustment)
-    AND bAdjustmentReady
-    AND bRetractPermit
-THEN
-    eStep := E_AdjustmentStep.CloseGripper;
-END_IF;
-
-// 准备阶段结束后，COM4命令权归本FB；唯一Action实例不重复调用。
+// 准备阶段结束后，COM4命令权归本FB；Open持续到最终质量结果确定。
 IF bMachinePrepared THEN
     IF eStep = E_AdjustmentStep.OpenGripper THEN
         bAdjustGripperActionExecute := TRUE;
@@ -187,14 +230,10 @@ IF bMachinePrepared THEN
     );
 END_IF;
 
-IF stAxisX.Alarm.bError
-    OR stAxisY.Alarm.bError
-    OR stAxisZ.Alarm.bError
-THEN
+IF stAxisX.Alarm.bError OR stAxisY.Alarm.bError OR stAxisZ.Alarm.bError THEN
     bError := TRUE;
     bGripperError := FALSE;
     eStep := E_AdjustmentStep.Error;
-
     IF stAxisX.Alarm.bError THEN
         uiErrorAxis := GVL_AxisIndex.AdjustmentX;
         udErrorCode := stAxisX.Alarm.nErrorID;
@@ -233,20 +272,19 @@ END_IF;
 CASE eStep OF
     E_AdjustmentStep.Idle:
         bAdjustmentDone := FALSE;
-        bAdjustmentReady := FALSE;
 
     E_AdjustmentStep.MoveXYToWork:
         IF NOT bXDone THEN
             bXDone := M_MoveAxisAbsolute(fTarget := fXWork, fVelocity := fXVelocity,
                 uiAxis := GVL_AxisIndex.AdjustmentX, ioIssued := bXIssued, ioAxis := stAxisX);
         END_IF;
-
         IF NOT bYDone THEN
             bYDone := M_MoveAxisAbsolute(fTarget := fYWork, fVelocity := fYVelocity,
                 uiAxis := GVL_AxisIndex.AdjustmentY, ioIssued := bYIssued, ioAxis := stAxisY);
         END_IF;
-
         IF bXDone AND bYDone THEN
+            fAdjustTargetX := fXWork;
+            fAdjustTargetY := fYWork;
             bZIssued := FALSE;
             bZDone := FALSE;
             eStep := E_AdjustmentStep.LowerZToWork;
@@ -255,24 +293,179 @@ CASE eStep OF
     E_AdjustmentStep.LowerZToWork:
         bZDone := M_MoveAxisAbsolute(fTarget := fZWork, fVelocity := fZVelocity,
             uiAxis := GVL_AxisIndex.AdjustmentZ, ioIssued := bZIssued, ioAxis := stAxisZ);
-
         IF bZDone THEN
             eStep := E_AdjustmentStep.OpenGripper;
         END_IF;
 
     E_AdjustmentStep.OpenGripper:
         IF ioAdjustGripperAction.bDone THEN
-            eStep := E_AdjustmentStep.WaitAdjustment;
+            eStep := E_AdjustmentStep.CheckVisionMode;
         END_IF;
 
-    E_AdjustmentStep.WaitAdjustment:
-        IF fbAdjustment.Q THEN
-            // COM4保持Open；只发布二次拧紧许可，不提前Close。
-            bAdjustmentReady := TRUE;
+    E_AdjustmentStep.CheckVisionMode:
+        fCorrectionX := 0.0;
+        fCorrectionY := 0.0;
+        bVisionWithinTolerance := FALSE;
+        IF NOT GVL_ProcessConfig.stAdjustment.bUseCoaxVision THEN
+            // 无相机模式：不执行额外XY运动，但仍完成二次拧紧。
+            eStep := E_AdjustmentStep.RequestSecondTighten;
+        ELSIF NOT GVL_CoaxVision.stInterface.bOnline THEN
+            // Offline时禁止旧Delta参与运动，本件最终按不合格处理。
+            bVisionFault := TRUE;
+            eStep := E_AdjustmentStep.RequestSecondTighten;
+        ELSE
+            eStep := E_AdjustmentStep.RequestMeasure;
+        END_IF;
+
+    E_AdjustmentStep.RequestMeasure:
+        fCorrectionX := 0.0;
+        fCorrectionY := 0.0;
+        bVisionWithinTolerance := FALSE;
+        udiVisionRequestId := M_NextVisionRequestId();
+        udiExpectedResultId := udiVisionRequestId;
+        eStep := E_AdjustmentStep.WaitMeasureResult;
+
+    E_AdjustmentStep.WaitMeasureResult:
+        IF NOT GVL_CoaxVision.stInterface.bOnline THEN
+            bVisionFault := TRUE;
+            fCorrectionX := 0.0;
+            fCorrectionY := 0.0;
+            eStep := E_AdjustmentStep.RequestSecondTighten;
+        ELSIF fbVisionTimeout.Q THEN
+            bVisionFault := TRUE;
+            bVisionTimeout := TRUE;
+            fCorrectionX := 0.0;
+            fCorrectionY := 0.0;
+            eStep := E_AdjustmentStep.RequestSecondTighten;
+        ELSIF GVL_CoaxVision.stInterface.bResultValid
+            AND (GVL_CoaxVision.stInterface.udiResultId = udiExpectedResultId)
+        THEN
+            fVisionCoaxiality := GVL_CoaxVision.stInterface.fCoaxiality;
+            fCorrectionX := GVL_CoaxVision.stInterface.fDeltaX;
+            fCorrectionY := GVL_CoaxVision.stInterface.fDeltaY;
+            bVisionWithinTolerance :=
+                fVisionCoaxiality <= GVL_ProcessConfig.stAdjustment.fAdjustTolerance;
+            eStep := E_AdjustmentStep.EvaluateAdjustment;
+        END_IF;
+
+    E_AdjustmentStep.EvaluateAdjustment:
+        IF bVisionWithinTolerance
+            OR (nAdjustCount >= GVL_ProcessConfig.stAdjustment.nMaxAdjustCount)
+        THEN
+            eStep := E_AdjustmentStep.RequestSecondTighten;
+        ELSE
+            // Vision的Delta是“从当前状态仍需修正的增量”；轴仍使用绝对目标。
+            fAdjustTargetX := fAdjustTargetX + fCorrectionX;
+            fAdjustTargetY := fAdjustTargetY + fCorrectionY;
+            nAdjustCount := nAdjustCount + 1;
+            eStep := E_AdjustmentStep.StartCorrectionXY;
+        END_IF;
+
+    E_AdjustmentStep.StartCorrectionXY:
+        bXIssued := FALSE;
+        bYIssued := FALSE;
+        bXDone := FALSE;
+        bYDone := FALSE;
+        eStep := E_AdjustmentStep.WaitCorrectionXY;
+
+    E_AdjustmentStep.WaitCorrectionXY:
+        // Z保持工作高度，X/Y同时向累计后的绝对目标运动。
+        IF NOT bXDone THEN
+            bXDone := M_MoveAxisAbsolute(fTarget := fAdjustTargetX, fVelocity := fXVelocity,
+                uiAxis := GVL_AxisIndex.AdjustmentX, ioIssued := bXIssued, ioAxis := stAxisX);
+        END_IF;
+        IF NOT bYDone THEN
+            bYDone := M_MoveAxisAbsolute(fTarget := fAdjustTargetY, fVelocity := fYVelocity,
+                uiAxis := GVL_AxisIndex.AdjustmentY, ioIssued := bYIssued, ioAxis := stAxisY);
+        END_IF;
+        IF bXDone AND bYDone THEN
+            eStep := E_AdjustmentStep.RequestMeasure;
+        END_IF;
+
+    E_AdjustmentStep.RequestSecondTighten:
+        eStep := E_AdjustmentStep.WaitSecondTighten;
+
+    E_AdjustmentStep.WaitSecondTighten:
+        IF bSecondTightenDone OR bRetractPermit THEN
+            IF NOT GVL_ProcessConfig.stAdjustment.bUseCoaxVision THEN
+                // 无相机模拟模式最终按Qualified继续。
+                bAdjustmentQualified := TRUE;
+                eStep := E_AdjustmentStep.CloseGripper;
+            ELSIF bVisionFault THEN
+                // Offline/Timeout本件直接Unqualified，不进入无意义返调。
+                bAdjustmentQualified := FALSE;
+                eStep := E_AdjustmentStep.CloseGripper;
+            ELSE
+                eStep := E_AdjustmentStep.RequestFinalMeasure;
+            END_IF;
+        END_IF;
+
+    E_AdjustmentStep.RequestFinalMeasure:
+        fCorrectionX := 0.0;
+        fCorrectionY := 0.0;
+        bVisionWithinTolerance := FALSE;
+        udiVisionRequestId := M_NextVisionRequestId();
+        udiExpectedResultId := udiVisionRequestId;
+        eStep := E_AdjustmentStep.WaitFinalMeasure;
+
+    E_AdjustmentStep.WaitFinalMeasure:
+        IF NOT GVL_CoaxVision.stInterface.bOnline THEN
+            bVisionFault := TRUE;
+            bAdjustmentQualified := FALSE;
+            fCorrectionX := 0.0;
+            fCorrectionY := 0.0;
+            eStep := E_AdjustmentStep.CloseGripper;
+        ELSIF fbVisionTimeout.Q THEN
+            bVisionFault := TRUE;
+            bVisionTimeout := TRUE;
+            bAdjustmentQualified := FALSE;
+            fCorrectionX := 0.0;
+            fCorrectionY := 0.0;
+            eStep := E_AdjustmentStep.CloseGripper;
+        ELSIF GVL_CoaxVision.stInterface.bResultValid
+            AND (GVL_CoaxVision.stInterface.udiResultId = udiExpectedResultId)
+        THEN
+            fVisionCoaxiality := GVL_CoaxVision.stInterface.fCoaxiality;
+            fCorrectionX := GVL_CoaxVision.stInterface.fDeltaX;
+            fCorrectionY := GVL_CoaxVision.stInterface.fDeltaY;
+            bVisionWithinTolerance :=
+                fVisionCoaxiality <= GVL_ProcessConfig.stAdjustment.fQualifiedTolerance;
+            eStep := E_AdjustmentStep.EvaluateFinalResult;
+        END_IF;
+
+    E_AdjustmentStep.EvaluateFinalResult:
+        IF bVisionWithinTolerance THEN
+            bAdjustmentQualified := TRUE;
+            eStep := E_AdjustmentStep.CloseGripper;
+        ELSIF nReworkCount < GVL_ProcessConfig.stAdjustment.nMaxReworkCount THEN
+            bAdjustmentQualified := FALSE;
+            nReworkCount := nReworkCount + 1;
+            eStep := E_AdjustmentStep.RequestReworkLoosen;
+        ELSE
+            bAdjustmentQualified := FALSE;
+            eStep := E_AdjustmentStep.CloseGripper;
+        END_IF;
+
+    E_AdjustmentStep.RequestReworkLoosen:
+        eStep := E_AdjustmentStep.WaitReworkLoosen;
+
+    E_AdjustmentStep.WaitReworkLoosen:
+        IF bReworkLoosenDone THEN
+            // AdjustmentXYZ与COM4始终未撤离；仅重置本轮修正计数并重新检测。
+            nAdjustCount := 0;
+            fCorrectionX := 0.0;
+            fCorrectionY := 0.0;
+            bVisionWithinTolerance := FALSE;
+            IF GVL_CoaxVision.stInterface.bOnline THEN
+                eStep := E_AdjustmentStep.RequestMeasure;
+            ELSE
+                bVisionFault := TRUE;
+                bAdjustmentQualified := FALSE;
+                eStep := E_AdjustmentStep.CloseGripper;
+            END_IF;
         END_IF;
 
     E_AdjustmentStep.CloseGripper:
-        // AdjustmentZ仅等待COM4 Close完成，不依赖外部机构到位。
         IF ioAdjustGripperAction.bDone THEN
             bZIssued := FALSE;
             bZDone := FALSE;
@@ -282,7 +475,6 @@ CASE eStep OF
     E_AdjustmentStep.LiftZToSafe:
         bZDone := M_MoveAxisAbsolute(fTarget := fZSafe, fVelocity := fZVelocity,
             uiAxis := GVL_AxisIndex.AdjustmentZ, ioIssued := bZIssued, ioAxis := stAxisZ);
-
         IF bZDone THEN
             bXIssued := FALSE;
             bYIssued := FALSE;
@@ -296,12 +488,10 @@ CASE eStep OF
             bXDone := M_MoveAxisAbsolute(fTarget := fXStandby, fVelocity := fXVelocity,
                 uiAxis := GVL_AxisIndex.AdjustmentX, ioIssued := bXIssued, ioAxis := stAxisX);
         END_IF;
-
         IF NOT bYDone THEN
             bYDone := M_MoveAxisAbsolute(fTarget := fYStandby, fVelocity := fYVelocity,
                 uiAxis := GVL_AxisIndex.AdjustmentY, ioIssued := bYIssued, ioAxis := stAxisY);
         END_IF;
-
         IF bXDone AND bYDone THEN
             bAdjustmentDone := TRUE;
             eStep := E_AdjustmentStep.WaitDoneAck;
@@ -311,7 +501,7 @@ CASE eStep OF
         bAdjustmentDone := TRUE;
         IF bDoneAck THEN
             bAdjustmentDone := FALSE;
-            bAdjustmentReady := FALSE;
+            bAdjustmentQualified := FALSE;
             bXIssued := FALSE;
             bYIssued := FALSE;
             bZIssued := FALSE;
@@ -326,7 +516,23 @@ CASE eStep OF
         bError := TRUE;
 END_CASE;
 
-// 发布与当前最终状态一致的兼容诊断值。
+// 保持型握手由状态直接派生，避免单扫描脉冲丢失。
+bRequestSecondTighten :=
+    (eStep = E_AdjustmentStep.RequestSecondTighten)
+    OR (eStep = E_AdjustmentStep.WaitSecondTighten);
+bAdjustmentReady := bRequestSecondTighten;
+bRequestReworkLoosen :=
+    (eStep = E_AdjustmentStep.RequestReworkLoosen)
+    OR (eStep = E_AdjustmentStep.WaitReworkLoosen);
+
+// ADS视觉请求同样保持；只有匹配ExpectedResultId的新结果才会退出等待。
+GVL_CoaxVision.stInterface.bMeasureRequest :=
+    (eStep = E_AdjustmentStep.WaitMeasureResult)
+    OR (eStep = E_AdjustmentStep.WaitFinalMeasure);
+GVL_CoaxVision.stInterface.udiRequestId := udiVisionRequestId;
+GVL_CoaxVision.stInterface.bWithinTolerance := bVisionWithinTolerance;
+GVL_CoaxVision.stInterface.bTimeout := bVisionTimeout;
+
 IF eStep = E_AdjustmentStep.OpenGripper THEN
     bAdjustGripperActionExecute := TRUE;
     eAdjustGripperActionCommand := E_GripperCommand.Open;
@@ -399,6 +605,23 @@ IF ioAxis.State.bReady
 THEN
     ioIssued := FALSE;
     M_MoveAxisAbsolute := TRUE;
+END_IF;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_NextVisionRequestId" Id="{E91B67CF-F17C-4ED5-A315-D0341512F71B}">
+      <Declaration><![CDATA[METHOD PRIVATE M_NextVisionRequestId : UDINT]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// 从当前请求号与Vision最后结果号中的较大者继续递增，PLC重启后也不会
+// 因外部仍保持旧ResultValid而立即消费同号旧结果。
+IF GVL_CoaxVision.stInterface.udiResultId >= udiVisionRequestId THEN
+    M_NextVisionRequestId := GVL_CoaxVision.stInterface.udiResultId + 1;
+ELSE
+    M_NextVisionRequestId := udiVisionRequestId + 1;
+END_IF;
+
+// UDINT回绕时跳过0，保留0作为“尚未请求”的诊断值。
+IF M_NextVisionRequestId = 0 THEN
+    M_NextVisionRequestId := 1;
 END_IF;]]></ST>
       </Implementation>
     </Method>

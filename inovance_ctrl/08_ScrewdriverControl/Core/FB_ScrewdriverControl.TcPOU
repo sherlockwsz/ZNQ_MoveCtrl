@@ -14,6 +14,7 @@ VAR
 
     eInternalState   : E_ScrewdriverState := E_ScrewdriverState.Disabled;
     eDirection       : E_ScrewdriverDirection := E_ScrewdriverDirection.Unknown;
+    eLastMotionDirection : E_ScrewdriverDirection := E_ScrewdriverDirection.Unknown;
     eActiveCommand   : E_ScrewdriverCommand := E_ScrewdriverCommand.None;
     byLatchedStation : BYTE;
     byRetryCount     : USINT;
@@ -30,6 +31,8 @@ VAR
     bFailureCommunication   : BOOL;
     bFailureHandled         : BOOL;
     bBuildOk                : BOOL;
+    bFaultSafeStopActive    : BOOL;
+    bFaultSafeStopAttempted : BOOL;
 
     eFailureError  : E_ScrewdriverError;
     eProtocolResult : E_ScrewdriverProtocolResult;
@@ -78,6 +81,7 @@ IF NOT bEnable THEN
     eInternalState := E_ScrewdriverState.Disabled;
     eActiveCommand := E_ScrewdriverCommand.None;
     eDirection := E_ScrewdriverDirection.Unknown;
+    bFaultSafeStopActive := FALSE;
     byRetryCount := 0;
     bStopPending := FALSE;
     bHadValidReply := FALSE;
@@ -149,6 +153,9 @@ IF bCanProcess THEN
         byRetryCount := 0;
         eActiveCommand := E_ScrewdriverCommand.None;
         eDirection := E_ScrewdriverDirection.Unknown;
+        eLastMotionDirection := E_ScrewdriverDirection.Unknown;
+        bFaultSafeStopActive := FALSE;
+        bFaultSafeStopAttempted := FALSE;
         eInternalState := E_ScrewdriverState.Ready;
         bHadValidReply := FALSE;
 
@@ -271,11 +278,17 @@ IF bCanProcess THEN
         IF bCommandSuccess THEN
             bHadValidReply := TRUE;
             ioScrewdriver.Runtime.bCommandDone := TRUE;
-            ioScrewdriver.Runtime.bCommandError := FALSE;
             ioScrewdriver.Runtime.bCommandConflict := FALSE;
-            ioScrewdriver.Runtime.eError := E_ScrewdriverError.None;
             ioScrewdriver.Runtime.byModbusExceptionCode := 0;
             ioScrewdriver.Runtime.eLastCommand := eActiveCommand;
+
+            // Fault安全Stop的正常回显只证明停止尝试成功，不能清除原通信故障。
+            IF bFaultSafeStopActive THEN
+                ioScrewdriver.Runtime.bCommandError := TRUE;
+            ELSE
+                ioScrewdriver.Runtime.bCommandError := FALSE;
+                ioScrewdriver.Runtime.eError := E_ScrewdriverError.None;
+            END_IF;
 
             CASE eActiveCommand OF
                 E_ScrewdriverCommand.PcControl:
@@ -296,20 +309,27 @@ IF bCanProcess THEN
                     ioScrewdriver.Cmd.bTighten := FALSE;
                     ioScrewdriver.Cmd.bLoosen := FALSE;
                     eDirection := E_ScrewdriverDirection.None;
+                    eLastMotionDirection := E_ScrewdriverDirection.None;
                     bStopPending := FALSE;
             END_CASE;
 
             eActiveCommand := E_ScrewdriverCommand.None;
             byRetryCount := 0;
 
-            CASE eDirection OF
-                E_ScrewdriverDirection.Tightening:
-                    eInternalState := E_ScrewdriverState.RunningTighten;
-                E_ScrewdriverDirection.Loosening:
-                    eInternalState := E_ScrewdriverState.RunningLoosen;
+            IF bFaultSafeStopActive THEN
+                // 安全Stop成功后仍锁存在Fault，等待现有人工Reset。
+                eInternalState := E_ScrewdriverState.Fault;
+                bFaultSafeStopActive := FALSE;
             ELSE
-                eInternalState := E_ScrewdriverState.Ready;
-            END_CASE;
+                CASE eDirection OF
+                    E_ScrewdriverDirection.Tightening:
+                        eInternalState := E_ScrewdriverState.RunningTighten;
+                    E_ScrewdriverDirection.Loosening:
+                        eInternalState := E_ScrewdriverState.RunningLoosen;
+                ELSE
+                    eInternalState := E_ScrewdriverState.Ready;
+                END_CASE;
+            END_IF;
         END_IF;
 
         // 失败出口统一清除本次请求。通信结果不等同于工艺完成。
@@ -330,26 +350,86 @@ IF bCanProcess THEN
                     ioScrewdriver.Cmd.bStop := FALSE;
             END_CASE;
 
-            IF bFailureCommunication THEN
+            IF bFaultSafeStopActive THEN
+                // 安全Stop沿用原有Retry/Timeout；失败后停止重试并保持Fault。
                 eDirection := E_ScrewdriverDirection.Unknown;
-                ioScrewdriver.Runtime.bPcControlConfirmed := FALSE;
-                bHadValidReply := FALSE;
                 bStopPending := FALSE;
                 ioScrewdriver.Cmd.bStop := FALSE;
                 eInternalState := E_ScrewdriverState.Fault;
+                bFaultSafeStopActive := FALSE;
             ELSE
-                CASE eDirection OF
-                    E_ScrewdriverDirection.Tightening:
-                        eInternalState := E_ScrewdriverState.RunningTighten;
-                    E_ScrewdriverDirection.Loosening:
-                        eInternalState := E_ScrewdriverState.RunningLoosen;
+                IF bFailureCommunication THEN
+                    eDirection := E_ScrewdriverDirection.Unknown;
+                    ioScrewdriver.Runtime.bPcControlConfirmed := FALSE;
+                    bHadValidReply := FALSE;
+                    bStopPending := FALSE;
+                    ioScrewdriver.Cmd.bStop := FALSE;
+                    eInternalState := E_ScrewdriverState.Fault;
                 ELSE
-                    eInternalState := E_ScrewdriverState.Ready;
-                END_CASE;
+                    CASE eDirection OF
+                        E_ScrewdriverDirection.Tightening:
+                            eInternalState := E_ScrewdriverState.RunningTighten;
+                        E_ScrewdriverDirection.Loosening:
+                            eInternalState := E_ScrewdriverState.RunningLoosen;
+                    ELSE
+                        eInternalState := E_ScrewdriverState.Ready;
+                    END_CASE;
+                END_IF;
             END_IF;
 
             eActiveCommand := E_ScrewdriverCommand.None;
             byRetryCount := 0;
+            bFailureHandled := TRUE;
+        END_IF;
+
+        // Fault状态只额外放行一次安全Stop；普通启动和PC控制命令仍被禁止。
+        // 端口重连后内部状态可能暂时为Ready，因此同时覆盖“方向未知且故障仍锁存”的情况。
+        IF NOT bFailureHandled
+            AND ioScrewdriver.Cmd.bStop
+            AND NOT bFaultSafeStopAttempted
+            AND
+            (
+                (eInternalState = E_ScrewdriverState.Fault)
+                OR
+                (
+                    ioScrewdriver.Runtime.bCommandError
+                    AND (eDirection = E_ScrewdriverDirection.Unknown)
+                )
+            ) THEN
+
+            // Stop优先，禁止Fault状态残留的普通命令继续执行。
+            ioScrewdriver.Cmd.bPcControl := FALSE;
+            ioScrewdriver.Cmd.bTighten := FALSE;
+            ioScrewdriver.Cmd.bLoosen := FALSE;
+
+            IF (ioScrewdriver.Set.byStationId < 1)
+                OR (ioScrewdriver.Set.byStationId > 247) THEN
+                ioScrewdriver.Cmd.bStop := FALSE;
+                ioScrewdriver.Runtime.bCommandError := TRUE;
+                ioScrewdriver.Runtime.eError := E_ScrewdriverError.InvalidStationId;
+                eInternalState := E_ScrewdriverState.Fault;
+            ELSE
+                CASE eLastMotionDirection OF
+                    E_ScrewdriverDirection.Tightening:
+                        eActiveCommand := E_ScrewdriverCommand.TightenStop;
+                        bStartNewCommand := TRUE;
+
+                    E_ScrewdriverDirection.Loosening:
+                        eActiveCommand := E_ScrewdriverCommand.LoosenStop;
+                        bStartNewCommand := TRUE;
+
+                ELSE
+                    // 没有可靠的最后运动方向时不猜测Stop类型。
+                    ioScrewdriver.Cmd.bStop := FALSE;
+                    eInternalState := E_ScrewdriverState.Fault;
+                END_CASE;
+            END_IF;
+
+            IF bStartNewCommand THEN
+                bFaultSafeStopActive := TRUE;
+                bFaultSafeStopAttempted := TRUE;
+            END_IF;
+            // 防止同一扫描周期继续进入Ready/Running普通命令选择器。
             bFailureHandled := TRUE;
         END_IF;
 
@@ -472,10 +552,23 @@ IF bCanProcess THEN
                 byRetryCount := 0;
                 uiExpectedLength := 0;
                 ioScrewdriver.Runtime.byActiveStationId := byLatchedStation;
-                ioScrewdriver.Runtime.bCommandError := FALSE;
                 ioScrewdriver.Runtime.bCommandConflict := FALSE;
-                ioScrewdriver.Runtime.eError := E_ScrewdriverError.None;
                 ioScrewdriver.Runtime.byModbusExceptionCode := 0;
+
+                // Start报文实际进入发送状态前锁存方向；即使回显丢失也不清除。
+                CASE eActiveCommand OF
+                    E_ScrewdriverCommand.TightenStart:
+                        eLastMotionDirection := E_ScrewdriverDirection.Tightening;
+                        bFaultSafeStopAttempted := FALSE;
+                    E_ScrewdriverCommand.LoosenStart:
+                        eLastMotionDirection := E_ScrewdriverDirection.Loosening;
+                        bFaultSafeStopAttempted := FALSE;
+                END_CASE;
+
+                IF NOT bFaultSafeStopActive THEN
+                    ioScrewdriver.Runtime.bCommandError := FALSE;
+                    ioScrewdriver.Runtime.eError := E_ScrewdriverError.None;
+                END_IF;
 
                 FOR nIndex := 0 TO 31 DO
                     ioScrewdriver.Runtime.aLastTxBuffer[nIndex] := fbProtocol.aTxBuffer[nIndex];
@@ -486,6 +579,10 @@ IF bCanProcess THEN
                 ioScrewdriver.Runtime.bCommandError := TRUE;
                 ioScrewdriver.Runtime.eError := E_ScrewdriverError.InvalidStationId;
                 eActiveCommand := E_ScrewdriverCommand.None;
+                IF bFaultSafeStopActive THEN
+                    eInternalState := E_ScrewdriverState.Fault;
+                    bFaultSafeStopActive := FALSE;
+                END_IF;
             END_IF;
         END_IF;
     END_IF;

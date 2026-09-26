@@ -19,17 +19,27 @@ TYPE E_ScrewdriverStep :
     LiftAfterPreTighten        := 60,
     RetreatYToSafe             := 70,
 
-    // 等待协调器允许继续本机构流程
-    WaitProcessReady           := 80,
+    // Adjustment保持在工作位期间等待业务请求
+    WaitProcessRequest         := 80,
 
     // 二次拧紧
     MoveYForSecondTighten      := 110,
     LowerForSecondTighten      := 120,
     WaitSecondTighten          := 130,
     LiftAfterSecondTighten     := 140,
+    RetreatYAfterSecondTighten := 145,
+    WaitSecondTightenAck       := 150,
+
+    // 二次拧紧后不合格时的返工拧松
+    MoveYForReworkLoosen       := 155,
+    LowerForReworkLoosen       := 160,
+    WaitReworkLoosen           := 165,
+    LiftAfterReworkLoosen      := 170,
+    RetreatYAfterReworkLoosen  := 175,
+    WaitReworkLoosenAck        := 180,
 
     // 本机构流程完成后等待周期确认
-    WaitDoneAck                := 170,
+    WaitDoneAck                := 190,
 
     Error                      := 900
 );

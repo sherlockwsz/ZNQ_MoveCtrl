@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_DualScrewdriverActionStep" Id="{67554B13-A670-4C09-94B3-A7BF4C850BEE}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_DualScrewdriverActionStep :
+(
+    Idle                         := 0,
+    ResetInterfaces              := 5,
+    WaitInterfacesReady          := 10,
+    StartPcControl               := 15,
+    WaitBothPcControl            := 20,
+    StartTighten                 := 30,
+    WaitBothTightening           := 40,
+    Tightening                   := 50,
+    SendStopAfterTighten         := 60,
+    WaitBothStoppedAfterTighten  := 70,
+    StartLoosen                  := 80,
+    WaitBothLoosening            := 90,
+    Loosening                    := 100,
+    SendStopAfterLoosen          := 110,
+    WaitBothStoppedAfterLoosen   := 120,
+    Done                         := 130,
+    CancelStopping               := 800,
+    Fault                        := 900
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

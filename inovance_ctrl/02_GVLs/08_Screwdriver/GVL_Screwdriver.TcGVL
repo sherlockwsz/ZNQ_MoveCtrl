@@ -3,9 +3,9 @@
   <GVL Name="GVL_Screwdriver" Id="{71351413-6719-4619-ABF6-2F53BFAED97C}">
     <Declaration><![CDATA[{attribute 'qualified_only'}
 VAR_GLOBAL
-    // 默认FALSE：本次只增加独立在线调试入口，不自动打开新端口或接入工艺。
-    bEnableScrewdriver1 : BOOL := FALSE;
-    bEnableScrewdriver2 : BOOL := FALSE;
+    // COM5/COM6实际工艺通信默认使能；两个FB实例仍保持端口和事务完全独立。
+    bEnableScrewdriver1 : BOOL := TRUE;
+    bEnableScrewdriver2 : BOOL := TRUE;
 
     stScrewdriver1 : ST_ScrewdriverInterface := (
         Port := (

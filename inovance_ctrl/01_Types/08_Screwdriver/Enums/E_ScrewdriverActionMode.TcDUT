@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_ScrewdriverActionMode" Id="{FDE2068C-5C72-45E2-B638-21074F7B5265}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_ScrewdriverActionMode :
+(
+    None         := 0,
+    PreTighten   := 10,
+    FinalTighten := 20,
+    ReworkLoosen := 30
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

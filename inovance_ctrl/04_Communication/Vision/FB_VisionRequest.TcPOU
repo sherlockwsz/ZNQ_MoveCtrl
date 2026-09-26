@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <POU Name="FB_VisionRequest" Id="{B1359B60-2FDB-42E2-B191-9F88178D7DD0}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_VisionRequest
+VAR_INPUT
+    // 保持到bDone或bFault；撤销后复位本次事务终态。
+    bExecute : BOOL;
+    bCancel : BOOL;
+    bOnline : BOOL;
+    bResultValid : BOOL;
+    udiResultId : UDINT;
+    // 由具体视觉接口报告，但不包含任何业务结果含义。
+    bResultInvalid : BOOL;
+    bServiceFault : BOOL;
+    tTimeout : TIME;
+END_VAR
+VAR_OUTPUT
+    // 直接映射到相机独立ADS接口的PLC请求字段。
+    bRequest : BOOL;
+    udiRequestId : UDINT;
+    udiExpectedResultId : UDINT;
+    bBusy : BOOL;
+    bDone : BOOL;
+    bFault : BOOL;
+    eError : E_VisionError := E_VisionError.None;
+END_VAR
+VAR
+    fbTimeout : TON;
+    bActive : BOOL;
+    udiLastRequestId : UDINT;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// bExecute=FALSE是唯一正常复位条件，保证Done/Fault可被调用者可靠消费。
+IF NOT bExecute THEN
+    fbTimeout(IN := FALSE, PT := tTimeout);
+    bRequest := FALSE;
+    bActive := FALSE;
+    bBusy := FALSE;
+    bDone := FALSE;
+    bFault := FALSE;
+    eError := E_VisionError.None;
+    RETURN;
+END_IF;
+
+// 取消是事务错误状态，但仍由上层业务视觉FB生成可继续流程的Fallback结果。
+IF bCancel THEN
+    fbTimeout(IN := FALSE, PT := tTimeout);
+    bRequest := FALSE;
+    bActive := FALSE;
+    bBusy := FALSE;
+    bDone := FALSE;
+    bFault := TRUE;
+    eError := E_VisionError.Cancelled;
+    RETURN;
+END_IF;
+
+// 终态保持到调用者撤销bExecute。
+IF bDone OR bFault THEN
+    fbTimeout(IN := FALSE, PT := tTimeout);
+    bRequest := FALSE;
+    bActive := FALSE;
+    bBusy := FALSE;
+    RETURN;
+END_IF;
+
+IF NOT bActive THEN
+    // 从本实例已发出的请求号与ADS中最后结果号的较大者继续递增。
+    // PLC重启后Python仍保持旧ResultValid时，也不会误消费旧结果。
+    IF udiResultId >= udiLastRequestId THEN
+        udiRequestId := udiResultId + 1;
+    ELSE
+        udiRequestId := udiLastRequestId + 1;
+    END_IF;
+
+    // 0保留为“尚未请求”的诊断值。
+    IF udiRequestId = 0 THEN
+        udiRequestId := 1;
+    END_IF;
+
+    udiLastRequestId := udiRequestId;
+    udiExpectedResultId := udiRequestId;
+
+    IF NOT bOnline THEN
+        bFault := TRUE;
+        eError := E_VisionError.Offline;
+        RETURN;
+    END_IF;
+
+    bActive := TRUE;
+    bRequest := TRUE;
+    bBusy := TRUE;
+END_IF;
+
+fbTimeout(IN := bActive, PT := tTimeout);
+
+IF NOT bOnline THEN
+    bFault := TRUE;
+    eError := E_VisionError.Offline;
+ELSIF bServiceFault THEN
+    bFault := TRUE;
+    eError := E_VisionError.ServiceFault;
+ELSIF bResultValid AND (udiResultId = udiExpectedResultId) THEN
+    IF bResultInvalid THEN
+        bFault := TRUE;
+        eError := E_VisionError.InvalidResult;
+    ELSE
+        bDone := TRUE;
+        eError := E_VisionError.None;
+    END_IF;
+ELSIF fbTimeout.Q THEN
+    bFault := TRUE;
+    eError := E_VisionError.Timeout;
+END_IF;
+
+// bResultValid=TRUE但ResultId不匹配时不进入任何分支：旧结果被忽略并继续等待。
+IF bDone OR bFault THEN
+    bRequest := FALSE;
+    bActive := FALSE;
+    bBusy := FALSE;
+END_IF;]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

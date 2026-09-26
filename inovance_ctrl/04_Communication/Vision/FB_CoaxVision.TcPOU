@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <POU Name="FB_CoaxVision" Id="{37DEDF81-B2BC-4830-9BF3-1676C063E4E0}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_CoaxVision
+VAR_INPUT
+    bExecute : BOOL;
+    bCancel : BOOL;
+    // 仅透传Adjustment业务评价用于兼容ADS诊断路径，不参与视觉事务判断。
+    bWithinTolerance : BOOL;
+END_VAR
+VAR_OUTPUT
+    stResult : ST_CoaxVisionResult;
+    bBusy : BOOL;
+    bDone : BOOL;
+    bVisionFault : BOOL;
+    bFallbackUsed : BOOL;
+    eVisionError : E_VisionError := E_VisionError.None;
+END_VAR
+VAR
+    // 本FB独占实例；不会与螺钉角度视觉共享事务状态。
+    fbRequest : FB_VisionRequest;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[GVL_CoaxVision.stInterface.bUseCoaxVision :=
+    GVL_ProcessConfig.stAdjustment.eVisionMode = E_VisionMode.Camera;
+GVL_CoaxVision.stInterface.bWithinTolerance := bWithinTolerance;
+
+IF GVL_ProcessConfig.stAdjustment.eVisionMode = E_VisionMode.Simulation THEN
+    // Simulation不占用ADS事务，但仍经过与Camera完全相同的stResult出口。
+    fbRequest(
+        bExecute := FALSE,
+        bCancel := bCancel,
+        bOnline := GVL_CoaxVision.stInterface.bOnline,
+        bResultValid := GVL_CoaxVision.stInterface.bResultValid,
+        udiResultId := GVL_CoaxVision.stInterface.udiResultId,
+        bResultInvalid := GVL_CoaxVision.stInterface.bResultInvalid,
+        bServiceFault := GVL_CoaxVision.stInterface.bServiceFault,
+        tTimeout := GVL_CommunicationConfig.stCoaxVision.tResultTimeout
+    );
+    GVL_CoaxVision.stInterface.bMeasureRequest := FALSE;
+    GVL_CoaxVision.stInterface.udiRequestId := fbRequest.udiRequestId;
+    GVL_CoaxVision.stInterface.bTimeout := FALSE;
+
+    IF NOT bExecute THEN
+        stResult.bValid := FALSE;
+        stResult.fCoaxiality := 0.0;
+        stResult.fDeltaX := 0.0;
+        stResult.fDeltaY := 0.0;
+        bBusy := FALSE;
+        bDone := FALSE;
+        bVisionFault := FALSE;
+        bFallbackUsed := FALSE;
+        eVisionError := E_VisionError.None;
+    ELSIF bCancel THEN
+        stResult.bValid := FALSE;
+        stResult.fCoaxiality := 0.0;
+        stResult.fDeltaX := 0.0;
+        stResult.fDeltaY := 0.0;
+        bBusy := FALSE;
+        bDone := TRUE;
+        bVisionFault := TRUE;
+        bFallbackUsed := TRUE;
+        eVisionError := E_VisionError.Cancelled;
+    ELSE
+        stResult.bValid := TRUE;
+        stResult.fCoaxiality := GVL_ProcessConfig.stAdjustment.fSimulatedCoaxiality;
+        stResult.fDeltaX := GVL_ProcessConfig.stAdjustment.fSimulatedDeltaX;
+        stResult.fDeltaY := GVL_ProcessConfig.stAdjustment.fSimulatedDeltaY;
+        bBusy := FALSE;
+        bDone := TRUE;
+        bVisionFault := FALSE;
+        bFallbackUsed := FALSE;
+        eVisionError := E_VisionError.None;
+    END_IF;
+ELSE
+    fbRequest(
+        bExecute := bExecute,
+        bCancel := bCancel,
+        bOnline := GVL_CoaxVision.stInterface.bOnline,
+        bResultValid := GVL_CoaxVision.stInterface.bResultValid,
+        udiResultId := GVL_CoaxVision.stInterface.udiResultId,
+        bResultInvalid := GVL_CoaxVision.stInterface.bResultInvalid,
+        bServiceFault := GVL_CoaxVision.stInterface.bServiceFault,
+        tTimeout := GVL_CommunicationConfig.stCoaxVision.tResultTimeout
+    );
+
+    GVL_CoaxVision.stInterface.bMeasureRequest := fbRequest.bRequest;
+    GVL_CoaxVision.stInterface.udiRequestId := fbRequest.udiRequestId;
+    GVL_CoaxVision.stInterface.bTimeout :=
+        fbRequest.bFault AND (fbRequest.eError = E_VisionError.Timeout);
+
+    IF NOT bExecute THEN
+        stResult.bValid := FALSE;
+        stResult.fCoaxiality := 0.0;
+        stResult.fDeltaX := 0.0;
+        stResult.fDeltaY := 0.0;
+        bBusy := FALSE;
+        bDone := FALSE;
+        bVisionFault := FALSE;
+        bFallbackUsed := FALSE;
+        eVisionError := E_VisionError.None;
+    ELSIF fbRequest.bDone THEN
+        stResult.bValid := TRUE;
+        stResult.fCoaxiality := GVL_CoaxVision.stInterface.fCoaxiality;
+        stResult.fDeltaX := GVL_CoaxVision.stInterface.fDeltaX;
+        stResult.fDeltaY := GVL_CoaxVision.stInterface.fDeltaY;
+        bBusy := FALSE;
+        bDone := TRUE;
+        bVisionFault := FALSE;
+        bFallbackUsed := FALSE;
+        eVisionError := E_VisionError.None;
+    ELSIF fbRequest.bFault THEN
+        // 调试阶段统一Fallback：结果可被业务层消费，但bValid=FALSE明确区分真实0值。
+        stResult.bValid := FALSE;
+        stResult.fCoaxiality := 0.0;
+        stResult.fDeltaX := 0.0;
+        stResult.fDeltaY := 0.0;
+        bBusy := FALSE;
+        bDone := TRUE;
+        bVisionFault := TRUE;
+        bFallbackUsed := TRUE;
+        eVisionError := fbRequest.eError;
+    ELSE
+        bBusy := fbRequest.bBusy;
+        bDone := FALSE;
+        bVisionFault := FALSE;
+        bFallbackUsed := FALSE;
+        eVisionError := E_VisionError.None;
+    END_IF;
+END_IF;]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

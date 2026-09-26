@@ -74,6 +74,11 @@ VAR_OUTPUT
     //==========================================================
     bPrePositionDone : BOOL;
 
+    // 最近一次螺钉角度视觉事务诊断；Fallback结果仍允许当前取料流程继续。
+    bVisionFault : BOOL;
+    bVisionFallbackUsed : BOOL;
+    eVisionError : E_VisionError := E_VisionError.None;
+
     // 发送给FB_TurntableProcess的保持型请求。
     stTurntableInput : ST_DamperTurntableInput;
     // 最近一次完成调整的料盘编号。
@@ -253,8 +258,8 @@ VAR
 	// 相机检测与旋转运行变量
 	//==============================================================
 	
-	// 模拟相机检测定时器。
-	fbSimulatedVisionDetection : TON;
+	// 螺钉角度业务视觉封装；内部拥有独立FB_VisionRequest实例。
+	fbScrewAngleVision : FB_ScrewAngleVision;
 	
 	// 相机对准当前阻尼器时，DamperXY的目标位置。
 	fCurrentVisionX : LREAL;
@@ -296,6 +301,15 @@ trigReinitializeCoordinates(
 
 bGripperActionExecute := FALSE;
 eGripperActionCommand := E_GripperCommand.None;
+
+// 机械流程只保持请求并消费统一结果；Simulation延时、ADS握手和Fallback
+// 均封装在FB_ScrewAngleVision中。
+fbScrewAngleVision(
+    bExecute := bBusy
+                AND (eCurrentStep = E_DamperProcessStep.TakeCurrentDamper)
+                AND (eTakeStep = E_DamperTakeStep.AcquireVisionResult),
+    bCancel := bAbort
+);
 
 //==============================================================
 // 外部中止优先级最高
@@ -410,28 +424,6 @@ bTrayChangeRequest :=
     eCurrentStep
     = E_DamperProcessStep.WaitTrayChange;
 
-//==============================================================
-// 模拟取料前相机检测
-//
-// 只有M_TakeDamper进入SimulateVisionDetection步骤时计时。
-// 离开该步骤后TON自动复位，为下一件阻尼器做准备。
-//==============================================================
-fbSimulatedVisionDetection(
-    IN :=
-        bBusy
-        AND
-        (
-            eCurrentStep
-            = E_DamperProcessStep.TakeCurrentDamper
-        )
-        AND
-        (
-            eTakeStep
-            = E_DamperTakeStep.SimulateVisionDetection
-        ),
-
-    PT := GVL_ProcessConfig.stVision.tDetectionDelay
-);
 //==============================================================
 // 7. 五盘阻尼器上下料主流程
 //==============================================================
@@ -1047,18 +1039,6 @@ bResetRotationDoneLatched := FALSE;
 
 
 //==============================================================
-// 3. 关闭模拟相机定时器
-//
-// 主体在RETURN后不会继续调用该定时器，
-// 因此必须在这里显式使用IN=FALSE复位。
-//==============================================================
-fbSimulatedVisionDetection(
-    IN := FALSE,
-    PT := GVL_ProcessConfig.stVision.tDetectionDelay
-);
-
-
-//==============================================================
 // 4. 撤销发往转台的全部请求
 //
 // stTurntableInput.bEnable=FALSE后，
@@ -1617,6 +1597,9 @@ CASE eTakeStep OF
 		// 清除上一件阻尼器锁存的绝对角度。
 		fCameraAngleLatched := GVL_PositionConfig.stDamper.fRotationZero;
 		fScanTargetAngle := GVL_PositionConfig.stDamper.fRotationZero;
+		bVisionFault := FALSE;
+		bVisionFallbackUsed := FALSE;
+		eVisionError := E_VisionError.None;
 	
 		// 清除DamperRotation发令状态。
 		bRotationCommandIssued := FALSE;
@@ -1666,21 +1649,23 @@ CASE eTakeStep OF
             ioAxisY := ioAxisY
         ) THEN
             eTakeStep :=
-                E_DamperTakeStep.SimulateVisionDetection;
+                E_DamperTakeStep.AcquireVisionResult;
         END_IF;
 
 
     //==========================================================
-	// 3. 延时2秒模拟相机检测
+	// 3. 获取统一螺钉角度视觉结果
 	//
-	// 当前固定返回60°绝对相机角度。
-	// 此处只锁存角度，不立即旋转。
+	// Simulation与Camera均由FB_ScrewAngleVision返回相同强类型结果。
+	// 相机异常时返回0° Fallback，同时保留诊断并允许流程继续。
 	//==========================================================
-	E_DamperTakeStep.SimulateVisionDetection:
-		IF fbSimulatedVisionDetection.Q THEN
+	E_DamperTakeStep.AcquireVisionResult:
+		IF fbScrewAngleVision.bDone THEN
 			// 锁存本次检测得到的绝对相机角度。
-			fCameraAngleLatched :=
-				GVL_ProcessConfig.stVision.fCameraAngle;
+			fCameraAngleLatched := fbScrewAngleVision.stResult.fAngle;
+			bVisionFault := fbScrewAngleVision.bVisionFault;
+			bVisionFallbackUsed := fbScrewAngleVision.bFallbackUsed;
+			eVisionError := fbScrewAngleVision.eVisionError;
 	
 			// 旋转将在夹爪夹紧阻尼器后执行。
 			bRotationCommandIssued := FALSE;

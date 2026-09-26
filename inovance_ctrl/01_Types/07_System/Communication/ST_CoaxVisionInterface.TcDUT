@@ -18,8 +18,10 @@ STRUCT
     fCoaxiality : LREAL;
     fDeltaX : LREAL;
     fDeltaY : LREAL;
+    bResultInvalid : BOOL;
+    bServiceFault : BOOL;
 
-    // PLC -> Vision / HMI诊断：针对当前阶段阈值的判断及超时状态。
+    // PLC -> Vision / HMI诊断：业务评价与当前请求超时状态。
     bWithinTolerance : BOOL;
     bTimeout : BOOL;
 END_STRUCT

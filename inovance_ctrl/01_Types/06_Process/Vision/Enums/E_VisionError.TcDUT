@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="E_VisionError" Id="{A94107C1-DBBD-4229-BD07-6FADA08CE2A2}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE E_VisionError :
+(
+    None          := 0,
+    Offline       := 10,
+    Timeout       := 20,
+    InvalidResult := 30,
+    ServiceFault  := 40,
+    Cancelled     := 50
+);
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

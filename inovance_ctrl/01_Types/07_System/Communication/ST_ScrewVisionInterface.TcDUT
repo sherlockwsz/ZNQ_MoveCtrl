@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_ScrewVisionInterface" Id="{5793EC76-EFC6-418E-B9D4-F4EED29F7D86}">
+    <Declaration><![CDATA[TYPE ST_ScrewVisionInterface :
+STRUCT
+    // PLC -> Vision / 诊断：TRUE表示当前使用真实螺钉角度相机。
+    bUseScrewVision : BOOL;
+    // Vision -> PLC：Python Vision Service在线心跳状态。
+    bOnline : BOOL;
+
+    // PLC -> Vision：请求保持到匹配结果、异常或取消。
+    bMeasureRequest : BOOL;
+    udiRequestId : UDINT;
+
+    // Vision -> PLC：事务包络与强类型业务结果。
+    bResultValid : BOOL;
+    udiResultId : UDINT;
+    fAngle : LREAL;
+    bDetected : BOOL;
+    fConfidence : LREAL;
+    bResultInvalid : BOOL;
+    bServiceFault : BOOL;
+
+    // PLC -> Vision / HMI诊断。
+    bTimeout : BOOL;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

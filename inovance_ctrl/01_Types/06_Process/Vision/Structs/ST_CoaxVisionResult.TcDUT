@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_CoaxVisionResult" Id="{1BD94FBF-BEB1-4A36-BBCB-6950A87F8FEC}">
+    <Declaration><![CDATA[TYPE ST_CoaxVisionResult :
+STRUCT
+    // TRUE仅表示真实测量或Simulation结果有效；Fallback时保持FALSE。
+    bValid      : BOOL;
+    fCoaxiality : LREAL;
+    fDeltaX     : LREAL;
+    fDeltaY     : LREAL;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

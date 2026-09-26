@@ -117,6 +117,12 @@
     <Compile Include="01_Types\06_Process\Adjustment\Enums\E_AdjustmentStep.TcDUT">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="01_Types\06_Process\Vision\Enums\E_VisionMode.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\06_Process\Vision\Enums\E_VisionError.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="01_Types\07_System\Enums\Startup\E_AutoStartErrorCode.TcDUT">
       <SubType>Code</SubType>
     </Compile>
@@ -229,6 +235,12 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="01_Types\06_Process\Damper\Structs\ST_DamperSlot.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\06_Process\Vision\Structs\ST_CoaxVisionResult.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\06_Process\Vision\Structs\ST_ScrewAngleVisionResult.TcDUT">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="01_Types\05_Gripper\Structs\ST_GripperChannelFeedback.TcDUT">
@@ -394,6 +406,15 @@
     <Compile Include="04_Communication\Serial\FB_SerialPort.TcPOU">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="04_Communication\Vision\FB_VisionRequest.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="04_Communication\Vision\FB_CoaxVision.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="04_Communication\Vision\FB_ScrewAngleVision.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="06_Programs\MAIN.TcPOU">
       <SubType>Code</SubType>
     </Compile>
@@ -462,6 +483,10 @@
       <LinkAlways>true</LinkAlways>
     </Compile>
     <Compile Include="02_GVLs\04_Communication\GVL_CoaxVision.TcGVL">
+      <SubType>Code</SubType>
+      <LinkAlways>true</LinkAlways>
+    </Compile>
+    <Compile Include="02_GVLs\04_Communication\GVL_ScrewVision.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>
     </Compile>
@@ -551,7 +576,7 @@
     <Compile Include="01_Types\03_Config\Communication\ST_HmiCommunicationConfig.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="01_Types\03_Config\Communication\ST_CoaxVisionCommunicationConfig.TcDUT">
+    <Compile Include="01_Types\03_Config\Communication\ST_VisionCommunicationConfig.TcDUT">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="01_Types\03_Config\Communication\ST_GripperCommunicationConfig.TcDUT">
@@ -564,6 +589,9 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="01_Types\07_System\Communication\ST_CoaxVisionInterface.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="01_Types\07_System\Communication\ST_ScrewVisionInterface.TcDUT">
       <SubType>Code</SubType>
     </Compile>
   </ItemGroup>
@@ -613,6 +641,9 @@
     <Folder Include="01_Types\06_Process\Turntable" />
     <Folder Include="01_Types\06_Process\Turntable\Enums" />
     <Folder Include="01_Types\06_Process\Turntable\Structs" />
+    <Folder Include="01_Types\06_Process\Vision" />
+    <Folder Include="01_Types\06_Process\Vision\Enums" />
+    <Folder Include="01_Types\06_Process\Vision\Structs" />
     <Folder Include="01_Types\07_System" />
     <Folder Include="01_Types\07_System\Communication" />
     <Folder Include="01_Types\07_System\Enums" />
@@ -649,6 +680,7 @@
     <Folder Include="03_AxisControl\Supervision" />
     <Folder Include="04_Communication" />
     <Folder Include="04_Communication\Serial" />
+    <Folder Include="04_Communication\Vision" />
     <Folder Include="04_SystemControl" />
     <Folder Include="04_SystemControl\Communication" />
     <Folder Include="04_SystemControl\Homing" />

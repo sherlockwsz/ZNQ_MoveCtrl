@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
+  <DUT Name="ST_VisionCommunicationConfig" Id="{3C4E5581-0439-4A93-BD5E-A94E7CF7AD08}">
+    <Declaration><![CDATA[TYPE ST_VisionCommunicationConfig :
+STRUCT
+    // PLC发出测量请求后等待Python Vision Service返回匹配ResultId的最长时间。
+    tResultTimeout : TIME;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

@@ -3,9 +3,12 @@
   <DUT Name="ST_VisionProcessConfig" Id="{42274acc-75c3-4a04-812c-ebbc4875d172}">
     <Declaration><![CDATA[TYPE ST_VisionProcessConfig :
 STRUCT
+    eMode : E_VisionMode;
     tDetectionDelay : TIME;
-    // 相机检测后的DamperRotation绝对目标角度，单位与NC轴缩放一致。
-    fCameraAngle : LREAL;
+    // Simulation模式返回的DamperRotation绝对目标角度，单位与NC轴缩放一致。
+    fSimulatedAngle : LREAL;
+    bSimulatedDetected : BOOL;
+    fSimulatedConfidence : LREAL;
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

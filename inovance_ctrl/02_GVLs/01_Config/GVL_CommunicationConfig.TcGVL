@@ -5,7 +5,8 @@
 VAR_GLOBAL CONSTANT
     stHmi : ST_HmiCommunicationConfig := (tWatchdogTimeout := T#2S);
     stGripper : ST_GripperCommunicationConfig := (tAdsTimeout := T#2S, tPollInterval := T#150MS);
-    stCoaxVision : ST_CoaxVisionCommunicationConfig := (tResultTimeout := T#5S);
+    stCoaxVision : ST_VisionCommunicationConfig := (tResultTimeout := T#5S);
+    stScrewVision : ST_VisionCommunicationConfig := (tResultTimeout := T#5S);
 END_VAR]]></Declaration>
   </GVL>
 </TcPlcObject>

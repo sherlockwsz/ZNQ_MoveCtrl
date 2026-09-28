@@ -1,6 +1,6 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
-  <GVL Name="GVL_Screwdriver" Id="{71351413-6719-4619-ABF6-2F53BFAED97C}">
+  <GVL Name="GVL_Screwdriver" Id="{71351413-6719-4619-abf6-2f53bfaed97c}">
     <Declaration><![CDATA[{attribute 'qualified_only'}
 VAR_GLOBAL
     // COM5/COM6实际工艺通信默认使能；两个FB实例仍保持端口和事务完全独立。
@@ -48,7 +48,7 @@ VAR_GLOBAL
             tReplyTimeout := T#3S
         ),
         Set := (
-            byStationId       := 2,
+            byStationId       := 1,
             bExpectReply      := TRUE,
             bRequirePcControl := TRUE,
             nMaxRetry         := 1

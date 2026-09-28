@@ -11,6 +11,7 @@ VAR_OUTPUT
     bBusy : BOOL;
     bDone : BOOL;
     bVisionFault : BOOL;
+    // 为兼容现有监控符号保留；本版本已取消Fallback，因此始终为FALSE。
     bFallbackUsed : BOOL;
     eVisionError : E_VisionError := E_VisionError.None;
 END_VAR
@@ -41,7 +42,8 @@ IF GVL_ProcessConfig.stVision.eMode = E_VisionMode.Simulation THEN
     IF NOT bExecute THEN
         fbSimulationDelay(IN := FALSE, PT := GVL_ProcessConfig.stVision.tDetectionDelay);
         stResult.bValid := FALSE;
-        stResult.fAngle := 0.0;
+        stResult.fDetectedAngle := 0.0;
+        stResult.fCorrectionAngle := 0.0;
         stResult.bDetected := FALSE;
         stResult.fConfidence := 0.0;
         bBusy := FALSE;
@@ -52,13 +54,14 @@ IF GVL_ProcessConfig.stVision.eMode = E_VisionMode.Simulation THEN
     ELSIF bCancel THEN
         fbSimulationDelay(IN := FALSE, PT := GVL_ProcessConfig.stVision.tDetectionDelay);
         stResult.bValid := FALSE;
-        stResult.fAngle := 0.0;
+        stResult.fDetectedAngle := 0.0;
+        stResult.fCorrectionAngle := 0.0;
         stResult.bDetected := FALSE;
         stResult.fConfidence := 0.0;
         bBusy := FALSE;
         bDone := TRUE;
         bVisionFault := TRUE;
-        bFallbackUsed := TRUE;
+        bFallbackUsed := FALSE;
         eVisionError := E_VisionError.Cancelled;
     ELSE
         fbSimulationDelay(
@@ -68,7 +71,10 @@ IF GVL_ProcessConfig.stVision.eMode = E_VisionMode.Simulation THEN
 
         IF fbSimulationDelay.Q THEN
             stResult.bValid := TRUE;
-            stResult.fAngle := GVL_ProcessConfig.stVision.fSimulatedAngle;
+            stResult.fDetectedAngle :=
+                GVL_ProcessConfig.stVision.fSimulatedDetectedAngle;
+            stResult.fCorrectionAngle :=
+                GVL_ProcessConfig.stVision.fSimulatedCorrectionAngle;
             stResult.bDetected := GVL_ProcessConfig.stVision.bSimulatedDetected;
             stResult.fConfidence := GVL_ProcessConfig.stVision.fSimulatedConfidence;
             bBusy := FALSE;
@@ -100,7 +106,8 @@ ELSE
 
     IF NOT bExecute THEN
         stResult.bValid := FALSE;
-        stResult.fAngle := 0.0;
+        stResult.fDetectedAngle := 0.0;
+        stResult.fCorrectionAngle := 0.0;
         stResult.bDetected := FALSE;
         stResult.fConfidence := 0.0;
         bBusy := FALSE;
@@ -110,7 +117,10 @@ ELSE
         eVisionError := E_VisionError.None;
     ELSIF fbRequest.bDone THEN
         stResult.bValid := TRUE;
-        stResult.fAngle := GVL_ScrewVision.stInterface.fAngle;
+        stResult.fDetectedAngle :=
+            GVL_ScrewVision.stInterface.fDetectedAngle;
+        stResult.fCorrectionAngle :=
+            GVL_ScrewVision.stInterface.fCorrectionAngle;
         stResult.bDetected := GVL_ScrewVision.stInterface.bDetected;
         stResult.fConfidence := GVL_ScrewVision.stInterface.fConfidence;
         bBusy := FALSE;
@@ -120,13 +130,14 @@ ELSE
         eVisionError := E_VisionError.None;
     ELSIF fbRequest.bFault THEN
         stResult.bValid := FALSE;
-        stResult.fAngle := 0.0;
+        stResult.fDetectedAngle := 0.0;
+        stResult.fCorrectionAngle := 0.0;
         stResult.bDetected := FALSE;
         stResult.fConfidence := 0.0;
         bBusy := FALSE;
         bDone := TRUE;
         bVisionFault := TRUE;
-        bFallbackUsed := TRUE;
+        bFallbackUsed := FALSE;
         eVisionError := fbRequest.eError;
     ELSE
         bBusy := fbRequest.bBusy;

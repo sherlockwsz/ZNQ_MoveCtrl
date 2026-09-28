@@ -11,15 +11,15 @@ TYPE E_DamperTakeStep :
     EnsureSafeZ          := 10,// 确认DamperZ位于安全高度。
     MoveXYToVisionPosition     := 11,// XY移动，使相机中心对准当前阻尼器。
 
-    AcquireVisionResult        := 12,// 请求统一螺钉角度视觉结果，并锁存绝对角度。
+    AcquireVisionResult        := 12,// 请求统一螺钉角度视觉结果，并分别锁存检测角度与机械修正量。
 
     MoveXYToSlot               := 20,// 检测完成后，XY回到阻尼器理论料位。
     LowerZToSlot         := 30,// Z轴下降到料盘取料高度。
     ClampPlaceholder     := 40,// 夹爪夹紧占位。
-    RotationToCameraAngle := 50,// Z轴抬升和DamperRotation绝对运动到相机角度并行执行。
+    RotationToCameraAngle := 50,// 兼容保留步骤名：Z轴抬升与按需执行一次DamperRotation修正并行。
     MoveXYToTransfer     := 60, // 两个并行动作均完成后，XY移动到转台备料位。
 	// XY到达备料位、Z保持110mm时，
-	// DamperRotation绝对运动到相机角度+扫码偏移角。
+	// DamperRotation绝对运动到本件实际机械基准角度+扫码偏移角。
 	RotationToScanAngle := 65,
     LowerZToTransfer     := 70,
     ReleasePlaceholder   := 80,

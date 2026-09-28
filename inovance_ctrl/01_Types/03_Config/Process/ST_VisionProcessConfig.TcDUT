@@ -5,10 +5,14 @@
 STRUCT
     eMode : E_VisionMode;
     tDetectionDelay : TIME;
-    // Simulation模式返回的DamperRotation绝对目标角度，单位与NC轴缩放一致。
-    fSimulatedAngle : LREAL;
+    // Simulation模式下的原始检测角度，仅用于监控和诊断。
+    fSimulatedDetectedAngle : LREAL;
+    // Simulation模式下已经完成坐标及方向映射的DamperRotation修正量。
+    fSimulatedCorrectionAngle : LREAL;
     bSimulatedDetected : BOOL;
     fSimulatedConfidence : LREAL;
+    // 单次DamperRotation修正死区；不是二次视觉质量复检容差。
+    fAngleTolerance : LREAL;
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

@@ -49,12 +49,12 @@ VAR_GLOBAL
             diOpenPosition       := 29000,
             diClosePosition      := 50000,
             bPositivePulseCloses := TRUE,
-            diPositionTolerance  := 0,      // 待实机标定
-            uiCloseCurrentMin    := 0,      // 待实机标定；不绕过Close电流判据
+            diPositionTolerance  := 1,      // 待实机标定
+            uiCloseCurrentMin    := 1,      // 待实机标定；不绕过Close电流判据
             tReplyTimeout        := T#500MS,
             tFeedbackTimeout     := T#3S,
             tMoveTimeout         := T#5S,   // 现有调试占位值，需按实测时间复核
-            bParametersVerified  := FALSE
+            bParametersVerified  := TRUE
         )
     );
 END_VAR]]></Declaration>

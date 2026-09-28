@@ -3,11 +3,14 @@
   <DUT Name="ST_ScrewAngleVisionResult" Id="{832595DB-EBDB-496B-9E14-2C7CD0353B3D}">
     <Declaration><![CDATA[TYPE ST_ScrewAngleVisionResult :
 STRUCT
-    // TRUE仅表示真实测量或Simulation结果有效；Fallback时保持FALSE。
-    bValid      : BOOL;
-    fAngle      : LREAL;
-    bDetected   : BOOL;
-    fConfidence : LREAL;
+    // TRUE仅表示真实测量或Simulation结果的数据包有效。
+    bValid           : BOOL;
+    // 两个螺钉中心连线相对于相机水平X轴的实际检测角度。
+    fDetectedAngle   : LREAL;
+    // Python完成周期、坐标、方向及标定处理后的DamperRotation修正量。
+    fCorrectionAngle : LREAL;
+    bDetected        : BOOL;
+    fConfidence      : LREAL;
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

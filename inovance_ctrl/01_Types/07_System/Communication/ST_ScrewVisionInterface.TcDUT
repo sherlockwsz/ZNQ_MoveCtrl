@@ -15,7 +15,10 @@ STRUCT
     // Vision -> PLC：事务包络与强类型业务结果。
     bResultValid : BOOL;
     udiResultId : UDINT;
-    fAngle : LREAL;
+    // 原始视觉检测角度，仅供监控、显示和诊断。
+    fDetectedAngle : LREAL;
+    // Python已完成180度周期、坐标映射、方向及标定处理的机械修正量。
+    fCorrectionAngle : LREAL;
     bDetected : BOOL;
     fConfidence : LREAL;
     bResultInvalid : BOOL;

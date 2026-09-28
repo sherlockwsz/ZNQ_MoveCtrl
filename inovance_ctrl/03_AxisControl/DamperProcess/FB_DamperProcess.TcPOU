@@ -74,8 +74,9 @@ VAR_OUTPUT
     //==========================================================
     bPrePositionDone : BOOL;
 
-    // 最近一次螺钉角度视觉事务诊断；Fallback结果仍允许当前取料流程继续。
+    // 最近一次螺钉角度视觉事务诊断。
     bVisionFault : BOOL;
+    // 为兼容现有监控符号保留；本版本不再生成或使用Fallback结果。
     bVisionFallbackUsed : BOOL;
     eVisionError : E_VisionError := E_VisionError.None;
 
@@ -265,9 +266,12 @@ VAR
 	fCurrentVisionX : LREAL;
 	fCurrentVisionY : LREAL;
 	
-	// 锁存本次检测得到的绝对相机角度，以及由其计算出的绝对扫码角度。
-	fCameraAngleLatched : LREAL;
-	fScanTargetAngle    : LREAL;
+	// 锁存原始检测角度、Python给出的机械修正量和本件实际机械基准角度。
+	fDetectedAngleLatched   : LREAL;
+	fCorrectionAngleLatched : LREAL;
+	fRotationBaseAngle      : LREAL;
+	fScanTargetAngle        : LREAL;
+	bRotationCorrectionRequired : BOOL;
 	
 	// 防止每扫描周期重复发送DamperRotation绝对运动命令。
 	bRotationCommandIssued : BOOL;
@@ -302,7 +306,7 @@ trigReinitializeCoordinates(
 bGripperActionExecute := FALSE;
 eGripperActionCommand := E_GripperCommand.None;
 
-// 机械流程只保持请求并消费统一结果；Simulation延时、ADS握手和Fallback
+// 机械流程只保持请求并消费统一结果；Simulation延时和ADS握手
 // 均封装在FB_ScrewAngleVision中。
 fbScrewAngleVision(
     bExecute := bBusy
@@ -966,6 +970,36 @@ CASE eCurrentStep OF
 			END_IF;
 
 
+	//==========================================================
+	// 螺钉视觉失败锁存终态
+	//
+	// 不自动重试、不跳件、不回安全位；仅撤销自动命令和流程请求，
+	// 保留bVisionFault/eVisionError，等待现有bAbort或系统复位处理。
+	//==========================================================
+	E_DamperProcessStep.Error:
+		bBusy := FALSE;
+		bDone := FALSE;
+		bTrayChangeRequest := FALSE;
+		bPrePositionDone := FALSE;
+
+		eTakeStep := E_DamperTakeStep.Idle;
+		ePlaceStep := E_DamperPlaceStep.Idle;
+
+		bGripperActionExecute := FALSE;
+		eGripperActionCommand := E_GripperCommand.None;
+
+		stAxisX.AutoCmd.bMoveAbs := FALSE;
+		stAxisY.AutoCmd.bMoveAbs := FALSE;
+		stAxisZ.AutoCmd.bMoveAbs := FALSE;
+		stAxisRotation.AutoCmd.bMoveAbs := FALSE;
+		stAxisRotation.AutoCmd.bMoveRel := FALSE;
+
+		stTurntableInput.bEnable := FALSE;
+		stTurntableInput.bExchangeRequest := FALSE;
+		stTurntableInput.bNoMorePartsToLoad := FALSE;
+		stTurntableInput.bFinalUnloadDone := FALSE;
+
+
 ELSE
     // 非法步骤直接回到Idle。
     // 当前版本不实现异常恢复。
@@ -1552,8 +1586,11 @@ ioAxisY.AutoCmd.bMoveAbs := FALSE;
 ioAxisZ.AutoCmd.bMoveAbs := FALSE;
 
 // 复位相机检测和旋转运行状态。
-fCameraAngleLatched := GVL_PositionConfig.stDamper.fRotationZero;
+fDetectedAngleLatched := 0.0;
+fCorrectionAngleLatched := 0.0;
+fRotationBaseAngle := GVL_PositionConfig.stDamper.fRotationZero;
 fScanTargetAngle := GVL_PositionConfig.stDamper.fRotationZero;
+bRotationCorrectionRequired := FALSE;
 bRotationCommandIssued := FALSE;
 // 复位夹紧后两个并行动作的完成锁存。
 bCameraLiftZDoneLatched := FALSE;
@@ -1594,9 +1631,12 @@ CASE eTakeStep OF
     // 本次取料子流程开始
     //==========================================================
 	E_DamperTakeStep.Idle:
-		// 清除上一件阻尼器锁存的绝对角度。
-		fCameraAngleLatched := GVL_PositionConfig.stDamper.fRotationZero;
+		// 清除上一件阻尼器锁存的视觉结果和机械角度基准。
+		fDetectedAngleLatched := 0.0;
+		fCorrectionAngleLatched := 0.0;
+		fRotationBaseAngle := GVL_PositionConfig.stDamper.fRotationZero;
 		fScanTargetAngle := GVL_PositionConfig.stDamper.fRotationZero;
+		bRotationCorrectionRequired := FALSE;
 		bVisionFault := FALSE;
 		bVisionFallbackUsed := FALSE;
 		eVisionError := E_VisionError.None;
@@ -1657,23 +1697,56 @@ CASE eTakeStep OF
 	// 3. 获取统一螺钉角度视觉结果
 	//
 	// Simulation与Camera均由FB_ScrewAngleVision返回相同强类型结果。
-	// 相机异常时返回0° Fallback，同时保留诊断并允许流程继续。
+	// 视觉事务异常或未检测到两个螺钉时进入锁存Error，禁止当前工件继续。
 	//==========================================================
 	E_DamperTakeStep.AcquireVisionResult:
 		IF fbScrewAngleVision.bDone THEN
-			// 锁存本次检测得到的绝对相机角度。
-			fCameraAngleLatched := fbScrewAngleVision.stResult.fAngle;
+			// 两个角度语义保持独立；PLC不使用DetectedAngle计算机械修正量。
+			fDetectedAngleLatched :=
+				fbScrewAngleVision.stResult.fDetectedAngle;
+			fCorrectionAngleLatched :=
+				fbScrewAngleVision.stResult.fCorrectionAngle;
+			fRotationBaseAngle := GVL_PositionConfig.stDamper.fRotationZero;
+			bRotationCorrectionRequired := FALSE;
+
 			bVisionFault := fbScrewAngleVision.bVisionFault;
-			bVisionFallbackUsed := fbScrewAngleVision.bFallbackUsed;
+			bVisionFallbackUsed := FALSE;
 			eVisionError := fbScrewAngleVision.eVisionError;
-	
-			// 旋转将在夹爪夹紧阻尼器后执行。
-			bRotationCommandIssued := FALSE;
-			bCameraRotationDoneLatched := FALSE;
-	
-			// 检测完成后，XY先回到理论料位。
-			eTakeStep :=
-				E_DamperTakeStep.MoveXYToSlot;
+
+			IF bVisionFault OR NOT fbScrewAngleVision.stResult.bValid THEN
+				// 事务异常时绝不生成0度Fallback，也不进入后续取料、旋转和扫码流程。
+				bVisionFault := TRUE;
+				IF eVisionError = E_VisionError.None THEN
+					eVisionError := E_VisionError.InvalidResult;
+				END_IF;
+				eTakeStep := E_DamperTakeStep.Idle;
+				eCurrentStep := E_DamperProcessStep.Error;
+			ELSIF NOT fbScrewAngleVision.stResult.bDetected THEN
+				// 有效事务中未识别到两个螺钉，属于明确的业务视觉失败。
+				bVisionFault := TRUE;
+				eVisionError := E_VisionError.TargetNotDetected;
+				eTakeStep := E_DamperTakeStep.Idle;
+				eCurrentStep := E_DamperProcessStep.Error;
+			ELSE
+				// 仅CorrectionAngle参与机械控制；死区参数来自唯一ProcessConfig源。
+				IF
+					ABS(fCorrectionAngleLatched)
+					> GVL_ProcessConfig.stVision.fAngleTolerance
+				THEN
+					fRotationBaseAngle :=
+						GVL_PositionConfig.stDamper.fRotationZero
+						+ fCorrectionAngleLatched;
+					bRotationCorrectionRequired := TRUE;
+				END_IF;
+
+				// 旋转将在夹爪夹紧阻尼器后最多执行一次。
+				bRotationCommandIssued := FALSE;
+				bCameraRotationDoneLatched := FALSE;
+
+				// 检测成功后，XY先回到理论料位。
+				eTakeStep :=
+					E_DamperTakeStep.MoveXYToSlot;
+			END_IF;
 		END_IF;
 
 
@@ -1729,7 +1802,7 @@ CASE eTakeStep OF
 	//
 	// 同一个PLC扫描周期内：
 	// 1. DamperZ开始向110mm安全位置运动；
-	// 2. DamperRotation从机械零点绝对运动到相机角度。
+	// 2. 仅当修正量超出死区时，DamperRotation绝对运动到修正后的机械基准角度。
 	//
 	// 两根轴分别锁存完成状态。
 	// 只有两根轴全部完成后，XY才能移动到转台备料位。
@@ -1752,11 +1825,14 @@ CASE eTakeStep OF
 	
 	
 		//======================================================
-		// 7.2 启动并等待DamperRotation到绝对相机角度
+		// 7.2 按需启动并等待DamperRotation单次角度修正
 		//======================================================
 		IF NOT bCameraRotationDoneLatched THEN
-			IF M_MoveRotationAbsolute(
-				fTargetAngle := fCameraAngleLatched,
+			IF NOT bRotationCorrectionRequired THEN
+				// 修正量位于死区内，本件机械基准保持RotationZero，不发送旋转命令。
+				bCameraRotationDoneLatched := TRUE;
+			ELSIF M_MoveRotationAbsolute(
+				fTargetAngle := fRotationBaseAngle,
 				fVelocity := GVL_MotionConfig.stDamper.stRotation.fVelocity,
 				fAcceleration := GVL_MotionConfig.stDamper.stRotation.fAcceleration,
 				fDeceleration := GVL_MotionConfig.stDamper.stRotation.fDeceleration,
@@ -1779,7 +1855,7 @@ CASE eTakeStep OF
 			bCameraRotationDoneLatched := FALSE;
 			bRotationCommandIssued := FALSE;
 	
-			// Z轴已经到达安全位置且绝对相机角度到位，
+			// Z轴已经到达安全位置且本件角度修正已完成或无需修正，
 			// 现在允许XY移动到转台备料位。
 			eTakeStep :=
 				E_DamperTakeStep.MoveXYToTransfer;
@@ -1799,10 +1875,10 @@ CASE eTakeStep OF
 			ioAxisX := ioAxisX,
 			ioAxisY := ioAxisY
 		) THEN
-			// 绝对扫码目标固定由本件相机角度与工艺偏移计算，
+			// 绝对扫码目标固定由本件实际机械基准角度与工艺偏移计算，
 			// 不读取、不累加当前轴位置。
 			fScanTargetAngle :=
-				fCameraAngleLatched
+				fRotationBaseAngle
 				+ GVL_ProcessConfig.stQrScan.fOffsetAngle;
 			bRotationCommandIssued := FALSE;
 	
@@ -1818,7 +1894,7 @@ CASE eTakeStep OF
 	// 3. 夹爪仍然夹持阻尼器。
 	//
 	// 当前二维码相机尚未接入，
-	// DamperRotation到达“相机角度+扫码偏移角”即认为扫描成功。
+	// DamperRotation到达“本件机械基准角度+扫码偏移角”即认为扫描成功。
 	//==========================================================
 	E_DamperTakeStep.RotationToScanAngle:
 		IF M_MoveRotationAbsolute(

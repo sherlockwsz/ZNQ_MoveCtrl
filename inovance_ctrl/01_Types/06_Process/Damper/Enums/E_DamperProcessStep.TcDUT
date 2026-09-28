@@ -26,7 +26,9 @@ TYPE E_DamperProcessStep :
     FinalWaitAdjustment        := 70,
     FinalRotateTurntable       := 80,
     PlaceFinalDamperToBuffer   := 90,
-    Completed                  := 100
+    Completed                  := 100,
+    // 螺钉视觉失败后的锁存终态；等待外部中止/复位。
+    Error                      := 110
 );
 END_TYPE]]></Declaration>
   </DUT>

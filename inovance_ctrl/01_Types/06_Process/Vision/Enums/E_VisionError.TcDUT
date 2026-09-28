@@ -11,7 +11,8 @@ TYPE E_VisionError :
     Timeout       := 20,
     InvalidResult := 30,
     ServiceFault  := 40,
-    Cancelled     := 50
+    Cancelled     := 50,
+    TargetNotDetected := 60
 );
 END_TYPE]]></Declaration>
   </DUT>

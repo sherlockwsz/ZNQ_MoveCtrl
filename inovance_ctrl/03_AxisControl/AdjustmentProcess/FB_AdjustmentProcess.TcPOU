@@ -368,8 +368,8 @@ CASE eStep OF
     E_AdjustmentStep.WaitMeasureResult:
         IF fbCoaxVision.bDone THEN
             fVisionCoaxiality := fbCoaxVision.stResult.fCoaxiality;
-            fCorrectionX := fbCoaxVision.stResult.fDeltaX;
-            fCorrectionY := fbCoaxVision.stResult.fDeltaY;
+            fCorrectionX := fbCoaxVision.stResult.fDeltaY;
+            fCorrectionY := fbCoaxVision.stResult.fDeltaX;
 
             IF fbCoaxVision.bVisionFault THEN
                 bVisionFault := TRUE;
@@ -413,21 +413,24 @@ CASE eStep OF
 		ELSE
 	
 			//======================================================
-			// 情况2：
-			// 当前仍然需要执行XY修正。
+			// Python视觉结果定义：
 			//
-			// Python返回的fCorrectionX / fCorrectionY定义为：
+			// fDeltaX：Camera X方向偏差
+			//          右为正，左为负
 			//
-			// “从Adjustment当前实际机械位置出发，
-			//  本次还需要移动的机械修正增量”
+			// fDeltaY：Camera Y方向偏差
+			//          下为正，上为负
 			//
-			// 所以：
+			// Camera与Adjustment机械坐标映射：
 			//
-			// Candidate
-			// =
-			// ActualPosition + Correction
-			//======================================================
-	
+			// AdjustmentX修正 = Camera DeltaY
+			// AdjustmentY修正 = Camera DeltaX
+			//
+			// 当前修正比例暂定1:1。
+			//
+			// 因此：
+			// Candidate = ActualPosition + Correction
+			//======================================================	
 			fCandidateTargetX :=
 				stAxisX.Data.fActPosition
 				+ fCorrectionX;
@@ -603,8 +606,8 @@ CASE eStep OF
     E_AdjustmentStep.WaitFinalMeasure:
         IF fbCoaxVision.bDone THEN
             fVisionCoaxiality := fbCoaxVision.stResult.fCoaxiality;
-            fCorrectionX := fbCoaxVision.stResult.fDeltaX;
-            fCorrectionY := fbCoaxVision.stResult.fDeltaY;
+            fCorrectionX := fbCoaxVision.stResult.fDeltaY;
+            fCorrectionY := fbCoaxVision.stResult.fDeltaX;
 
             IF fbCoaxVision.bVisionFault THEN
                 bVisionFault := TRUE;

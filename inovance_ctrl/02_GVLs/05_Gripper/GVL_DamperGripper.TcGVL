@@ -29,7 +29,7 @@ VAR_GLOBAL
             diGripPositionMin      := 34000,
             diGripPositionMax      := 36000,
             uiGripConfirmCount     := 2,
-            bStopAfterGripDetected := TRUE
+            bStopAfterGripDetected := FALSE
         )
     );
 

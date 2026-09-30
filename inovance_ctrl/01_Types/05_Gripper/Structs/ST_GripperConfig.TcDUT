@@ -5,7 +5,7 @@
 STRUCT
     nStationId            : BYTE;   // Modbus RTU站号；两台位于不同COM口，可相同
     diOpenPosition        : DINT;   // 完全张开绝对位置，单位：脉冲
-    diClosePosition       : DINT;   // 夹紧绝对目标，单位：脉冲
+    diClosePosition       : DINT;   // 闭合绝对命令目标，单位：脉冲
     bPositivePulseCloses  : BOOL;   // TRUE：位置增大是夹紧方向；供标定和诊断使用
     diPositionTolerance   : DINT;   // 到位允许偏差，单位：脉冲，必须 >= 0
 
@@ -18,6 +18,11 @@ STRUCT
 
     bParametersVerified   : BOOL;   // 站号、方向、行程和电流阈值实测确认后置TRUE
                                     // FALSE时，自动流程不得发起运动
+
+    diGripPositionMin      : DINT;  // 有效工件夹持绝对位置下限，单位：脉冲
+    diGripPositionMax      : DINT;  // 有效工件夹持绝对位置上限，单位：脉冲
+    uiGripConfirmCount     : UINT;  // Close过程中连续满足条件的新电流反馈样本数
+    bStopAfterGripDetected : BOOL;  // 有效夹持确认后是否主动发送Stop
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

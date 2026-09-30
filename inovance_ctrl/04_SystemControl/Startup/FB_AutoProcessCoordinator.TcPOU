@@ -242,8 +242,9 @@ stTurntableInputForThisScan.bAdjustmentDone :=
     AND NOT ioScrewdriverProcess.bError
 	AND ioScrewdriverProcess.bScrewdriverSafe;
 
-// 最终质量状态只有FB_AdjustmentProcess维护：无相机模拟为Qualified，
-// 真实视觉由二次拧紧后的最终检测及返调上限决定。
+// 最终质量状态只由FB_AdjustmentProcess维护：
+// Candidate超出Adjustment允许修正范围时可提前判定Unqualified；
+// 其余正常视觉流程由二次拧紧后的最终检测及返调上限决定。
 stTurntableInputForThisScan.bAdjustmentQualified :=
     ioAdjustmentProcess.bAdjustmentQualified;
 

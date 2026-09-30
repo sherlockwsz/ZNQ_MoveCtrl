@@ -18,14 +18,18 @@ VAR_GLOBAL
         Set := (
             nStationId           := 2,
             diOpenPosition       := 0,
-            diClosePosition      := 35000,   // 已标定
+            diClosePosition      := 40000,   // 已标定
             bPositivePulseCloses := TRUE,
-            diPositionTolerance  := 20,     // 暂定
-            uiCloseCurrentMin    := 1,      // 暂定
+            diPositionTolerance  := 1000,     // 到位容差
+            uiCloseCurrentMin    := 20,
             tReplyTimeout        := T#500MS,
             tFeedbackTimeout     := T#3S,   // 3秒无任何有效反馈才判通信故障
             tMoveTimeout         := T#5S,
-            bParametersVerified  := TRUE
+            bParametersVerified  := TRUE,
+            diGripPositionMin      := 34000,
+            diGripPositionMax      := 36000,
+            uiGripConfirmCount     := 2,
+            bStopAfterGripDetected := TRUE
         )
     );
 
@@ -49,12 +53,16 @@ VAR_GLOBAL
             diOpenPosition       := 29000,
             diClosePosition      := 50000,
             bPositivePulseCloses := TRUE,
-            diPositionTolerance  := 1,      // 待实机标定
+            diPositionTolerance  := 1000,      // 到位容差
             uiCloseCurrentMin    := 1,      // 待实机标定；不绕过Close电流判据
             tReplyTimeout        := T#500MS,
             tFeedbackTimeout     := T#3S,
             tMoveTimeout         := T#5S,   // 现有调试占位值，需按实测时间复核
-            bParametersVerified  := TRUE
+            bParametersVerified  := TRUE,
+            diGripPositionMin      := 49000,
+            diGripPositionMax      := 51000,
+            uiGripConfirmCount     := 1,
+            bStopAfterGripDetected := FALSE
         )
     );
 END_VAR]]></Declaration>

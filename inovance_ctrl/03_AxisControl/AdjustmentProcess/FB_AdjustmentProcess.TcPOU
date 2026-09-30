@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
   <POU Name="FB_AdjustmentProcess" Id="{6be3f419-7e42-4f1c-ad50-7db14f957959}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_AdjustmentProcess
@@ -31,8 +31,9 @@ VAR_OUTPUT
     bAdjustmentDone    : BOOL;
     bAdjustmentBusy    : BOOL;
     bAdjustmentQualified : BOOL;
+	bAdjustmentOutOfRange : BOOL;
     bRequestSecondTighten : BOOL;
-    bRequestReworkLoosen  : BOOL;
+    bRequestReworkLoosen  : BOOL;// 当前件超出Adjustment可调整范围。
     bVisionTimeout     : BOOL;
     bVisionFault       : BOOL;
     bFallbackUsed      : BOOL;
@@ -64,10 +65,34 @@ VAR
     fPositionTolerance : LREAL;
     tMoveTimeout : TIME;
 
-    fAdjustTargetX : LREAL;
-    fAdjustTargetY : LREAL;
-    bVisionWithinTolerance : BOOL;
-
+	//==============================================================
+	// Adjustment最终被PLC接受并真正下发给轴的绝对目标
+	//==============================================================
+	fAdjustTargetX : LREAL;
+	fAdjustTargetY : LREAL;
+	
+	
+	//==============================================================
+	// 本次Coax修正计算出的候选绝对目标
+	//
+	// Candidate = 当前实际位置 + Python修正量
+	//
+	// 候选值只有通过±最大修正范围检查后，
+	// 才允许写入fAdjustTargetX/Y。
+	//==============================================================
+	fCandidateTargetX : LREAL;
+	fCandidateTargetY : LREAL;
+	
+	
+	//==============================================================
+	// 修正目标范围诊断
+	//==============================================================
+	bCorrectionXOutOfRange : BOOL;
+	bCorrectionYOutOfRange : BOOL;
+	
+	
+	bVisionWithinTolerance : BOOL;
+	
     fbMoveTimeout : TON;
     fbCoaxVision : FB_CoaxVision;
     bTimerRestart : BOOL;
@@ -163,6 +188,7 @@ IF NOT bEnable OR bAbort THEN
     bAdjustmentDone := FALSE;
     bAdjustmentBusy := FALSE;
     bAdjustmentQualified := FALSE;
+	bAdjustmentOutOfRange := FALSE;
     bRequestSecondTighten := FALSE;
     bRequestReworkLoosen := FALSE;
     bVisionTimeout := FALSE;
@@ -171,6 +197,10 @@ IF NOT bEnable OR bAbort THEN
     eVisionError := E_VisionError.None;
     fCorrectionX := 0.0;
     fCorrectionY := 0.0;
+	fCandidateTargetX := 0.0;
+	fCandidateTargetY := 0.0;
+	bCorrectionXOutOfRange := FALSE;
+	bCorrectionYOutOfRange := FALSE;
     nAdjustCount := 0;
     nReworkCount := 0;
     bError := FALSE;
@@ -188,23 +218,45 @@ IF NOT bEnable OR bAbort THEN
 END_IF;
 
 IF (eStep = E_AdjustmentStep.Idle) AND bStartRequest THEN
+
+ 	//==========================================================
+    // 新工件开始，清除上一件质量结果。
+    //==========================================================
     bAdjustmentQualified := FALSE;
+	bAdjustmentOutOfRange := FALSE;
+
     bVisionTimeout := FALSE;
     bVisionFault := FALSE;
     bFallbackUsed := FALSE;
     eVisionError := E_VisionError.None;
+
     bVisionWithinTolerance := FALSE;
+
     fVisionCoaxiality := 0.0;
+
     fCorrectionX := 0.0;
     fCorrectionY := 0.0;
+
+    // 初始接受目标仍然从Adjustment工作位置开始。
     fAdjustTargetX := fXWork;
     fAdjustTargetY := fYWork;
+
+    // 候选目标初始化到工作位置。
+    fCandidateTargetX := fXWork;
+    fCandidateTargetY := fYWork;
+
+    // 清除上一件产品的范围诊断。
+    bCorrectionXOutOfRange := FALSE;
+    bCorrectionYOutOfRange := FALSE;
+
     nAdjustCount := 0;
     nReworkCount := 0;
+
     bXIssued := FALSE;
     bYIssued := FALSE;
     bXDone := FALSE;
     bYDone := FALSE;
+
     eStep := E_AdjustmentStep.MoveXYToWork;
 END_IF;
 
@@ -335,17 +387,177 @@ CASE eStep OF
         END_IF;
 
     E_AdjustmentStep.EvaluateAdjustment:
-        IF bVisionWithinTolerance
-            OR (nAdjustCount >= GVL_ProcessConfig.stAdjustment.nMaxAdjustCount)
-        THEN
-            eStep := E_AdjustmentStep.RequestSecondTighten;
-        ELSE
-            // Vision的Delta是“从当前状态仍需修正的增量”；轴仍使用绝对目标。
-            fAdjustTargetX := fAdjustTargetX + fCorrectionX;
-            fAdjustTargetY := fAdjustTargetY + fCorrectionY;
-            nAdjustCount := nAdjustCount + 1;
-            eStep := E_AdjustmentStep.StartCorrectionXY;
-        END_IF;
+
+		//==========================================================
+		// 情况1：
+		// 当前同轴度已经达到调整容差；
+		//
+		// 或者：
+		// 已经达到本轮最大允许调整次数。
+		//
+		// 此时不再进行新的AdjustmentXY修正。
+		//==========================================================
+		IF
+			bVisionWithinTolerance
+			OR
+			(
+				nAdjustCount
+				>= GVL_ProcessConfig.stAdjustment.nMaxAdjustCount
+			)
+		THEN
+	
+			eStep :=
+				E_AdjustmentStep.RequestSecondTighten;
+	
+	
+		ELSE
+	
+			//======================================================
+			// 情况2：
+			// 当前仍然需要执行XY修正。
+			//
+			// Python返回的fCorrectionX / fCorrectionY定义为：
+			//
+			// “从Adjustment当前实际机械位置出发，
+			//  本次还需要移动的机械修正增量”
+			//
+			// 所以：
+			//
+			// Candidate
+			// =
+			// ActualPosition + Correction
+			//======================================================
+	
+			fCandidateTargetX :=
+				stAxisX.Data.fActPosition
+				+ fCorrectionX;
+	
+			fCandidateTargetY :=
+				stAxisY.Data.fActPosition
+				+ fCorrectionY;
+	
+	
+			//======================================================
+			// 检查候选位置是否仍然处于
+			//
+			// Adjustment工作位置 ± 最大允许调整范围
+			//
+			// 这里检查的是累计机械偏移，
+			// 而不是单次Delta大小。
+			//======================================================
+	
+			bCorrectionXOutOfRange :=
+				ABS(
+					fCandidateTargetX
+					- fXWork
+				)
+				>
+				GVL_ProcessConfig.stAdjustment.fMaxCorrectionX;
+	
+			bCorrectionYOutOfRange :=
+				ABS(
+					fCandidateTargetY
+					- fYWork
+				)
+				>
+				GVL_ProcessConfig.stAdjustment.fMaxCorrectionY;
+	
+	
+			//======================================================
+			// 任意一个方向越界：
+			//
+			// X/Y作为同一次二维Coax修正，
+			// 不允许只执行其中一根轴。
+			//
+			// 所以两根轴都不运动。
+			//======================================================
+			IF
+				bCorrectionXOutOfRange
+				OR
+				bCorrectionYOutOfRange
+			THEN
+			
+				//==========================================================
+				// Adjustment修正目标超出允许工艺窗口。
+				//
+				// 该情况定义为：
+				// “当前工件的同轴度偏差已经超过Adjustment机构的调整能力”
+				//
+				// 它属于工件质量问题，而不是设备故障。
+				//
+				// 因此：
+				// 1. 不执行本次AdjustmentXY修正；
+				// 2. 不置bError；
+				// 3. 当前件判定Unqualified；
+				// 4. 进入正常安全撤离流程；
+				// 5. 撤离完成后通过bAdjustmentDone正常结束本周期。
+				//==========================================================
+			
+				bAdjustmentQualified := FALSE;
+				bAdjustmentOutOfRange := TRUE;
+			
+			
+				//==========================================================
+				// 当前Candidate不允许成为真正的轴运动目标。
+				//
+				// 因此保持fAdjustTargetX/Y不变，
+				// 不把fCandidateTargetX/Y写入fAdjustTargetX/Y。
+				//==========================================================
+			
+			
+				//==========================================================
+				// 清除本轮可能残留的XY动作状态。
+				//==========================================================
+				bXIssued := FALSE;
+				bYIssued := FALSE;
+			
+				bXDone := FALSE;
+				bYDone := FALSE;
+			
+			
+				//==========================================================
+				// 不进入Error。
+				//
+				// 直接进入正常撤离链：
+				//
+				// CloseGripper
+				//      ↓
+				// LiftZToSafe
+				//      ↓
+				// ReturnXYToStandby
+				//      ↓
+				// bAdjustmentDone
+				//
+				// COM4先恢复闭合，然后Z抬升，最后XY回准备位置。
+				//==========================================================
+				eStep :=
+					E_AdjustmentStep.CloseGripper;
+			
+			
+			ELSE
+			
+				//==========================================================
+				// X/Y候选目标均处于允许Adjustment修正窗口内。
+				// 正式接受Candidate作为新的轴绝对目标。
+				//==========================================================
+			
+				bAdjustmentOutOfRange := FALSE;
+			
+				fAdjustTargetX :=
+					fCandidateTargetX;
+			
+				fAdjustTargetY :=
+					fCandidateTargetY;
+			
+				nAdjustCount :=
+					nAdjustCount + 1;
+			
+				eStep :=
+					E_AdjustmentStep.StartCorrectionXY;
+			
+			END_IF;
+
+		END_IF;
 
     E_AdjustmentStep.StartCorrectionXY:
         bXIssued := FALSE;
@@ -355,7 +567,7 @@ CASE eStep OF
         eStep := E_AdjustmentStep.WaitCorrectionXY;
 
     E_AdjustmentStep.WaitCorrectionXY:
-        // Z保持工作高度，X/Y同时向累计后的绝对目标运动。
+        // Z保持工作高度，X/Y同时向通过工艺范围检查后的绝对目标运动。
         IF NOT bXDone THEN
             bXDone := M_MoveAxisAbsolute(fTarget := fAdjustTargetX, fVelocity := fXVelocity,
                 uiAxis := GVL_AxisIndex.AdjustmentX, ioIssued := bXIssued, ioAxis := stAxisX);
@@ -511,7 +723,7 @@ bAdjustmentBusy :=
     AND (eStep <> E_AdjustmentStep.Error);]]></ST>
     </Implementation>
     <Method Name="M_MoveAxisAbsolute" Id="{d92a53a5-1112-4138-b128-19cd21bfd66f}">
-      <Declaration>METHOD PRIVATE M_MoveAxisAbsolute : BOOL
+      <Declaration><![CDATA[METHOD PRIVATE M_MoveAxisAbsolute : BOOL
 VAR_INPUT
     fTarget   : LREAL;
     fVelocity : LREAL;
@@ -520,7 +732,7 @@ END_VAR
 VAR_IN_OUT
     ioIssued : BOOL;
     ioAxis   : ST_AxisInterface;
-END_VAR</Declaration>
+END_VAR]]></Declaration>
       <Implementation>
         <ST><![CDATA[M_MoveAxisAbsolute := FALSE;
 

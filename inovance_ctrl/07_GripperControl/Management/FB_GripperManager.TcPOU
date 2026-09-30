@@ -59,6 +59,8 @@ bAutoParametersValid :=
     ioGripper.Set.bParametersVerified
     AND (ioGripper.Set.diPositionTolerance >= 0)
     AND (ioGripper.Set.uiCloseCurrentMin > 0)
+    AND (ioGripper.Set.diGripPositionMin <= ioGripper.Set.diGripPositionMax)
+    AND (ioGripper.Set.uiGripConfirmCount > 0)
     AND (ioGripper.Set.tFeedbackTimeout > T#0MS)
     AND (ioGripper.Set.tMoveTimeout > T#0MS);
 

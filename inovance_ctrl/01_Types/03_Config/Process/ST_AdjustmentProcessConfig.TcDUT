@@ -1,12 +1,34 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4026.20">
   <DUT Name="ST_AdjustmentProcessConfig" Id="{03500fbb-864c-49b5-9597-9684309f44f6}">
     <Declaration><![CDATA[TYPE ST_AdjustmentProcessConfig :
 STRUCT
-    fAdjustTolerance : LREAL;
-    fQualifiedTolerance : LREAL;
-    nMaxAdjustCount : UINT;
-    nMaxReworkCount : UINT;
+    
+    fAdjustTolerance : LREAL;// 同轴度调整阶段停止继续修正的容差。
+
+    
+    fQualifiedTolerance : LREAL;// 最终检测判定合格的容差。
+
+    //==========================================================
+    // Adjustment XY自动视觉闭环最大允许累计修正范围
+    //
+    // 单位：mm
+    //
+    // 基准位置：
+    // GVL_PositionConfig.stAdjustment.stWork.X/Y
+    //
+    // 实际允许区域：
+    // WorkX ± fMaxCorrectionX
+    // WorkY ± fMaxCorrectionY
+    //==========================================================
+    fMaxCorrectionX : LREAL;
+    fMaxCorrectionY : LREAL;
+
+    
+    nMaxAdjustCount : UINT;// 单轮最大视觉修正次数。
+
+    
+    nMaxReworkCount : UINT;// 最终检测失败后的最大返调次数。
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

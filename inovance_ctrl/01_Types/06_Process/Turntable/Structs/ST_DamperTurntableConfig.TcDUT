@@ -53,7 +53,11 @@ STRUCT
     fClampOpenPosition : LREAL;
 
     // 接近阻尼器但尚未产生明显夹紧力的位置。
+    // 仅供CST模式在切换转矩控制前使用。
     fClampApproachPosition : LREAL;
+
+    // CSP固定位置夹紧目标。
+    fClampPosition : LREAL;
 
     // 转矩模式下允许到达的最深夹紧位置。
     // 夹紧方向为位置减小方向，到达该位置即可判定夹紧完成。
@@ -64,6 +68,15 @@ STRUCT
     fClampPositionDeceleration : LREAL;
     fClampPositionTolerance : LREAL;
     tClampPositionTimeout   : TIME;
+
+    // FALSE：默认CSP固定位置夹紧；TRUE：既有CST力矩夹紧。
+    bUseTorqueClamp : BOOL;
+
+    // CSP过程转矩监控参数。
+    bEnableMinClampTorqueCheck : BOOL;
+    fMinClampTorquePercent : LREAL;
+    fMaxClampTorquePercent : LREAL;
+    tOverTorqueConfirm : TIME;
 
     //==========================================================
     // 夹紧轴转矩参数

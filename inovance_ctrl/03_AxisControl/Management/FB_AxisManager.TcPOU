@@ -19,6 +19,9 @@ VAR_INPUT
     bHmiOnline : BOOL;            // HMI心跳在线状态
     bStopSequenceActive : BOOL;   // 受控停止期间使能权归停止管理器
     stLimit : ST_AxisLimit;       // 当前轴限位配置
+    // 仅Clamping启用：透传驱动器6061真实模式反馈。
+    bUsePhysicalModeFeedback : BOOL;
+    i8ModeOfOperationDisplay : SINT;
 END_VAR
 
 VAR_IN_OUT
@@ -94,6 +97,8 @@ IF bAxisConfigured THEN
             OR (eControlOwner = E_AxisControlOwner.Recovery)
             OR (eControlOwner = E_AxisControlOwner.Homing),
         stLimit := stLimit,
+        bUsePhysicalModeFeedback := bUsePhysicalModeFeedback,
+        i8ModeOfOperationDisplay := i8ModeOfOperationDisplay,
         AxisRef := AxisRef,
         stAxis := stAxis
     );

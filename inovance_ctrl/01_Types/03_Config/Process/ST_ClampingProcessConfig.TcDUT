@@ -3,6 +3,16 @@
   <DUT Name="ST_ClampingProcessConfig" Id="{bdb21785-a1e4-46ba-b29f-b1d092cb1257}">
     <Declaration><![CDATA[TYPE ST_ClampingProcessConfig :
 STRUCT
+    // FALSE：默认CSP固定位置夹紧；TRUE：使用既有CST力矩夹紧。
+    bUseTorqueClamp : BOOL;
+
+    // CSP夹紧过程参数。
+    bEnableMinClampTorqueCheck : BOOL;
+    fMinClampTorquePercent : LREAL;
+    fMaxClampTorquePercent : LREAL;
+    tOverTorqueConfirm : TIME;
+
+    // 既有CST参数，继续作为CST流程的唯一配置来源。
     stTorque : ST_ClampTorqueConfig;
 END_STRUCT
 END_TYPE]]></Declaration>

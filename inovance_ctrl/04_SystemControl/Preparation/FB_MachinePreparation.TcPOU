@@ -157,6 +157,8 @@ FOR uiItem := LOWER_BOUND(GVL_AxisIndex.AutoProcessAxes, 1) TO UPPER_BOUND(GVL_A
     aAxes[uiAxis].PreparationCmd.bMoveRel := FALSE;
     aAxes[uiAxis].PreparationCmd.bJogPos := FALSE;
     aAxes[uiAxis].PreparationCmd.bJogNeg := FALSE;
+    aAxes[uiAxis].PreparationCmd.bStop := FALSE;
+    aAxes[uiAxis].PreparationCmd.bTorqueControl := FALSE;
 END_FOR;
 
 
@@ -268,6 +270,26 @@ ELSE
                     eStep :=
                         E_MachinePreparationStep.Error;
                     EXIT;
+                END_IF;
+
+                // Clamping必须先由真实6061确认已经恢复CSP。
+                // 若PLC重新激活后驱动仍残留CST，则通过既有MC_Stop
+                // 恢复边界请求退出；6061不是8时绝不发布准备运动。
+                IF
+                    (uiAxis = GVL_AxisIndex.Clamping)
+                    AND
+                    (
+                        aAxes[uiAxis].State.eControlMode
+                        <> E_AxisControlMode.Position
+                    )
+                THEN
+                    aAxes[uiAxis].PreparationCmd.bTorqueControl := FALSE;
+                    aAxes[uiAxis].PreparationCmd.bStop := TRUE;
+                    bAllAxesReady := FALSE;
+
+                    IF uiErrorAxis = 0 THEN
+                        uiErrorAxis := uiAxis;
+                    END_IF;
                 END_IF;
 
                 IF NOT aAxes[uiAxis].State.bReady THEN
@@ -502,14 +524,23 @@ ELSE
             // 夹紧轴松开和ScrewdriverY回零并行。
             IF bScrewZDone THEN
                 IF NOT bClampDone THEN
-                    bClampDone := M_MoveAxisAbsolute(
-                        fTarget := stConfig.fClampOpenPosition,
-                        fVelocity := stConfig.fClampVelocity,
-                        fTolerance := stConfig.fLinearTolerance,
-                        uiAxisIndex := GVL_AxisIndex.Clamping,
-                        ioIssued := bClampIssued,
-                        ioAxis := aAxes[GVL_AxisIndex.Clamping]
-                    );
+                    IF
+                        aAxes[GVL_AxisIndex.Clamping].State.eControlMode
+                        <> E_AxisControlMode.Position
+                    THEN
+                        // 6061未确认CSP时只允许执行受控模式恢复。
+                        aAxes[GVL_AxisIndex.Clamping].PreparationCmd.bTorqueControl := FALSE;
+                        aAxes[GVL_AxisIndex.Clamping].PreparationCmd.bStop := TRUE;
+                    ELSE
+                        bClampDone := M_MoveAxisAbsolute(
+                            fTarget := stConfig.fClampOpenPosition,
+                            fVelocity := stConfig.fClampVelocity,
+                            fTolerance := stConfig.fLinearTolerance,
+                            uiAxisIndex := GVL_AxisIndex.Clamping,
+                            ioIssued := bClampIssued,
+                            ioAxis := aAxes[GVL_AxisIndex.Clamping]
+                        );
+                    END_IF;
                 END_IF;
 
                 IF NOT bScrewYDone THEN

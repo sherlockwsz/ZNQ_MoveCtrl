@@ -5,6 +5,7 @@
 STRUCT
     fReadyPosition : LREAL;
     fApproachPosition : LREAL;
+    fClampPosition : LREAL;
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

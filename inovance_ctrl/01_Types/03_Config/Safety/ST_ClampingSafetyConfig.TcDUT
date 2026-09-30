@@ -5,6 +5,10 @@
 STRUCT
     fMinimumAllowedPosition : LREAL;
     fModeSwitchVelocityMax : LREAL;
+
+    // 绝对硬转矩上限预留；第一阶段关闭且不参与流程判断。
+    bEnableHardMaxClampTorqueCheck : BOOL;
+    fHardMaxClampTorquePercent : LREAL;
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

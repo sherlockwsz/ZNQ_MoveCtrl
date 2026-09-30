@@ -3,7 +3,7 @@
   <GVL Name="GVL_SafetyConfig" Id="{1914259c-8fe9-49d7-820e-667631cb12b8}">
     <Declaration><![CDATA[{attribute 'qualified_only'}
 VAR_GLOBAL CONSTANT
-    stClamping : ST_ClampingSafetyConfig := (fMinimumAllowedPosition := 21.0, fModeSwitchVelocityMax := 0.01);
+    stClamping : ST_ClampingSafetyConfig := (fMinimumAllowedPosition := 21.0, fModeSwitchVelocityMax := 0.01, bEnableHardMaxClampTorqueCheck := FALSE, fHardMaxClampTorquePercent := 0.0);
     stStop : ST_StopSafetyConfig := (tTimeout := T#10S);
     stStartup : ST_StartupSafetyConfig := (tEnableTimeout := T#15S);
 END_VAR]]></Declaration>

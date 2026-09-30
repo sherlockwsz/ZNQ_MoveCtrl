@@ -49,6 +49,13 @@ STRUCT
     bClampOpen           : BOOL;
     bClampHolding        : BOOL;
 
+    // 当前工件夹紧模式及CSP保持/诊断状态。
+    bActiveUseTorqueClamp    : BOOL;
+    fClampHoldPosition       : LREAL;
+    bClampDepthOverTorque    : BOOL;
+    bExternalLoadOverTorque  : BOOL;
+    bPositionModeReady       : BOOL;
+
     eStep              : E_DamperTurntableStep;
     eTurntablePosition : E_DamperTurntablePosition;
     eClampStep         : E_DamperClampStep;

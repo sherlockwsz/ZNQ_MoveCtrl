@@ -3294,7 +3294,7 @@ External Setpoint Generation:
 		</Motion>
 		<Plc>
 			<Project GUID="{EA67B656-2FC5-4A9C-A62D-78AA627F7844}" Name="inovance_ctrl" PrjFilePath="inovance_ctrl\inovance_ctrl.plcproj" TmcFilePath="inovance_ctrl\inovance_ctrl.tmc" ReloadTmc="true" AmsPort="851" FileArchiveSettings="#x000e" SymbolicMapping="true">
-				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcHash="{93343F6B-04A7-825E-7189-C0E472FACF91}" TmcPath="inovance_ctrl\inovance_ctrl.tmc">
+				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcHash="{93AB69E1-439B-C3FA-C7AF-D24CC2B3D06B}" TmcPath="inovance_ctrl\inovance_ctrl.tmc">
 					<Name>inovance_ctrl Instance</Name>
 					<CLSID ClassFactory="TcPlc30">{08500001-0000-0000-F000-000000000064}</CLSID>
 					<Vars VarGrpType="2" AreaNo="1">
@@ -8301,6 +8301,7 @@ External Setpoint Generation:
 		<MappingInfo Identifier="{00000000-2001-0850-0020-500841000403}" Id="#x02030020"/>
 		<MappingInfo Identifier="{00000000-0020-0304-1000-040320000403}" Id="#x02030010"/>
 		<MappingInfo Identifier="{00000000-0030-0304-1000-040332000403}" Id="#x02030040"/>
+		<MappingInfo Identifier="{08502001-0020-0304-0020-500820000403}" Id="#x02030050" Watchdog="00000000000000000000000000000000"/>
 		<MappingInfo Identifier="{05000010-2001-0850-1000-040300205008}" Id="#x02030030" Watchdog="14000000040000000400000004000000"/>
 		<OwnerA Name="TINC^Servo SAF^Axes^AdjustmentX">
 			<OwnerB Name="TIID^设备 1 (EtherCAT)^驱动器 17 (InoSV670N)">
@@ -8666,6 +8667,10 @@ External Setpoint Generation:
 				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[6]" VarB="Channel 6^Output"/>
 				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[7]" VarB="Channel 7^蜂鸣"/>
 				<Link VarA="PlcTask Outputs^GVL_IO_Raw.aEL2008_02[8]" VarB="Channel 8^Output"/>
+			</OwnerB>
+			<OwnerB Name="TIID^设备 1 (EtherCAT)^驱动器 15 (InoSV680N)">
+				<Link VarA="PlcTask Inputs^GVL_ClampingPdo.i8ModeOfOperationDisplay" VarB="Inputs^Modes of operation display"/>
+				<Link VarA="PlcTask Outputs^GVL_ClampingPdo.udiMaxProfileVelocity" VarB="Outputs^Max profile velocity"/>
 			</OwnerB>
 			<OwnerB Name="TINC^Servo SAF^Axes^AdjustmentX">
 				<Link VarA="PlcTask Inputs^GVL_AxisRef.AxisRefs[10].NcToPlc" VarB="输出^ToPlc" AutoLink="true"/>

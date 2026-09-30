@@ -919,6 +919,11 @@ FOR uiAxisIndex := 1 TO GVL_Constants.cMaxAxisCount DO
         // Guard仍清除普通运动命令，不能提前撤使能。
         bStopSequenceActive := bAbortProcesses OR fbAutoStopManager.bError,
         stLimit := GVL_AxisConfig.AxisLimits[uiAxisIndex],
+        // 只有Clamping使用6061真实模式反馈；其他轴保持既有判断。
+        bUsePhysicalModeFeedback :=
+            (uiAxisIndex = GVL_AxisIndex.Clamping),
+        i8ModeOfOperationDisplay :=
+            GVL_ClampingPdo.i8ModeOfOperationDisplay,
         AxisRef := GVL_AxisRef.AxisRefs[uiAxisIndex],
         stAxis := GVL_AxisRuntime.Axes[uiAxisIndex]
     );

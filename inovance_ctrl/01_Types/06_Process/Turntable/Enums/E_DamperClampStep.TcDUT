@@ -8,7 +8,10 @@
 (*
     夹紧轴内部动作步骤。
 
-    夹紧过程：
+    默认CSP夹紧：
+    位置模式运动到固定夹紧位置 -> 位置保持。
+
+    可选CST夹紧：
     位置模式接近工件 -> 切换CST -> 建立转矩 -> 保持。
 
     松开过程：
@@ -17,6 +20,10 @@
 TYPE E_DamperClampStep :
 (
     Idle                := 0,   // 无夹紧动作
+    MoveToClampPosition := 5,   // CSP运动到固定夹紧位置
+    WaitClampPosition   := 7,   // 等待CSP固定夹紧位置到位
+    StopClampForDepth   := 8,   // ClampDepth触发后受控停止
+    WaitClampStopReleased := 9, // 等待停止释放并锁存保持位置
     MoveToApproach      := 10,  // 位置模式运动到接近位置
     WaitApproach        := 20,  // 等待接近位置到位
     // 已经进入40 mm位置公差，但MC_MoveAbsolute可能仍处于Busy。

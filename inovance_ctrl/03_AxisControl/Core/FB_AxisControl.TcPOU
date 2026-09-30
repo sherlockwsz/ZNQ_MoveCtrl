@@ -5,6 +5,9 @@
 VAR_INPUT
     bControlAllowed : BOOL;// 外部控制许可
 	stLimit : ST_AxisLimit;// 当前轴的限位配置
+    // 仅Clamping启用：使用驱动器6061确认真实CSP/CST状态。
+    bUsePhysicalModeFeedback : BOOL;
+    i8ModeOfOperationDisplay : SINT;
 END_VAR
 
 VAR_IN_OUT
@@ -907,25 +910,43 @@ fbTorqueReached(
 
 ioAxis.State.bTorqueReached := fbTorqueReached.Q;
 ioAxis.State.bTorqueControlActive := fbTorqueControl.Active;
-ioAxis.State.bTorqueModeReady := fbTorqueControl.Active;
 
 //==============================================================
 // 5. 发布当前控制模式
 //==============================================================
-IF fbTorqueControl.Active OR fbTorqueControl.Busy THEN
-    ioAxis.State.eControlMode := E_AxisControlMode.Torque;
-ELSIF
-    fbPower.Status
-    AND NOT stInternal.bStopExecute
-    AND NOT fbStop.Busy
-THEN
-    ioAxis.State.eControlMode := E_AxisControlMode.Position;
+IF bUsePhysicalModeFeedback THEN
+    // Clamping必须以驱动器6061为准，不能由PLCopen FB内部状态推断。
+    CASE i8ModeOfOperationDisplay OF
+        8:
+            ioAxis.State.eControlMode := E_AxisControlMode.Position;
+        10:
+            ioAxis.State.eControlMode := E_AxisControlMode.Torque;
+        ELSE
+            ioAxis.State.eControlMode := E_AxisControlMode.Undefined;
+    END_CASE;
 ELSE
-    ioAxis.State.eControlMode := E_AxisControlMode.Undefined;
+    IF fbTorqueControl.Active OR fbTorqueControl.Busy THEN
+        ioAxis.State.eControlMode := E_AxisControlMode.Torque;
+    ELSIF
+        fbPower.Status
+        AND NOT stInternal.bStopExecute
+        AND NOT fbStop.Busy
+    THEN
+        ioAxis.State.eControlMode := E_AxisControlMode.Position;
+    ELSE
+        ioAxis.State.eControlMode := E_AxisControlMode.Undefined;
+    END_IF;
 END_IF;
 
 ioAxis.State.bPositionModeReady :=
-    ioAxis.State.eControlMode = E_AxisControlMode.Position;
+    fbPower.Status
+    AND (ioAxis.State.eControlMode = E_AxisControlMode.Position)
+    AND NOT stInternal.bStopExecute
+    AND NOT fbStop.Busy;
+
+ioAxis.State.bTorqueModeReady :=
+    fbTorqueControl.Active
+    AND (ioAxis.State.eControlMode = E_AxisControlMode.Torque);
 
 //==============================================================
 // 6. 功能块结果

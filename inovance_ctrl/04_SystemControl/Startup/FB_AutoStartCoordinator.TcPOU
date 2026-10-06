@@ -10,6 +10,10 @@ VAR_INPUT
     bGripperReady        : BOOL;
     bGripperActionFault  : BOOL;
     bProcessDone         : BOOL;  // 整套五盘流程已完成
+    bTrayPlanCheckDone   : BOOL;  // Tray唯一来源：五层稳定检查完成
+    bTrayPlanValid       : BOOL;
+    bTrayPlanLocked      : BOOL;
+    bTrayNoTrayAvailable : BOOL;
     tEnableTimeout       : TIME := GVL_SafetyConfig.stStartup.tEnableTimeout;
 	bMachinePreparationDone  : BOOL;
 	bMachinePreparationError : BOOL;
@@ -21,6 +25,8 @@ VAR_IN_OUT
 END_VAR
 
 VAR_OUTPUT
+    bTrayPlanRequest : BOOL;  // 启动前预检查；成功后保持至批次结束
+    bTrayPlanChecking : BOOL; // 仅诊断/Busy，不代表轴使能
     bEnableAxes      : BOOL;  // MAIN 据此请求自动流程涉及的轴使能
     bProcessStart    : BOOL;  // 全部就绪后保持 TRUE，直到完成或中止
     bEnabling        : BOOL;  // 正在等待轴使能、就绪
@@ -57,7 +63,7 @@ bErrorPulse := FALSE;
 
 // Stop 优先级最高。本 FB 不撤轴使能：受控停止和掉使能
 // 仍由 FB_AutoStopManager 按既有时序完成。
-IF bCancel THEN
+IF bCancel OR ((eStep = E_AutoStartStep.WaitTrayPlan) AND NOT bRequest) THEN
     eStep := E_AutoStartStep.Idle;
 ELSE
     CASE eStep OF
@@ -98,10 +104,29 @@ ELSE
                     END_FOR;
 
                     IF NOT bStartRejected THEN
-                        eStep := E_AutoStartStep.WaitAxesReady;
+                        // Auto启动前Tray计划预检查，尚不使能、不请求整机准备。
+                        eStep := E_AutoStartStep.WaitTrayPlan;
                     END_IF;
                 END_IF;
             END_IF;
+
+        E_AutoStartStep.WaitTrayPlan:
+            IF NOT bHmiOnline OR NOT bControlAllowed
+                OR bGripperActionFault OR NOT bGripperReady THEN
+                // 准入检查期间条件失效，尚无自动运动，沿用启动拒绝。
+                bStartRejected := TRUE;
+                uiErrorCode := TO_UINT(E_AutoStartErrorCode.StartConditionLost);
+                eStep := E_AutoStartStep.Idle;
+            ELSIF bTrayPlanCheckDone THEN
+                IF bTrayNoTrayAvailable THEN
+                    // 全无盘仅StartRejected，不是Fault；MAIN撤销bControlAuto。
+                    bStartRejected := TRUE;
+                    uiErrorCode := TO_UINT(E_AutoStartErrorCode.NoTrayAvailable);
+                    eStep := E_AutoStartStep.Idle;
+                ELSIF bTrayPlanValid AND bTrayPlanLocked THEN
+                    eStep := E_AutoStartStep.WaitAxesReady;
+                END_IF;
+            END_IF; // StableValid未全部成立时继续等待，不新增超时。
 
         E_AutoStartStep.WaitAxesReady: // 请求使能，读取 FB_AxisManager 上一扫描周期的轴状态
             IF NOT bHmiOnline
@@ -178,6 +203,13 @@ END_IF;
 
 // 统一从状态机导出输出，避免 Stop 同一扫描仍下发启动。
 // 根据本周期最终状态发布输出；Stop 时三个输出立即撤销。
+// 计划请求贯穿本轮生命周期，Tray据此冻结/释放唯一计划。
+bTrayPlanChecking := (eStep = E_AutoStartStep.WaitTrayPlan);
+bTrayPlanRequest := bTrayPlanChecking
+    OR (eStep = E_AutoStartStep.WaitAxesReady)
+    OR (eStep = E_AutoStartStep.WaitMachinePreparation)
+    OR (eStep = E_AutoStartStep.Running);
+
 bEnabling :=
     (eStep = E_AutoStartStep.WaitAxesReady)
     OR

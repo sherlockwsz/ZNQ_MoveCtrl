@@ -4,7 +4,7 @@
     <Declaration><![CDATA[{attribute 'qualified_only'}
 VAR_GLOBAL
     stDamper : ST_DamperPositionConfig := (fRotationZero := 0.0, stGrid := (stOrigin := (X := -191.5, Y := 95), fRowPitchX := 80.0, fColumnPitchY := -80.0, fPickZ := -15.0, aSlotOffset := [24((X := 0.0, Y := 0.0))]), fSafeZ := 110.0, stTransfer := (X := 57.48, Y := -542.0, Z := 60.0), stBuffer := (X := 194.0, Y := -472.0, Z := -23.0), stCameraOffset := (X := 0.0, Y := 115.0));
-    stTray : ST_TrayPositionConfig := (fStandbyZ := -753.0, fRackStationX := 288.5, fLiftStationX := -95.0, fPickupLevelZ := -16.0, aLayer := [(fHighPosition := -725.0, fLowPosition := -755.0), (fHighPosition := -575.0, fLowPosition := -615.0), (fHighPosition := -455.0, fLowPosition := -490.0), (fHighPosition := -330.0, fLowPosition := -365.0), (fHighPosition := -205.0, fLowPosition := -240.0)]);
+    stTray : ST_TrayPositionConfig := (fStandbyZ := -753.0, fRackStationX := 288.5, fLiftStationX := -95.0, fPickupLevelZ := -16.0, aLayer := [(fHighPosition := -724.0, fLowPosition := -754.0), (fHighPosition := -595.0, fLowPosition := -630.0), (fHighPosition := -475.0, fLowPosition := -507.0), (fHighPosition := -350.0, fLowPosition := -383.0), (fHighPosition := -205.0, fLowPosition := -240.0)]);
     stClamping : ST_ClampingPositionConfig := (fReadyPosition := 80.0, fApproachPosition := 23.0, fClampPosition := 22.0);
     stTurntable : ST_TurntablePositionConfig := (fPosition180 := 190.5, fPosition0 := 10.5);
     stAdjustment : ST_AdjustmentPositionConfig := (stWork := (X := -1.2, Y := -80.5, Z := 81.0), stReady := (X := -1.2, Y := -30.0, Z := 101.0));

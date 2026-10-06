@@ -34,7 +34,8 @@ TYPE E_TrayProcessStep :
 	// 第五盘放回且TrayX退出后，
     // TrayZ回到第一层下方。
     FinalMoveZFirstLayerLow := 140,
-    Completed               := 200
+    Completed               := 200,
+    Error                   := 900
 );
 END_TYPE]]></Declaration>
   </DUT>

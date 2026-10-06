@@ -6,6 +6,7 @@
 TYPE E_AutoStartStep :
 (
     Idle             		 := 0,   // 等待新的自动启动上升沿
+    WaitTrayPlan             := 5,   // Tray启动准入预检查，无机械动作
     WaitAxesReady    		 := 10,  // 请求八轴使能，等待全部轴就绪
     WaitMachinePreparation   := 20,  // 允许现有五盘流程运行
 	Running          		 := 30

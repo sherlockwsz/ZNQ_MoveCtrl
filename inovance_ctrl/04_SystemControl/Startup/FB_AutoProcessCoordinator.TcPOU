@@ -5,6 +5,8 @@
 VAR_INPUT
     // 来自 FB_AutoStartCoordinator；全部轴就绪后保持 TRUE。
     bStart : BOOL;
+    bTrayPlanRequest : BOOL; // 仅转接AutoStart预检查/计划保持，不改变工艺时序
+    aTrayLevelDetected : ARRAY[1..5] OF BOOL; // 上层语义化层检测，仅转接给Tray
 
     // 整机停止／流程中止。
     bAbort : BOOL;
@@ -38,8 +40,14 @@ VAR_IN_OUT
 END_VAR
 
 VAR_OUTPUT
+    bTrayFault : BOOL;
+    uiTrayErrorAxis : UINT;
+    udTrayError : UDINT;
+    bDamperFault : BOOL;
+    uiDamperErrorAxis : UINT;
+    udDamperError : UDINT;
     bBusy : BOOL; // 任一自动流程或夹爪动作正在执行
-    bDone : BOOL; // 第五盘放回、Tray 最终复位完成
+    bDone : BOOL; // 本轮最终计划盘放回、Tray 最终复位完成
 
     // 本扫描检测到夹爪动作失败；交给 MAIN 锁存并启动 Stop 链路。
     bGripperActionFault : BOOL;
@@ -78,7 +86,10 @@ bEffectiveAbort := bAbort;
 // ------------------------------------------------------------
 ioTrayProcess(
     bStart := bStart,
-    bAbort := bAbort,
+    bPlanCheckRequest := bTrayPlanRequest,
+    aTrayLevelDetected := aTrayLevelDetected,
+    bAbort := bAbort OR bStopRequest,
+    bReset := bReset,
 
     bDamperPrePositionDone :=
         ioDamperProcess.bPrePositionDone,
@@ -128,7 +139,8 @@ END_IF;
 // ------------------------------------------------------------
 ioDamperProcess(
     bStart := bStart,
-    bAbort := bEffectiveAbort,
+    bAbort := bEffectiveAbort OR bStopRequest,
+    bReset := bReset,
 	bMachinePrepared := bMachinePrepared,
 	// 使用上一扫描保持的请求：第一次提出请求后，下一扫描返回Done。
 	// 仿真由FB_GripperManager统一完成Accepted/Completed握手；
@@ -147,6 +159,9 @@ ioDamperProcess(
 
     nTrayAtDamperLayer :=
         ioTrayProcess.nCurrentLayer,
+
+    bCurrentTrayIsLastPlanned :=
+        ioTrayProcess.bCurrentTrayIsLastPlanned,
 
     stTurntableStatus :=
         ioTurntableUnit.stStatus,
@@ -230,6 +245,8 @@ IF bAdjustGripperActionFault THEN
 END_IF;
 
 stTurntableInputForThisScan := ioDamperProcess.stTurntableInput;
+// 只转接整机统一恢复脉冲，不改变正常转台握手。
+stTurntableInputForThisScan.bReset := stTurntableInputForThisScan.bReset OR bReset;
 stTurntableInputForThisScan.bAdjustmentAccepted :=
     ioScrewdriverProcess.bRequestAccepted;
 stTurntableInputForThisScan.bAdjustmentStarted :=
@@ -300,7 +317,15 @@ bBusy :=
 	OR ioAdjustGripperAction.bBusy
 	OR ioScrewdriverProcess.bBusy
     OR ioAdjustmentProcess.bAdjustmentBusy;
-bDone := ioTrayProcess.bDone;]]></ST>
+bDone := ioTrayProcess.bDone;
+
+// 直接转接锁存诊断，Abort不清已有错误；主动终止由各流程优先处理。
+bTrayFault := ioTrayProcess.bError;
+uiTrayErrorAxis := ioTrayProcess.uiErrorAxis;
+udTrayError := ioTrayProcess.udiErrorCode;
+bDamperFault := ioDamperProcess.bError;
+uiDamperErrorAxis := ioDamperProcess.uiErrorAxis;
+udDamperError := ioDamperProcess.udiErrorCode;]]></ST>
     </Implementation>
   </POU>
 </TcPlcObject>

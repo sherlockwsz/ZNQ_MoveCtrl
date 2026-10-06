@@ -6,21 +6,23 @@
 //
 // 启动方式：
 // bStart由FALSE变为TRUE时启动一次完整循环。
-// 一次循环依次取放第1～5层，第5层放回后结束。
+// 每轮按启动时冻结的有盘计划，从低层到高层取放，最终计划盘放回后结束。
 // bStart必须重新回到FALSE，下一次上升沿才可再次启动。
 //
 // 当前版本边界：
 // 1. 只实现正常主流程；
-// 2. 不判断料盘初始状态；
-// 3. 不实现安全互锁、超时和异常恢复；
-// 4. 到达阻尼器取料位后直接进入放盘流程；
+// 2. 五层输入持续稳定确认，自动启动预检查只建立一次固定计划；
+// 3. 运动拒绝/中止/超时进入锁存Error，由整机Stop负责停止；
+// 4. 到达阻尼器取料位后等待换盘请求或最终盘处理完成；
 // 5. 启动前两根轴应已使能并可执行绝对运动。
 //==============================================================
 
 FUNCTION_BLOCK FB_TrayProcess
 
 VAR_INPUT
-    bStart : BOOL; // 五层循环启动信号，上升沿有效
+    bStart : BOOL; // 正式生产启动信号，上升沿有效；直接使用已冻结Plan
+    bPlanCheckRequest : BOOL; // Auto启动前预检查；锁定后保持至批次结束
+    aTrayLevelDetected : ARRAY[1..5] OF BOOL; // 物理层检测，由上层传入，不依赖原始IO通道
 	
     //==========================================================
     // 来自FB_DamperProcess的预定位完成信号
@@ -31,15 +33,16 @@ VAR_INPUT
     bDamperPrePositionDone : BOOL;	
 
 	// 来自FB_DamperProcess。
-    // 第1～4盘第24件进入调整位后保持TRUE，请求更换料盘。
+    // 非最终计划盘第24件进入调整位后保持TRUE，请求更换料盘。
     bTrayChangeRequest : BOOL;
 
-    // 第五盘最后一件已经放入缓冲位。
+    // 最终计划盘最后一件已经放入缓冲位，或无真实在途件时已完成。
     // 保持到下一次自动流程启动。
     bDamperProcessDone : BOOL;
 	// TRUE：立即终止本轮料盘自动流程。
 	// 不执行回安全位；轴的实际减速停止由FB_AutoStopManager负责。
 	bAbort : BOOL;
+    bReset : BOOL; // 复用整机故障复位；Start不能绕过Error
 END_VAR
 
 VAR_IN_OUT
@@ -48,8 +51,17 @@ VAR_IN_OUT
 END_VAR
 
 VAR_OUTPUT
-    bBusy : BOOL;                         // TRUE：五层循环正在执行
-    bDone : BOOL;                         // TRUE：第5层已经放回
+    bError : BOOL;
+    uiErrorAxis : UINT;
+    udiErrorCode : UDINT;
+    nErrorLayer : INT;                    // PlannedTrayMissing锁存物理层号；正常/Reset为0
+    bNoTrayAvailable : BOOL;              // 本次启动计划为空；新预检查或Reset清理，仅诊断
+    bPlanCheckDone : BOOL;                // 五层StableValid完成且本轮BuildPlan已结束
+    bPlanValid : BOOL;                    // 本轮固定计划非空
+    bPlanLocked : BOOL;                   // 固定计划锁定，正式运行禁止重新BuildPlan
+    bCurrentTrayIsLastPlanned : BOOL;     // 当前工作位置料盘是启动时固定计划的最终盘
+    bBusy : BOOL;                         // TRUE：本轮固定料盘计划正在执行
+    bDone : BOOL;                         // TRUE：最终计划盘放回原层且Tray最终复位完成
     nCurrentLayer : INT;                  // 当前处理层号，范围1～5
     eCurrentStep : E_TrayProcessStep;     // 当前流程步骤
 	
@@ -63,12 +75,25 @@ END_VAR
 
 VAR
     trigStart : R_TRIG;
+    trigPlanCheck : R_TRIG;
+    fbMotionTimeout : TON;
 
     // 当前步骤的绝对运动命令是否已经发送。
     // 用于保证每个bMoveAbs只产生一个PLC周期的脉冲。
     bCommandIssued : BOOL;
 
-    nInitIndex : INT;
+    nInitIndex : DINT;
+    // 原始输入候选值/稳定值分离；去抖在Abort/Reset前持续调用。
+    aLevelDetectTimer : ARRAY[1..5] OF TON;
+    aLevelCandidate : ARRAY[1..5] OF BOOL;
+    aLevelCandidateInitialized : ARRAY[1..5] OF BOOL;
+    aLevelStable : ARRAY[1..5] OF BOOL;
+    aLevelStableValid : ARRAY[1..5] OF BOOL;
+    bAllLevelsStableValid : BOOL;
+    bPlanFrozen : BOOL;
+    nFirstPlannedLayer : INT;
+    nLastPlannedLayer : INT;
+    nNextPlannedLayer : INT;
 	// 锁存总启动上升沿，允许启动信号使用短脉冲。
 	bStartPending : BOOL;
 	
@@ -90,7 +115,7 @@ VAR
     //==========================================================
     // 五层料盘数据
     // 每层分别保存Z轴高位、低位和料盘状态。
-    // 当前测试流程默认五层均有待检料盘。
+    // 静态默认值保留；每次有效Start由稳定检测覆盖为真实批次计划。
     //==========================================================
     aTray : ARRAY[1..5] OF ST_Tray := [5((eState := E_Tray.WaitInspect))];
 END_VAR]]></Declaration>
@@ -99,6 +124,27 @@ END_VAR]]></Declaration>
 // 1. 更新启动上升沿
 //==============================================================
 trigStart(CLK := bStart);
+trigPlanCheck(CLK := bPlanCheckRequest);
+
+// 五层双向去抖持续更新，首次稳定确认前不允许建立计划。
+// 任一候选值变化都先复位该层TON，再开始新的连续稳定计时。
+bAllLevelsStableValid := TRUE;
+FOR nInitIndex := LOWER_BOUND(aTrayLevelDetected, 1) TO UPPER_BOUND(aTrayLevelDetected, 1) DO
+    IF NOT aLevelCandidateInitialized[nInitIndex]
+        OR (aLevelCandidate[nInitIndex] <> aTrayLevelDetected[nInitIndex])
+    THEN
+        aLevelCandidate[nInitIndex] := aTrayLevelDetected[nInitIndex];
+        aLevelCandidateInitialized[nInitIndex] := TRUE;
+        aLevelStableValid[nInitIndex] := FALSE;
+        aLevelDetectTimer[nInitIndex](IN := FALSE, PT := GVL_ProcessConfig.stTray.tLevelDetectStable);
+    END_IF;
+    aLevelDetectTimer[nInitIndex](IN := TRUE, PT := GVL_ProcessConfig.stTray.tLevelDetectStable);
+    IF aLevelDetectTimer[nInitIndex].Q THEN
+        aLevelStable[nInitIndex] := aLevelCandidate[nInitIndex];
+        aLevelStableValid[nInitIndex] := TRUE;
+    END_IF;
+    bAllLevelsStableValid := bAllLevelsStableValid AND aLevelStableValid[nInitIndex];
+END_FOR;
 
 //==============================================================
 // 外部中止处理
@@ -106,7 +152,16 @@ trigStart(CLK := bStart);
 // 只复位流程和命令，不修改实际料盘状态。
 // 轴的MC_Stop由FB_AutoStopManager统一处理。
 //==============================================================
-IF bAbort THEN
+IF bReset THEN
+    bError := FALSE;
+    uiErrorAxis := 0;
+    udiErrorCode := TO_UDINT(E_TrayErrorCode.None);
+    nErrorLayer := 0;
+    bNoTrayAvailable := FALSE;
+END_IF;
+
+IF bAbort OR bReset THEN
+    fbMotionTimeout(IN := FALSE, PT := GVL_MotionConfig.stTray.tMoveTimeout);
     // 清除本流程产生的轴命令。
     stAxisX.AutoCmd.bMoveAbs := FALSE;
     stAxisX.AutoCmd.bMoveRel := FALSE;
@@ -120,6 +175,14 @@ IF bAbort THEN
 
     // 清除流程锁存。
     bStartPending := FALSE;
+    bPlanFrozen := FALSE;
+    bPlanCheckDone := FALSE;
+    bPlanValid := FALSE;
+    bPlanLocked := FALSE;
+    nFirstPlannedLayer := 0;
+    nLastPlannedLayer := 0;
+    nNextPlannedLayer := 0;
+    bCurrentTrayIsLastPlanned := FALSE;
     bCommandIssued := FALSE;
     bTrayChangeActive := FALSE;
 
@@ -131,14 +194,57 @@ IF bAbort THEN
 
     // 返回空闲，但不调用M_ResetTrayStates。
     // 防止停止时篡改软件记录的料盘状态。
-    eCurrentStep := E_TrayProcessStep.Idle;
+    IF bError THEN
+        eCurrentStep := E_TrayProcessStep.Error;
+    ELSE
+        eCurrentStep := E_TrayProcessStep.Idle;
+    END_IF;
 
     RETURN;
 END_IF;
 
-// 锁存启动请求。
-// 即使外部bStart只保持一个PLC周期，流程也不会丢失启动命令。
-IF trigStart.Q THEN
+// 新Auto事务清除旧控制状态；计划只由Tray模块建立。
+IF trigPlanCheck.Q AND NOT bError AND NOT bBusy
+    AND ((eCurrentStep = E_TrayProcessStep.Idle) OR (eCurrentStep = E_TrayProcessStep.Completed))
+THEN
+    bStartPending := FALSE;
+    bPlanFrozen := FALSE;
+    bPlanCheckDone := FALSE;
+    bPlanValid := FALSE;
+    bPlanLocked := FALSE;
+    bNoTrayAvailable := FALSE;
+    nFirstPlannedLayer := 0;
+    nLastPlannedLayer := 0;
+    nNextPlannedLayer := 0;
+    bDone := FALSE;
+    eCurrentStep := E_TrayProcessStep.Idle;
+    FOR nInitIndex := LOWER_BOUND(aTray, 1) TO UPPER_BOUND(aTray, 1) DO
+        aTray[nInitIndex].eState := E_Tray.NoTray;
+    END_FOR;
+END_IF;
+
+// 预检查取消/启动拒绝/正常批次结束后释放Plan，不发Stop或运动命令。
+// NoTrayAvailable保持到下一次新Auto请求或明确Reset，供ADS稳定读取。
+IF NOT bPlanCheckRequest AND NOT bBusy
+    AND (bPlanCheckDone OR bPlanFrozen OR bStartPending) THEN
+    bStartPending := FALSE;
+    bPlanFrozen := FALSE;
+    bPlanCheckDone := FALSE;
+    bPlanValid := FALSE;
+    bPlanLocked := FALSE;
+    nFirstPlannedLayer := 0;
+    nLastPlannedLayer := 0;
+    nNextPlannedLayer := 0;
+    FOR nInitIndex := LOWER_BOUND(aTray, 1) TO UPPER_BOUND(aTray, 1) DO
+        aTray[nInitIndex].eState := E_Tray.NoTray;
+    END_FOR;
+END_IF;
+
+// 正式生产仅认领已冻结Plan；禁止再次等待StableValid或重新BuildPlan。
+IF trigStart.Q AND NOT bError AND bPlanCheckRequest
+    AND bPlanCheckDone AND bPlanValid AND bPlanLocked
+    AND (eCurrentStep = E_TrayProcessStep.Idle)
+THEN
     bStartPending := TRUE;
 END_IF;
 //==============================================================
@@ -169,20 +275,31 @@ CASE eCurrentStep OF
 		bTrayChangeDone := FALSE;
 		bTrayChangeActive := FALSE;
 	
+        // Auto启动前Tray计划预检查：只读稳定状态，不进入取盘状态机。
+        IF bPlanCheckRequest AND NOT bPlanCheckDone AND NOT bError
+            AND bAllLevelsStableValid THEN
+            M_ResetTrayStates();
+            bPlanCheckDone := TRUE;
+            bPlanValid := (nFirstPlannedLayer > 0);
+            bPlanLocked := bPlanValid; // 本轮固定Plan冻结，准备期间也不重新规划。
+            bPlanFrozen := bPlanLocked;
+            bNoTrayAvailable := NOT bPlanValid; // 全无盘仅用于StartRejected，非Fault。
+        END_IF;
+
 		// TrayX、TrayZ已经Ready，且Damper三轴已经完成预定位，
 		// 才正式启动第一盘取料流程。
 		// 如果条件尚未满足，bStartPending会继续保持TRUE。
 		IF
 			bStartPending
+            AND bPlanFrozen
+            AND (nFirstPlannedLayer > 0)
 			AND bDamperPrePositionDone
 			AND stAxisX.State.bReady
 			AND stAxisZ.State.bReady
 		THEN
 			bStartPending := FALSE;
 		
-			M_ResetTrayStates();
-		
-			nCurrentLayer := 1;
+			nCurrentLayer := nFirstPlannedLayer;
 			bBusy := TRUE;
 		
 			// Tray机构的第一步仍然是TrayX回到升降位。
@@ -228,10 +345,10 @@ CASE eCurrentStep OF
 			END_IF;
 	
 		//==========================================================
-		// 2. 第1～4盘接受换盘请求
+		// 2. 非最终计划盘接受换盘请求
 		//==========================================================
 		ELSIF
-			(nCurrentLayer < UPPER_BOUND(aTray, 1))
+			NOT bCurrentTrayIsLastPlanned
 			AND bTrayChangeRequest
 		THEN
 			bTrayAtDamperPosition := FALSE;
@@ -243,10 +360,10 @@ CASE eCurrentStep OF
 				E_TrayProcessStep.ReturnEnsureXRear;
 	
 		//==========================================================
-		// 3. 第五盘等待阻尼器完整流程结束
+		// 3. 最终计划盘等待阻尼器完整流程结束
 		//==========================================================
 		ELSIF
-			(nCurrentLayer = UPPER_BOUND(aTray, 1))
+			bCurrentTrayIsLastPlanned
 			AND bDamperProcessDone
 		THEN
 			bTrayAtDamperPosition := FALSE;
@@ -277,22 +394,23 @@ CASE eCurrentStep OF
     E_TrayProcessStep.NextLayer:
 		bCommandIssued := FALSE;
 	
-		IF nCurrentLayer < UPPER_BOUND(aTray, 1) THEN
-			nCurrentLayer := nCurrentLayer + 1;
-	
-			eCurrentStep :=
-				E_TrayProcessStep.TakeMoveXRear;
-		ELSE
-			// 第五盘已经放回，并且TrayX已经退出到升降位。
-			// 最后让TrayZ回到第一层下方。
-			eCurrentStep :=
-				E_TrayProcessStep.FinalMoveZFirstLayerLow;
-		END_IF;
+        nNextPlannedLayer := 0;
+        IF nCurrentLayer <> nLastPlannedLayer THEN
+            // 只搜索固定业务计划；空层在软件跳过，不扫描IO、不发运动。
+            nNextPlannedLayer := M_FindNextPlannedLayer(nAfterLayer := nCurrentLayer);
+        END_IF;
+        IF nNextPlannedLayer > 0 THEN
+            nCurrentLayer := nNextPlannedLayer;
+            eCurrentStep := E_TrayProcessStep.TakeMoveXRear;
+        ELSE
+            // 最终计划盘已经放回；沿用TrayZ回第一层下方的机械步骤。
+            eCurrentStep := E_TrayProcessStep.FinalMoveZFirstLayerLow;
+        END_IF;
 
 
     //==========================================================
-    // 第5层放回完成
-    // bDone保持TRUE，直到外部将bStart恢复为FALSE。
+    // 最终计划盘放回原层且Tray最终复位完成
+    // bDone保持TRUE，直到新的有效Start或Abort/Reset。
     //==========================================================
 	E_TrayProcessStep.Completed:
 		bBusy := FALSE;
@@ -307,16 +425,109 @@ CASE eCurrentStep OF
 			eCurrentStep := E_TrayProcessStep.Idle;
 		END_IF;
 
+    E_TrayProcessStep.Error:
+        bBusy := FALSE;
+        bDone := FALSE;
+        bStartPending := FALSE;
+        bTrayAtDamperPosition := FALSE;
+        bTrayChangeDone := FALSE;
+        bCommandIssued := FALSE;
+        stAxisX.AutoCmd.bMoveAbs := FALSE;
+        stAxisZ.AutoCmd.bMoveAbs := FALSE;
+        fbMotionTimeout(IN := FALSE, PT := GVL_MotionConfig.stTray.tMoveTimeout);
+
 ELSE
-    // 非法步骤回到空闲状态。
+    // 非法步骤回到空闲状态.
     bBusy := FALSE;
     bDone := FALSE;
     nCurrentLayer := 0;
     bCommandIssued := FALSE;
     eCurrentStep := E_TrayProcessStep.Idle;
 
-END_CASE;]]></ST>
+END_CASE;
+
+IF bError THEN
+    bPlanFrozen := FALSE;
+    bPlanCheckDone := FALSE;
+    bPlanValid := FALSE;
+    bPlanLocked := FALSE;
+    nFirstPlannedLayer := 0;
+    nLastPlannedLayer := 0;
+    nNextPlannedLayer := 0;
+    bBusy := FALSE;
+    bDone := FALSE;
+    bStartPending := FALSE;
+    bTrayChangeActive := FALSE;
+    bTrayAtDamperPosition := FALSE;
+    bTrayChangeDone := FALSE;
+    bCommandIssued := FALSE;
+    stAxisX.AutoCmd.bMoveAbs := FALSE;
+    stAxisZ.AutoCmd.bMoveAbs := FALSE;
+    fbMotionTimeout(IN := FALSE, PT := GVL_MotionConfig.stTray.tMoveTimeout);
+    eCurrentStep := E_TrayProcessStep.Error;
+END_IF;
+
+bCurrentTrayIsLastPlanned := bTrayAtDamperPosition
+    AND bPlanFrozen AND (nLastPlannedLayer > 0)
+    AND (nCurrentLayer = nLastPlannedLayer);]]></ST>
     </Implementation>
+    <Method Name="M_FindNextPlannedLayer" Id="{ae76d534-900e-4137-9dc9-150a14c58f8c}">
+      <Declaration><![CDATA[METHOD PRIVATE M_FindNextPlannedLayer : INT
+VAR_INPUT
+    nAfterLayer : DINT;
+END_VAR
+VAR
+    nLayer : DINT;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_FindNextPlannedLayer := 0;
+FOR nLayer := nAfterLayer + 1 TO UPPER_BOUND(aTray, 1) DO
+    IF (nLayer >= LOWER_BOUND(aTray, 1)) AND (aTray[nLayer].eState = E_Tray.WaitInspect) THEN
+        M_FindNextPlannedLayer := TO_INT(nLayer);
+        EXIT;
+    END_IF;
+END_FOR;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_MotionDone" Id="{d3396a39-e04b-4528-93d7-ea56759b5df3}">
+      <Declaration><![CDATA[METHOD PRIVATE M_MotionDone : BOOL
+VAR_INPUT
+    uiAxisIndex : UINT;
+END_VAR
+VAR_IN_OUT
+    ioAxis : ST_AxisInterface;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_MotionDone := FALSE;
+IF bError OR bAbort OR bReset THEN
+    RETURN;
+END_IF;
+
+fbMotionTimeout(IN := bCommandIssued, PT := GVL_MotionConfig.stTray.tMoveTimeout);
+IF bCommandIssued THEN
+    // 完成优先；发令当扫不消费上一运动留下的拒绝/中止脉冲。
+    IF ioAxis.State.bDone THEN
+        fbMotionTimeout(IN := FALSE, PT := GVL_MotionConfig.stTray.tMoveTimeout);
+        M_MotionDone := TRUE;
+    ELSIF NOT ioAxis.AutoCmd.bMoveAbs THEN
+        IF ioAxis.State.bCmdRejected THEN
+            udiErrorCode := TO_UDINT(E_TrayErrorCode.MotionCommandRejected);
+        ELSIF ioAxis.State.bCommandAborted THEN
+            udiErrorCode := TO_UDINT(E_TrayErrorCode.MotionCommandAborted);
+        ELSIF fbMotionTimeout.Q THEN
+            udiErrorCode := TO_UDINT(E_TrayErrorCode.MotionTimeout);
+        END_IF;
+        IF udiErrorCode <> TO_UDINT(E_TrayErrorCode.None) THEN
+            bError := TRUE;
+            uiErrorAxis := uiAxisIndex;
+            eCurrentStep := E_TrayProcessStep.Error;
+        END_IF;
+    END_IF;
+END_IF;
+]]></ST>
+      </Implementation>
+    </Method>
     <Method Name="M_ResetTrayStates" Id="{c28507a6-5dc3-4d81-8e05-5412d1d6f331}">
       <Declaration><![CDATA[METHOD PRIVATE M_ResetTrayStates
 
@@ -324,14 +535,22 @@ VAR
     nLayer : DINT;
 END_VAR]]></Declaration>
       <Implementation>
-        <ST><![CDATA[(*
-    每次启动新的五层料盘循环时，
-    将五层料盘状态恢复为待检。
-    不修改每层的高位和低位坐标。
-*)
-FOR nLayer := 1 TO UPPER_BOUND(aTray, 1) DO
-    aTray[nLayer].eState :=
-        E_Tray.WaitInspect;
+        <ST><![CDATA[// 只在Auto启动预检查且五层StableValid全部成立后调用；正式运行禁止重建。
+// 不改坐标，不将实时传感器变化回写业务状态。
+FOR nLayer := LOWER_BOUND(aTray, 1) TO UPPER_BOUND(aTray, 1) DO
+    IF aLevelStable[nLayer] THEN
+        aTray[nLayer].eState := E_Tray.WaitInspect;
+    ELSE
+        aTray[nLayer].eState := E_Tray.NoTray;
+    END_IF;
+END_FOR;
+nFirstPlannedLayer := M_FindNextPlannedLayer(nAfterLayer := LOWER_BOUND(aTray, 1) - 1);
+nLastPlannedLayer := 0;
+FOR nLayer := UPPER_BOUND(aTray, 1) TO LOWER_BOUND(aTray, 1) BY -1 DO
+    IF aTray[nLayer].eState = E_Tray.WaitInspect THEN
+        nLastPlannedLayer := TO_INT(nLayer);
+        EXIT;
+    END_IF;
 END_FOR;]]></ST>
       </Implementation>
     </Method>
@@ -363,7 +582,7 @@ END_VAR]]></Declaration>
             bCommandIssued := TRUE;
         END_IF;
 
-        IF bCommandIssued AND ioAxisX.State.bDone THEN
+        IF M_MotionDone(uiAxisIndex := GVL_AxisIndex.TrayX, ioAxis := ioAxisX) THEN
             bCommandIssued := FALSE;
             eCurrentStep := E_TrayProcessStep.ReturnMoveZHigh;
         END_IF;
@@ -381,7 +600,7 @@ END_VAR]]></Declaration>
             bCommandIssued := TRUE;
         END_IF;
 
-        IF bCommandIssued AND ioAxisZ.State.bDone THEN
+        IF M_MotionDone(uiAxisIndex := GVL_AxisIndex.TrayZ, ioAxis := ioAxisZ) THEN
             bCommandIssued := FALSE;
             eCurrentStep := E_TrayProcessStep.ReturnMoveXForward;
         END_IF;
@@ -398,7 +617,7 @@ END_VAR]]></Declaration>
             bCommandIssued := TRUE;
         END_IF;
 
-        IF bCommandIssued AND ioAxisX.State.bDone THEN
+        IF M_MotionDone(uiAxisIndex := GVL_AxisIndex.TrayX, ioAxis := ioAxisX) THEN
             bCommandIssued := FALSE;
             eCurrentStep := E_TrayProcessStep.ReturnMoveZLow;
         END_IF;
@@ -416,7 +635,7 @@ END_VAR]]></Declaration>
             bCommandIssued := TRUE;
         END_IF;
 
-        IF bCommandIssued AND ioAxisZ.State.bDone THEN
+        IF M_MotionDone(uiAxisIndex := GVL_AxisIndex.TrayZ, ioAxis := ioAxisZ) THEN
             bCommandIssued := FALSE;
             eCurrentStep := E_TrayProcessStep.ReturnMoveXRear;
         END_IF;
@@ -433,7 +652,7 @@ END_VAR]]></Declaration>
             bCommandIssued := TRUE;
         END_IF;
 
-        IF bCommandIssued AND ioAxisX.State.bDone THEN
+        IF M_MotionDone(uiAxisIndex := GVL_AxisIndex.TrayX, ioAxis := ioAxisX) THEN
             bCommandIssued := FALSE;
             aTray[nCurrentLayer].eState := E_Tray.Inspected;
             eCurrentStep := E_TrayProcessStep.NextLayer;
@@ -442,7 +661,7 @@ END_VAR]]></Declaration>
 	// 6. 整套流程结束前，TrayZ回到第一层下方
 	//
 	// 进入本步骤时：
-	// 1. 第五盘已经放回第五层；
+	// 1. 最终计划盘已经放回原物理层；
 	// 2. TrayX已经退出到升降位。
 	//==============================================================
 	E_TrayProcessStep.FinalMoveZFirstLayerLow:
@@ -457,7 +676,7 @@ END_VAR]]></Declaration>
 			bCommandIssued := TRUE;
 		END_IF;
 	
-		IF bCommandIssued AND ioAxisZ.State.bDone THEN
+		IF M_MotionDone(uiAxisIndex := GVL_AxisIndex.TrayZ, ioAxis := ioAxisZ) THEN
 			bCommandIssued := FALSE;
 	
 			eCurrentStep :=
@@ -494,7 +713,7 @@ END_VAR]]></Declaration>
             bCommandIssued := TRUE;
         END_IF;
 
-        IF bCommandIssued AND ioAxisX.State.bDone THEN
+        IF M_MotionDone(uiAxisIndex := GVL_AxisIndex.TrayX, ioAxis := ioAxisX) THEN
             bCommandIssued := FALSE;
             eCurrentStep := E_TrayProcessStep.TakeMoveZLow;
         END_IF;
@@ -512,7 +731,7 @@ END_VAR]]></Declaration>
             bCommandIssued := TRUE;
         END_IF;
 
-        IF bCommandIssued AND ioAxisZ.State.bDone THEN
+        IF M_MotionDone(uiAxisIndex := GVL_AxisIndex.TrayZ, ioAxis := ioAxisZ) THEN
             bCommandIssued := FALSE;
             eCurrentStep := E_TrayProcessStep.TakeMoveXForward;
         END_IF;
@@ -523,13 +742,22 @@ END_VAR]]></Declaration>
     //==========================================================
     E_TrayProcessStep.TakeMoveXForward:
         IF NOT bCommandIssued THEN
+            // 只在真正入架取盘发令前复核；取出后传感器FALSE不改变业务状态。
+            IF NOT aLevelStable[nCurrentLayer] THEN
+                bError := TRUE;
+                uiErrorAxis := 0;
+                udiErrorCode := TO_UDINT(E_TrayErrorCode.PlannedTrayMissing);
+                nErrorLayer := nCurrentLayer;
+                eCurrentStep := E_TrayProcessStep.Error;
+                RETURN;
+            END_IF;
             ioAxisX.AutoSet.Position.fAbsolutePosition := GVL_PositionConfig.stTray.fRackStationX;
             ioAxisX.AutoSet.Position.fVelocity := GVL_MotionConfig.stTray.stX.fVelocity;
             ioAxisX.AutoCmd.bMoveAbs := TRUE;
             bCommandIssued := TRUE;
         END_IF;
 
-        IF bCommandIssued AND ioAxisX.State.bDone THEN
+        IF M_MotionDone(uiAxisIndex := GVL_AxisIndex.TrayX, ioAxis := ioAxisX) THEN
             bCommandIssued := FALSE;
             eCurrentStep := E_TrayProcessStep.TakeMoveZHigh;
         END_IF;
@@ -547,7 +775,7 @@ END_VAR]]></Declaration>
             bCommandIssued := TRUE;
         END_IF;
 
-        IF bCommandIssued AND ioAxisZ.State.bDone THEN
+        IF M_MotionDone(uiAxisIndex := GVL_AxisIndex.TrayZ, ioAxis := ioAxisZ) THEN
             bCommandIssued := FALSE;
             eCurrentStep := E_TrayProcessStep.TakeMoveXRearWithTray;
         END_IF;
@@ -564,7 +792,7 @@ END_VAR]]></Declaration>
             bCommandIssued := TRUE;
         END_IF;
 
-        IF bCommandIssued AND ioAxisX.State.bDone THEN
+        IF M_MotionDone(uiAxisIndex := GVL_AxisIndex.TrayX, ioAxis := ioAxisX) THEN
             bCommandIssued := FALSE;
             eCurrentStep := E_TrayProcessStep.TakeMoveZDamperPosition;
         END_IF;
@@ -585,7 +813,7 @@ END_VAR]]></Declaration>
 			bCommandIssued := TRUE;
 		END_IF;
 	
-		IF bCommandIssued AND ioAxisZ.State.bDone THEN
+		IF M_MotionDone(uiAxisIndex := GVL_AxisIndex.TrayZ, ioAxis := ioAxisZ) THEN
 			bCommandIssued := FALSE;
 	
 			aTray[nCurrentLayer].eState :=

@@ -16,6 +16,7 @@ FUNCTION_BLOCK FB_MachineSupervisor
 
 VAR_INPUT
     bReset                   : BOOL;  // 人工故障复位脉冲；仅在故障条件消失后有效
+    bRecoveryReady           : BOOL := TRUE; // 异步源恢复事务完成后才允许清锁存
     bAutoActive              : BOOL;  // 自动启动准备或五盘流程正在执行
     bHmiWatchdogTimeout      : BOOL;
 
@@ -40,6 +41,13 @@ VAR_INPUT
 	bScrewdriverFault        : BOOL;
 	uiScrewdriverErrorAxis   : UINT;
 	udiScrewdriverError      : UDINT;
+
+    bTrayFault               : BOOL;
+    uiTrayErrorAxis          : UINT;
+    udiTrayError             : UDINT;
+    bDamperFault             : BOOL;
+    uiDamperErrorAxis        : UINT;
+    udiDamperError           : UDINT;
 
     bAutoStopFault           : BOOL;
     bAutoStopTimeout         : BOOL;
@@ -87,7 +95,7 @@ udiAxisError := 0;
 
 // 已锁存轴故障后即使自动流程已经退出，也继续监视原轴报警，
 // 防止轴错误尚未复位时错误清除整机故障。
-IF bAutoActive
+IF bAutoActive OR bReset
     OR (stFault.bActive AND (stFault.eSource = E_MachineFaultSource.Axis))
 THEN
     FOR uiItem := 1 TO GVL_Constants.cMaxAxisCount DO
@@ -137,6 +145,8 @@ bActiveCondition :=
     OR bAdjustGripperFault
     OR bTurntableFault
 	OR bScrewdriverFault
+    OR bTrayFault
+    OR bDamperFault
     OR bAutoStopFault;
 
 bStopRequestPulse := FALSE;
@@ -146,7 +156,7 @@ bStopRequestPulse := FALSE;
 // 启动错误使用单周期事件锁存，因此不加入bActiveCondition；
 // 轴、通信或设备持续故障必须先在源模块中清除。
 //==============================================================
-IF bReset AND NOT bActiveCondition THEN
+IF bReset AND bRecoveryReady AND NOT bActiveCondition THEN
     stFault.bActive := FALSE;
     stFault.eSource := E_MachineFaultSource.None;
     stFault.uiAxisIndex := 0;
@@ -193,6 +203,20 @@ IF NOT stFault.bActive THEN
         ELSE
             stFault.udiErrorCode := udiAxisError;
         END_IF;
+        bStopRequestPulse := TRUE;
+
+    ELSIF bTrayFault THEN
+        stFault.bActive := TRUE;
+        stFault.eSource := E_MachineFaultSource.TrayProcess;
+        stFault.uiAxisIndex := uiTrayErrorAxis;
+        stFault.udiErrorCode := udiTrayError;
+        bStopRequestPulse := TRUE;
+
+    ELSIF bDamperFault THEN
+        stFault.bActive := TRUE;
+        stFault.eSource := E_MachineFaultSource.DamperProcess;
+        stFault.uiAxisIndex := uiDamperErrorAxis;
+        stFault.udiErrorCode := udiDamperError;
         bStopRequestPulse := TRUE;
 
     ELSIF bDamperGripperFault OR bGripperHealthFault THEN

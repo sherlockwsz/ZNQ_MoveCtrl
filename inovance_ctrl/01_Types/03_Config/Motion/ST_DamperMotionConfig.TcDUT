@@ -8,6 +8,7 @@ STRUCT
     stZ : ST_VelocityConfig;
     fPositionTolerance : LREAL;
     stRotation : ST_DamperRotationMotionConfig;
+    tMoveTimeout : TIME; // 单次自动运动超时，统一在GVL_MotionConfig赋值
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

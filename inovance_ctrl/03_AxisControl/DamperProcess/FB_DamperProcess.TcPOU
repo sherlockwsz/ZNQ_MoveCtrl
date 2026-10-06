@@ -4,7 +4,7 @@
     <Declaration><![CDATA[//==============================================================
 // 五盘阻尼器上下料主流程
 //
-// 一个bStart上升沿自动处理5盘，每盘4行×6列。
+// 一个bStart上升沿按Tray启动时冻结的物理层计划处理料盘，每盘4行×6列。
 //
 // 当前测试版本：
 // 1. DamperX、DamperY在同一扫描周期启动；
@@ -14,7 +14,7 @@
 // 5. 夹紧轴使用位置模式模拟夹紧；
 // 6. 调整过程由FB_TurntableProcess使用3秒TON模拟；
 // 7. 换盘过程使用3秒TON模拟；
-// 8. 不实现安全互锁、报警、超时和中途停止。
+// 8. XY/Z/Rotation独立监督；统一Process Fault接入整机Stop链。
 //==============================================================
 
 FUNCTION_BLOCK FB_DamperProcess
@@ -41,9 +41,11 @@ VAR_INPUT
 	
 	// 当前位于阻尼器工作位置的实际料盘层号。
 	nTrayAtDamperLayer : INT;
+    bCurrentTrayIsLastPlanned : BOOL; // Tray转接：当前工作位置料盘是固定计划最终盘
 	// TRUE：立即中止本轮阻尼器自动流程。
 	// 不清空料位、备料位、调整位和缓冲位物料状态。
 	bAbort : BOOL;
+    bReset : BOOL; // 复用整机故障复位
 	// TRUE表示整机准备FB已经完成Z=110、XY=(1,1)、Rotation=0。
 	bMachinePrepared : BOOL;
 END_VAR
@@ -58,6 +60,9 @@ VAR_IN_OUT
 END_VAR
 
 VAR_OUTPUT
+    bError : BOOL;
+    uiErrorAxis : UINT;
+    udiErrorCode : UDINT;
     bBusy : BOOL;
     bDone : BOOL;
     bCurrentTrayDone : BOOL;
@@ -87,7 +92,7 @@ VAR_OUTPUT
 
     nCurrentTray   : INT;
     nCurrentRow    : INT;
-    nCurrentColumn : INT;
+    nCurrentColumn : DINT;
 
 //==============================================================
 // 上一件阻尼器的原始取料位置
@@ -99,7 +104,7 @@ VAR_OUTPUT
 //==============================================================
 	nPreviousSourceTray   : INT;
 	nPreviousSourceRow    : INT;
-	nPreviousSourceColumn : INT;
+	nPreviousSourceColumn : DINT;
 
     eCurrentStep : E_DamperProcessStep;
     eTakeStep    : E_DamperTakeStep;
@@ -131,6 +136,9 @@ END_VAR
 
 VAR
     trigStart : R_TRIG;
+    fbXYMotionTimeout : TON;
+    fbZMotionTimeout : TON;
+    fbRotationMotionTimeout : TON;
     trigReinitializeCoordinates : R_TRIG;
 	
     //==========================================================
@@ -186,6 +194,8 @@ VAR
     //==========================================================
     bCoordinatesInitialized : BOOL;
     bPreviousPartAvailable  : BOOL;
+    // 单槽位内部结果：只推进搜索，不代表实际取料成功。
+    bTakeSkippedNoScrew : BOOL;
 
     fCurrentSlotX : LREAL;
     fCurrentSlotY : LREAL;
@@ -312,13 +322,21 @@ fbScrewAngleVision(
     bExecute := bBusy
                 AND (eCurrentStep = E_DamperProcessStep.TakeCurrentDamper)
                 AND (eTakeStep = E_DamperTakeStep.AcquireVisionResult),
-    bCancel := bAbort
+    bCancel := bAbort OR bReset
 );
 
 //==============================================================
 // 外部中止优先级最高
 //==============================================================
-IF bAbort THEN
+IF bReset THEN
+    bError := FALSE;
+    uiErrorAxis := 0;
+    udiErrorCode := TO_UDINT(E_DamperErrorCode.None);
+    bVisionFault := FALSE;
+    eVisionError := E_VisionError.None;
+END_IF;
+
+IF bAbort OR bReset THEN
     M_AbortProcess(
         ioAxisX := stAxisX,
         ioAxisY := stAxisY,
@@ -330,7 +348,7 @@ IF bAbort THEN
 END_IF;
 
 
-IF trigStart.Q THEN
+IF trigStart.Q AND NOT bError THEN
     // 锁存一次完整五盘流程启动请求。
     bStartPending := TRUE;
 
@@ -458,6 +476,7 @@ CASE eCurrentStep OF
 		nCurrentColumn := 0;
 	
 		bPreviousPartAvailable := FALSE;
+		bTakeSkippedNoScrew := FALSE;
 	
 		// 清除上一件阻尼器来源位置。
 		nPreviousSourceTray := 0;
@@ -505,7 +524,7 @@ CASE eCurrentStep OF
 			// 第一盘进入工作位置后，默认24个位置都有未调整阻尼器。
 			M_ResetDamperSlotStates();
 	
-			nCurrentTray := 1;
+			nCurrentTray := 0; // 第一盘到位时再锁存真实物理层号
 			nCurrentRow := 1;
 			nCurrentColumn := 1;
 	
@@ -582,7 +601,8 @@ CASE eCurrentStep OF
 		IF
 			// 第一盘已经由Tray机构送到阻尼器取料位置。
 			bTrayAtDamperPosition
-			AND (nTrayAtDamperLayer = 1)
+            AND (nTrayAtDamperLayer >= LOWER_BOUND(GVL_PositionConfig.stTray.aLayer, 1))
+            AND (nTrayAtDamperLayer <= UPPER_BOUND(GVL_PositionConfig.stTray.aLayer, 1))
 	
 			// 转台初始化已经完成：
 			// 夹紧轴处于松开位置，转台位于初始位置。
@@ -594,6 +614,7 @@ CASE eCurrentStep OF
 			AND stAxisZ.State.bReady
 			AND stAxisRotation.State.bReady
 		THEN
+			nCurrentTray := nTrayAtDamperLayer;
 			// 第一盘到位后进入原有第一件取料流程。
 			// M_TakeDamper中的安全Z和XY检查会因为已经到位而直接通过，
 			// 随后DamperZ下降到第一料位取料高度。
@@ -636,6 +657,35 @@ CASE eCurrentStep OF
 					E_DamperSlotState.Empty;
 			
 				eCurrentStep := E_DamperProcessStep.RotateTurntable;
+			ELSIF bTakeSkippedNoScrew THEN
+				// M_TakeDamper仍返回FALSE：Skip没有任何真实取料副作用。
+				// eTakeStep已退出AcquireVisionResult；下一扫描bExecute=FALSE
+				// 复位本笔视觉事务，下一槽位重新到相机位后才发起新请求。
+				bTakeSkippedNoScrew := FALSE;
+
+				IF nCurrentColumn < UPPER_BOUND(aSlots, 2) THEN
+					nCurrentColumn := nCurrentColumn + 1;
+				ELSIF nCurrentRow < UPPER_BOUND(aSlots, 1) THEN
+					nCurrentColumn := LOWER_BOUND(aSlots, 2);
+					nCurrentRow := nCurrentRow + 1;
+				ELSE
+					// 盘尾Skip只结束搜索；保留最后一次真实取料的来源与在途状态。
+					// 仅本盘真实尾件需要登记调整结果；全盘Skip不创建等待工件。
+					IF bPreviousPartAvailable AND (nPreviousSourceTray = nCurrentTray) THEN
+						bWaitingTrayResult := TRUE;
+						nTrayAwaitingResult := nCurrentTray;
+					END_IF;
+
+					IF NOT bCurrentTrayIsLastPlanned THEN
+						eCurrentStep := E_DamperProcessStep.WaitTrayChange;
+					ELSIF bPreviousPartAvailable THEN
+						// 最终计划盘仍有真实尾件：使用原最终收尾路径。
+						eCurrentStep := E_DamperProcessStep.FinalWaitAdjustment;
+					ELSE
+						// 无真实在途件：不等待不存在的调整结果、不请求空转。
+						eCurrentStep := E_DamperProcessStep.Completed;
+					END_IF;
+				END_IF;
 			END_IF;
 		END_IF;
 
@@ -807,13 +857,13 @@ CASE eCurrentStep OF
 				nTrayAwaitingResult := nCurrentTray;
 			END_IF;
             // 第23件已经放入当前盘第24个空料位。
-            IF nCurrentTray < UPPER_BOUND(GVL_PositionConfig.stTray.aLayer, 1) THEN
+            IF NOT bCurrentTrayIsLastPlanned THEN
                 // 方案B：
                 // 第24件处于调整位期间，开始模拟更换料盘。
                 eCurrentStep :=
                     E_DamperProcessStep.WaitTrayChange;
             ELSE
-                // 第五盘不再更换新料盘。
+                // 最终计划盘不再更换新料盘。
                 eCurrentStep :=
                     E_DamperProcessStep.FinalWaitAdjustment;
             END_IF;
@@ -852,11 +902,8 @@ CASE eCurrentStep OF
 		IF
 			bTrayChangeDone
 			AND bTrayAtDamperPosition
-			AND
-			(
-				nTrayAtDamperLayer
-				= nCurrentTray + 1
-			)
+            AND (nTrayAtDamperLayer > nCurrentTray)
+            AND (nTrayAtDamperLayer <= UPPER_BOUND(GVL_PositionConfig.stTray.aLayer, 1))
 		THEN
 			nCurrentTray := nTrayAtDamperLayer;
 			nCurrentRow := 1;
@@ -865,8 +912,8 @@ CASE eCurrentStep OF
 			// 从现在开始，aSlots表示新到达的料盘。
 			M_ResetDamperSlotStates();
 	
-			// 上一盘第24件可能仍位于调整位。
-			bPreviousPartAvailable := TRUE;
+			// 保留此前真实取料建立的在途状态；全盘Skip不能凭换盘创建工件。
+			bTakeSkippedNoScrew := FALSE;
 	
 			eCurrentStep :=
 				E_DamperProcessStep.TakeCurrentDamper;
@@ -874,7 +921,7 @@ CASE eCurrentStep OF
 
 
 	//==========================================================
-	// 等待第五盘第24件调整完成
+	// 等待最终计划盘第24件调整完成
 	//==========================================================
 	E_DamperProcessStep.FinalWaitAdjustment:
 		IF
@@ -888,7 +935,7 @@ CASE eCurrentStep OF
 				= E_DamperSlotState.Unqualified
 			)
 		THEN
-			// 第五盘第24件之后不再有下一件。
+			// 最终计划盘第24件之后不再有下一件。
 			stTurntableInput.bNoMorePartsToLoad := TRUE;
 			stTurntableInput.bExchangeRequest := TRUE;
 			eCurrentStep := E_DamperProcessStep.FinalRotateTurntable;
@@ -896,7 +943,7 @@ CASE eCurrentStep OF
 
 
  	//==========================================================
-	// 第五盘第24件调整完成后，模拟转台旋转180°
+	// 最终计划盘第24件调整完成后，模拟转台旋转180°
 	//==========================================================
 	E_DamperProcessStep.FinalRotateTurntable:
 		IF
@@ -910,7 +957,7 @@ CASE eCurrentStep OF
 
 
     //==========================================================
-	// 将第五盘第24件从转台取回位搬到缓冲位1
+	// 将最终计划盘第24件从转台取回位搬到缓冲位1
 	//==========================================================
 	E_DamperProcessStep.PlaceFinalDamperToBuffer:
 		IF M_PlaceDamper(
@@ -971,7 +1018,7 @@ CASE eCurrentStep OF
 
 
 	//==========================================================
-	// 螺钉视觉失败锁存终态
+	// 螺钉视觉/运动失败锁存终态
 	//
 	// 不自动重试、不跳件、不回安全位；仅撤销自动命令和流程请求，
 	// 保留bVisionFault/eVisionError，等待现有bAbort或系统复位处理。
@@ -1010,7 +1057,17 @@ ELSE
     eCurrentStep :=
         E_DamperProcessStep.Idle;
 
-END_CASE;]]></ST>
+END_CASE;
+
+// 子流程本扫描首次报错时，立即撤销全部请求；不改变物料状态。
+IF bError THEN
+    M_AbortProcess(
+        ioAxisX := stAxisX,
+        ioAxisY := stAxisY,
+        ioAxisZ := stAxisZ,
+        ioAxisRotation := stAxisRotation
+    );
+END_IF;]]></ST>
     </Implementation>
     <Method Name="M_AbortProcess" Id="{82b37050-c640-466e-b95e-c85810e5c597}">
       <Declaration><![CDATA[METHOD PRIVATE M_AbortProcess
@@ -1103,7 +1160,11 @@ bPrePositionDone := FALSE;
 //==============================================================
 // 6. 状态机返回空闲
 //==============================================================
-eCurrentStep := E_DamperProcessStep.Idle;
+IF bError THEN
+    eCurrentStep := E_DamperProcessStep.Error;
+ELSE
+    eCurrentStep := E_DamperProcessStep.Idle;
+END_IF;
 eTakeStep := E_DamperTakeStep.Idle;
 ePlaceStep := E_DamperPlaceStep.Idle;
 
@@ -1193,6 +1254,78 @@ END_FOR;
 	fBufferSafeZ := GVL_PositionConfig.stDamper.fSafeZ;]]></ST>
       </Implementation>
     </Method>
+    <Method Name="M_MoveRotationAbsolute" Id="{8b630280-4267-4fa1-8e7d-1778dc522e7e}">
+      <Declaration><![CDATA[//==============================================================
+// DamperRotation统一绝对角度运动。
+//
+// 调用方只传入参数层提供或计算出的绝对目标角度，
+// 本Method不读取当前角度进行目标累加。
+//==============================================================
+METHOD PRIVATE M_MoveRotationAbsolute : BOOL
+
+VAR_INPUT
+    fTargetAngle : LREAL;
+    fVelocity : LREAL;
+    fAcceleration : LREAL;
+    fDeceleration : LREAL;
+END_VAR
+
+VAR_IN_OUT
+    ioAxisRotation : ST_AxisInterface;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_MoveRotationAbsolute := FALSE;
+IF bError OR bAbort OR bReset THEN
+    RETURN;
+END_IF;
+// 首次等待Ready也纳入本次运动计时；跨取料子步骤继续原Timer。
+fbRotationMotionTimeout(IN := TRUE, PT := GVL_MotionConfig.stDamper.tMoveTimeout);
+
+// 已在目标角度公差内时无需发令。
+IF NOT bRotationCommandIssued THEN
+    IF
+        ABS(ioAxisRotation.Data.fActPosition - fTargetAngle)
+        <= GVL_MotionConfig.stDamper.stRotation.fPositionTolerance
+    THEN
+        fbRotationMotionTimeout(IN := FALSE, PT := GVL_MotionConfig.stDamper.tMoveTimeout);
+        M_MoveRotationAbsolute := TRUE;
+
+    ELSIF ioAxisRotation.State.bReady THEN
+        ioAxisRotation.AutoSet.Position.fAbsolutePosition := fTargetAngle;
+        ioAxisRotation.AutoSet.Position.fVelocity := fVelocity;
+        ioAxisRotation.AutoSet.Position.fAcceleration := fAcceleration;
+        ioAxisRotation.AutoSet.Position.fDeceleration := fDeceleration;
+
+        // 只产生一个PLC扫描周期的绝对运动命令脉冲。
+        ioAxisRotation.AutoCmd.bMoveAbs := TRUE;
+        bRotationCommandIssued := TRUE;
+    ELSIF fbRotationMotionTimeout.Q THEN
+        M_SetProcessError(uiAxisIndex := GVL_AxisIndex.DamperRotation, eErrorCode := E_DamperErrorCode.MotionTimeout);
+    END_IF;
+
+ELSE
+    IF
+        ioAxisRotation.State.bDone
+        OR
+        (
+            ABS(ioAxisRotation.Data.fActPosition - fTargetAngle)
+            <= GVL_MotionConfig.stDamper.stRotation.fPositionTolerance
+        )
+    THEN
+        bRotationCommandIssued := FALSE;
+        fbRotationMotionTimeout(IN := FALSE, PT := GVL_MotionConfig.stDamper.tMoveTimeout);
+        M_MoveRotationAbsolute := TRUE;
+
+    ELSIF ioAxisRotation.State.bCmdRejected THEN
+        M_SetProcessError(uiAxisIndex := GVL_AxisIndex.DamperRotation, eErrorCode := E_DamperErrorCode.MotionCommandRejected);
+    ELSIF ioAxisRotation.State.bCommandAborted THEN
+        M_SetProcessError(uiAxisIndex := GVL_AxisIndex.DamperRotation, eErrorCode := E_DamperErrorCode.MotionCommandAborted);
+    ELSIF fbRotationMotionTimeout.Q THEN
+        M_SetProcessError(uiAxisIndex := GVL_AxisIndex.DamperRotation, eErrorCode := E_DamperErrorCode.MotionTimeout);
+    END_IF;
+END_IF;]]></ST>
+      </Implementation>
+    </Method>
     <Method Name="M_MoveXYParallel" Id="{76cd42f8-d1ed-4032-942b-c970dbafe1eb}">
       <Declaration><![CDATA[//==============================================================
 // 两根独立轴在同一扫描周期启动绝对运动。
@@ -1213,6 +1346,9 @@ VAR_IN_OUT
 END_VAR]]></Declaration>
       <Implementation>
         <ST><![CDATA[M_MoveXYParallel := FALSE;
+IF bError OR bAbort OR bReset THEN
+    RETURN;
+END_IF;
 
 
 //==============================================================
@@ -1254,6 +1390,7 @@ END_IF;
 //==============================================================
 // 2. 分别锁存X、Y完成信号
 //==============================================================
+fbXYMotionTimeout(IN := bXYCommandIssued, PT := GVL_MotionConfig.stDamper.tMoveTimeout);
 IF bXYCommandIssued THEN
     IF ioAxisX.State.bDone THEN
         bXDoneLatched := TRUE;
@@ -1270,7 +1407,25 @@ IF bXYCommandIssued THEN
         bXDoneLatched := FALSE;
         bYDoneLatched := FALSE;
 
+        fbXYMotionTimeout(IN := FALSE, PT := GVL_MotionConfig.stDamper.tMoveTimeout);
         M_MoveXYParallel := TRUE;
+    ELSIF NOT ioAxisX.AutoCmd.bMoveAbs AND NOT ioAxisY.AutoCmd.bMoveAbs THEN
+        // 双轴Done优先；否则任意轴Reject/Abort立即结束整个XY组。
+        IF ioAxisX.State.bCmdRejected THEN
+            M_SetProcessError(uiAxisIndex := GVL_AxisIndex.DamperX, eErrorCode := E_DamperErrorCode.MotionCommandRejected);
+        ELSIF ioAxisY.State.bCmdRejected THEN
+            M_SetProcessError(uiAxisIndex := GVL_AxisIndex.DamperY, eErrorCode := E_DamperErrorCode.MotionCommandRejected);
+        ELSIF ioAxisX.State.bCommandAborted THEN
+            M_SetProcessError(uiAxisIndex := GVL_AxisIndex.DamperX, eErrorCode := E_DamperErrorCode.MotionCommandAborted);
+        ELSIF ioAxisY.State.bCommandAborted THEN
+            M_SetProcessError(uiAxisIndex := GVL_AxisIndex.DamperY, eErrorCode := E_DamperErrorCode.MotionCommandAborted);
+        ELSIF fbXYMotionTimeout.Q THEN
+            IF NOT bXDoneLatched THEN
+                M_SetProcessError(uiAxisIndex := GVL_AxisIndex.DamperX, eErrorCode := E_DamperErrorCode.MotionTimeout);
+            ELSE
+                M_SetProcessError(uiAxisIndex := GVL_AxisIndex.DamperY, eErrorCode := E_DamperErrorCode.MotionTimeout);
+            END_IF;
+        END_IF;
     END_IF;
 END_IF;]]></ST>
       </Implementation>
@@ -1287,6 +1442,9 @@ VAR_IN_OUT
 END_VAR]]></Declaration>
       <Implementation>
         <ST><![CDATA[M_MoveZAbsolute := FALSE;
+IF bError OR bAbort OR bReset THEN
+    RETURN;
+END_IF;
 
 
 //==============================================================
@@ -1312,6 +1470,7 @@ END_IF;
 //==============================================================
 // 2. 等待运动完成
 //==============================================================
+fbZMotionTimeout(IN := bZCommandIssued, PT := GVL_MotionConfig.stDamper.tMoveTimeout);
 IF bZCommandIssued THEN
     IF ioAxisZ.State.bDone THEN
         bZDoneLatched := TRUE;
@@ -1321,70 +1480,16 @@ IF bZCommandIssued THEN
         bZCommandIssued := FALSE;
         bZDoneLatched := FALSE;
 
+        fbZMotionTimeout(IN := FALSE, PT := GVL_MotionConfig.stDamper.tMoveTimeout);
         M_MoveZAbsolute := TRUE;
-    END_IF;
-END_IF;]]></ST>
-      </Implementation>
-    </Method>
-    <Method Name="M_MoveRotationAbsolute" Id="{8b630280-4267-4fa1-8e7d-1778dc522e7e}">
-      <Declaration><![CDATA[//==============================================================
-// DamperRotation统一绝对角度运动。
-//
-// 调用方只传入参数层提供或计算出的绝对目标角度，
-// 本Method不读取当前角度进行目标累加。
-//==============================================================
-METHOD PRIVATE M_MoveRotationAbsolute : BOOL
-
-VAR_INPUT
-    fTargetAngle : LREAL;
-    fVelocity : LREAL;
-    fAcceleration : LREAL;
-    fDeceleration : LREAL;
-END_VAR
-
-VAR_IN_OUT
-    ioAxisRotation : ST_AxisInterface;
-END_VAR]]></Declaration>
-      <Implementation>
-        <ST><![CDATA[M_MoveRotationAbsolute := FALSE;
-
-// 已在目标角度公差内时无需发令。
-IF NOT bRotationCommandIssued THEN
-    IF
-        ABS(ioAxisRotation.Data.fActPosition - fTargetAngle)
-        <= GVL_MotionConfig.stDamper.stRotation.fPositionTolerance
-    THEN
-        M_MoveRotationAbsolute := TRUE;
-
-    ELSIF ioAxisRotation.State.bReady THEN
-        ioAxisRotation.AutoSet.Position.fAbsolutePosition := fTargetAngle;
-        ioAxisRotation.AutoSet.Position.fVelocity := fVelocity;
-        ioAxisRotation.AutoSet.Position.fAcceleration := fAcceleration;
-        ioAxisRotation.AutoSet.Position.fDeceleration := fDeceleration;
-
-        // 只产生一个PLC扫描周期的绝对运动命令脉冲。
-        ioAxisRotation.AutoCmd.bMoveAbs := TRUE;
-        bRotationCommandIssued := TRUE;
-    END_IF;
-
-ELSE
-    IF
-        ioAxisRotation.State.bDone
-        OR
-        (
-            ABS(ioAxisRotation.Data.fActPosition - fTargetAngle)
-            <= GVL_MotionConfig.stDamper.stRotation.fPositionTolerance
-        )
-    THEN
-        bRotationCommandIssued := FALSE;
-        M_MoveRotationAbsolute := TRUE;
-
-    ELSIF
-        ioAxisRotation.State.bCmdRejected
-        OR ioAxisRotation.State.bCommandAborted
-    THEN
-        // 清除发令锁存，待轴重新Ready后按同一绝对目标重试。
-        bRotationCommandIssued := FALSE;
+    ELSIF NOT ioAxisZ.AutoCmd.bMoveAbs THEN
+        IF ioAxisZ.State.bCmdRejected THEN
+            M_SetProcessError(uiAxisIndex := GVL_AxisIndex.DamperZ, eErrorCode := E_DamperErrorCode.MotionCommandRejected);
+        ELSIF ioAxisZ.State.bCommandAborted THEN
+            M_SetProcessError(uiAxisIndex := GVL_AxisIndex.DamperZ, eErrorCode := E_DamperErrorCode.MotionCommandAborted);
+        ELSIF fbZMotionTimeout.Q THEN
+            M_SetProcessError(uiAxisIndex := GVL_AxisIndex.DamperZ, eErrorCode := E_DamperErrorCode.MotionTimeout);
+        END_IF;
     END_IF;
 END_IF;]]></ST>
       </Implementation>
@@ -1571,7 +1676,11 @@ VAR_IN_OUT
 	ioAxisRotation : ST_AxisInterface;
 END_VAR]]></Declaration>
       <Implementation>
-        <ST><![CDATA[// 复位XY并行运动内部状态
+        <ST><![CDATA[fbXYMotionTimeout(IN := FALSE, PT := GVL_MotionConfig.stDamper.tMoveTimeout);
+fbZMotionTimeout(IN := FALSE, PT := GVL_MotionConfig.stDamper.tMoveTimeout);
+fbRotationMotionTimeout(IN := FALSE, PT := GVL_MotionConfig.stDamper.tMoveTimeout);
+
+// 复位XY并行运动内部状态
 bXYCommandIssued := FALSE;
 bXDoneLatched := FALSE;
 bYDoneLatched := FALSE;
@@ -1585,7 +1694,8 @@ ioAxisX.AutoCmd.bMoveAbs := FALSE;
 ioAxisY.AutoCmd.bMoveAbs := FALSE;
 ioAxisZ.AutoCmd.bMoveAbs := FALSE;
 
-// 复位相机检测和旋转运行状态。
+// 复位单槽位Skip结果以及相机检测和旋转运行状态。
+bTakeSkippedNoScrew := FALSE;
 fDetectedAngleLatched := 0.0;
 fCorrectionAngleLatched := 0.0;
 fRotationBaseAngle := GVL_PositionConfig.stDamper.fRotationZero;
@@ -1602,6 +1712,24 @@ bResetRotationDoneLatched := FALSE;
 // 清除可能残留的DamperRotation运动命令。
 ioAxisRotation.AutoCmd.bMoveAbs := FALSE;
 ioAxisRotation.AutoCmd.bMoveRel := FALSE;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_SetProcessError" Id="{590f4f70-1358-4db5-b1f2-b05ddbdb0fec}">
+      <Declaration><![CDATA[METHOD PRIVATE M_SetProcessError
+VAR_INPUT
+    uiAxisIndex : UINT;
+    eErrorCode : E_DamperErrorCode;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// 仅锁存第一流程错误；Servo/NC/MC根因继续由Supervisor扫描轴报警。
+IF NOT bError AND NOT bAbort AND NOT bReset THEN
+    bError := TRUE;
+    uiErrorAxis := uiAxisIndex;
+    udiErrorCode := TO_UDINT(eErrorCode);
+    eCurrentStep := E_DamperProcessStep.Error;
+END_IF;
+]]></ST>
       </Implementation>
     </Method>
     <Method Name="M_TakeDamper" Id="{d36fa61d-b49a-449e-ad76-302f3cdb0cc6}">
@@ -1631,6 +1759,7 @@ CASE eTakeStep OF
     // 本次取料子流程开始
     //==========================================================
 	E_DamperTakeStep.Idle:
+		bTakeSkippedNoScrew := FALSE;
 		// 清除上一件阻尼器锁存的视觉结果和机械角度基准。
 		fDetectedAngleLatched := 0.0;
 		fCorrectionAngleLatched := 0.0;
@@ -1697,7 +1826,7 @@ CASE eTakeStep OF
 	// 3. 获取统一螺钉角度视觉结果
 	//
 	// Simulation与Camera均由FB_ScrewAngleVision返回相同强类型结果。
-	// 视觉事务异常或未检测到两个螺钉时进入锁存Error，禁止当前工件继续。
+	// 视觉事务异常保持原锁存Error；正常有效但未检测到时只跳过当前槽位。
 	//==========================================================
 	E_DamperTakeStep.AcquireVisionResult:
 		IF fbScrewAngleVision.bDone THEN
@@ -1720,13 +1849,27 @@ CASE eTakeStep OF
 					eVisionError := E_VisionError.InvalidResult;
 				END_IF;
 				eTakeStep := E_DamperTakeStep.Idle;
-				eCurrentStep := E_DamperProcessStep.Error;
+				// Cancelled由整机主动终止产生，不新建Process Fault。
+                CASE eVisionError OF
+                    E_VisionError.Offline:
+                        M_SetProcessError(uiAxisIndex := 0, eErrorCode := E_DamperErrorCode.ScrewVisionOffline);
+                    E_VisionError.Timeout:
+                        M_SetProcessError(uiAxisIndex := 0, eErrorCode := E_DamperErrorCode.ScrewVisionTimeout);
+                    E_VisionError.ServiceFault:
+                        M_SetProcessError(uiAxisIndex := 0, eErrorCode := E_DamperErrorCode.ScrewVisionServiceFault);
+                    E_VisionError.TargetNotDetected:
+                        M_SetProcessError(uiAxisIndex := 0, eErrorCode := E_DamperErrorCode.ScrewTargetNotDetected);
+                    E_VisionError.Cancelled:
+                        // Stop/Abort优先分支已撤销请求，不升级Cancelled。
+                        bVisionFallbackUsed := FALSE;
+                    ELSE
+                        M_SetProcessError(uiAxisIndex := 0, eErrorCode := E_DamperErrorCode.ScrewVisionInvalidResult);
+                END_CASE;
 			ELSIF NOT fbScrewAngleVision.stResult.bDetected THEN
-				// 有效事务中未识别到两个螺钉，属于明确的业务视觉失败。
-				bVisionFault := TRUE;
-				eVisionError := E_VisionError.TargetNotDetected;
+				// SkippedNoScrew：正常、有效、无故障结果；不等于物理空位。
+				// 仅通知调用层推进搜索，绝不返回取料成功或建立回填目标。
+				bTakeSkippedNoScrew := TRUE;
 				eTakeStep := E_DamperTakeStep.Idle;
-				eCurrentStep := E_DamperProcessStep.Error;
 			ELSE
 				// 仅CorrectionAngle参与机械控制；死区参数来自唯一ProcessConfig源。
 				IF

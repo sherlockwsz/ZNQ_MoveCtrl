@@ -15,6 +15,7 @@ TYPE E_AutoStartErrorCode :
     AxisAlarm               := 16#0006,
     AxisReadyTimeout        := 16#0007,
     InvalidProcessStep      := 16#0008,
+    NoTrayAvailable         := 16#0009, // 启动拒绝原因，非整机故障
     SupervisorStartTimeout  := 16#A107
 ) UDINT;
 END_TYPE]]></Declaration>

@@ -196,6 +196,13 @@ ELSIF bAbort THEN
     END_IF;
 
 ELSE
+    // 仅Done收到新请求时失效旧完成状态；Start撤销不清除本周期Done。
+    // 同一扫描复用Idle中的配置检查和M_ResetProgress，不复制准备状态机。
+    IF (eStep = E_MachinePreparationStep.Done) AND trigStart.Q THEN
+        bDone := FALSE;
+        eStep := E_MachinePreparationStep.Idle;
+    END_IF;
+
     CASE eStep OF
 
         //======================================================
@@ -247,6 +254,7 @@ ELSE
         E_MachinePreparationStep.WaitAxesReady:
             bBusy := TRUE;
             bAllAxesReady := TRUE;
+            uiErrorAxis := 0;
 
             FOR uiItem := 1 TO
                 UPPER_BOUND(GVL_AxisIndex.AutoProcessAxes, 1)

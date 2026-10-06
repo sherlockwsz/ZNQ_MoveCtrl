@@ -95,6 +95,9 @@ VAR
 	
     fbMoveTimeout : TON;
     fbCoaxVision : FB_CoaxVision;
+    // 当前逻辑检测点的额外检测计数；Retry路径不得清零。
+    nCoaxRetryCount : UINT;
+    fbCoaxRetryDelay : TON;
     bTimerRestart : BOOL;
     eTimedStep : E_AdjustmentStep := E_AdjustmentStep.Idle;
     bTimedMovement : BOOL;
@@ -159,6 +162,15 @@ stAxisZ.AutoCmd.bMoveAbs := FALSE;
 bAdjustGripperActionExecute := FALSE;
 eAdjustGripperActionCommand := E_GripperCommand.None;
 
+// Retry属于Adjustment工艺层；两个Delay状态均撤销视觉bExecute。
+// 每扫描只调用一次TON，离开Delay状态或停止/取消时复位。
+fbCoaxRetryDelay(
+    IN := bEnable AND NOT bAbort AND NOT bStopRequest
+          AND ((eStep = E_AdjustmentStep.WaitMeasureRetryDelay)
+               OR (eStep = E_AdjustmentStep.WaitFinalMeasureRetryDelay)),
+    PT := GVL_ProcessConfig.stAdjustment.tCoaxRetryDelay
+);
+
 // Process只保持执行请求并消费强类型结果；ADS、RequestId、ResultId和Timeout
 // 全部封装在FB_CoaxVision -> FB_VisionRequest中。
 fbCoaxVision(
@@ -203,6 +215,7 @@ IF NOT bEnable OR bAbort THEN
 	bCorrectionYOutOfRange := FALSE;
     nAdjustCount := 0;
     nReworkCount := 0;
+    nCoaxRetryCount := 0;
     bError := FALSE;
     bGripperError := FALSE;
     uiErrorAxis := 0;
@@ -251,6 +264,7 @@ IF (eStep = E_AdjustmentStep.Idle) AND bStartRequest THEN
 
     nAdjustCount := 0;
     nReworkCount := 0;
+    nCoaxRetryCount := 0;
 
     bXIssued := FALSE;
     bYIssued := FALSE;
@@ -353,6 +367,8 @@ CASE eStep OF
         END_IF;
 
     E_AdjustmentStep.PrepareMeasurement:
+        // 工作位的首次逻辑检测点。Retry直接回RequestMeasure，不经过这里。
+        nCoaxRetryCount := 0;
         fCorrectionX := 0.0;
         fCorrectionY := 0.0;
         bVisionWithinTolerance := FALSE;
@@ -366,24 +382,49 @@ CASE eStep OF
         eStep := E_AdjustmentStep.WaitMeasureResult;
 
     E_AdjustmentStep.WaitMeasureResult:
-        IF fbCoaxVision.bDone THEN
-            fVisionCoaxiality := fbCoaxVision.stResult.fCoaxiality;
-            fCorrectionX := fbCoaxVision.stResult.fDeltaY;
-            fCorrectionY := fbCoaxVision.stResult.fDeltaX;
-
+        // Cancelled/Stop由现有Stop/Abort/Reset体系清理，不消费为产品结果。
+        IF fbCoaxVision.bDone
+            AND NOT bStopRequest
+            AND (fbCoaxVision.eVisionError <> E_VisionError.Cancelled)
+        THEN
             IF fbCoaxVision.bVisionFault THEN
-                bVisionFault := TRUE;
-                bFallbackUsed := fbCoaxVision.bFallbackUsed;
-                eVisionError := fbCoaxVision.eVisionError;
-                bVisionTimeout :=
-                    fbCoaxVision.eVisionError = E_VisionError.Timeout;
-                // Fallback Delta为0；调试阶段跳过额外XY修正并继续二次拧紧。
-                eStep := E_AdjustmentStep.RequestSecondTighten;
+                IF ((fbCoaxVision.eVisionError = E_VisionError.InvalidResult)
+                    OR (fbCoaxVision.eVisionError = E_VisionError.Timeout))
+                    AND (nCoaxRetryCount < GVL_ProcessConfig.stAdjustment.nCoaxMaxRetryCount)
+                THEN
+                    // 暂时失败不锁存工件级诊断；下一次执行创建新的RequestId。
+                    nCoaxRetryCount := nCoaxRetryCount + 1;
+                    eStep := E_AdjustmentStep.WaitMeasureRetryDelay;
+                ELSE
+                    // Retry耗尽，或Offline/ServiceFault：当前件不合格，正常撤离。
+                    bVisionFault := TRUE;
+                    bFallbackUsed := fbCoaxVision.bFallbackUsed;
+                    eVisionError := fbCoaxVision.eVisionError;
+                    bVisionTimeout :=
+                        fbCoaxVision.eVisionError = E_VisionError.Timeout;
+                    bAdjustmentQualified := FALSE;
+                    eStep := E_AdjustmentStep.CloseGripper;
+                END_IF;
             ELSE
+                // 仅有效测量进入工艺判断；恢复成功不保留中间失败诊断。
+                bVisionFault := FALSE;
+                bVisionTimeout := FALSE;
+                bFallbackUsed := FALSE;
+                eVisionError := E_VisionError.None;
+                fVisionCoaxiality := fbCoaxVision.stResult.fCoaxiality;
+                fCorrectionX := fbCoaxVision.stResult.fCorrectionX;
+                fCorrectionY := fbCoaxVision.stResult.fCorrectionY;
                 bVisionWithinTolerance :=
                     fVisionCoaxiality <= GVL_ProcessConfig.stAdjustment.fAdjustTolerance;
                 eStep := E_AdjustmentStep.EvaluateAdjustment;
             END_IF;
+        END_IF;
+
+    E_AdjustmentStep.WaitMeasureRetryDelay:
+        // 本扫描fbCoaxVision.bExecute=FALSE，PT=0时也先正常复位旧事务。
+        IF fbCoaxRetryDelay.Q AND NOT bStopRequest THEN
+            // 同一逻辑检测点的Retry，保留nCoaxRetryCount。
+            eStep := E_AdjustmentStep.RequestMeasure;
         END_IF;
 
     E_AdjustmentStep.EvaluateAdjustment:
@@ -413,22 +454,9 @@ CASE eStep OF
 		ELSE
 	
 			//======================================================
-			// Python视觉结果定义：
-			//
-			// fDeltaX：Camera X方向偏差
-			//          右为正，左为负
-			//
-			// fDeltaY：Camera Y方向偏差
-			//          下为正，上为负
-			//
-			// Camera与Adjustment机械坐标映射：
-			//
-			// AdjustmentX修正 = Camera DeltaY
-			// AdjustmentY修正 = Camera DeltaX
-			//
-			// 当前修正比例暂定1:1。
-			//
-			// 因此：
+			// 统一视觉结果中的Correction为机械相对修正位移，单位mm。
+			// Camera映射与比例标定由Python完成；Simulation由FB_CoaxVision生成。
+			// 本流程直接消费Correction，不再根据Delta映射或换算。
 			// Candidate = ActualPosition + Correction
 			//======================================================	
 			fCandidateTargetX :=
@@ -480,63 +508,15 @@ CASE eStep OF
 				bCorrectionYOutOfRange
 			THEN
 			
-				//==========================================================
-				// Adjustment修正目标超出允许工艺窗口。
-				//
-				// 该情况定义为：
-				// “当前工件的同轴度偏差已经超过Adjustment机构的调整能力”
-				//
-				// 它属于工件质量问题，而不是设备故障。
-				//
-				// 因此：
-				// 1. 不执行本次AdjustmentXY修正；
-				// 2. 不置bError；
-				// 3. 当前件判定Unqualified；
-				// 4. 进入正常安全撤离流程；
-				// 5. 撤离完成后通过bAdjustmentDone正常结束本周期。
-				//==========================================================
-			
-				bAdjustmentQualified := FALSE;
+				// 超范围仅是调整能力诊断；不接受Candidate，不移动任意一根轴。
+				// 仍执行二次拧紧，最终质量仅由Final Coax决定。
 				bAdjustmentOutOfRange := TRUE;
-			
-			
-				//==========================================================
-				// 当前Candidate不允许成为真正的轴运动目标。
-				//
-				// 因此保持fAdjustTargetX/Y不变，
-				// 不把fCandidateTargetX/Y写入fAdjustTargetX/Y。
-				//==========================================================
-			
-			
-				//==========================================================
-				// 清除本轮可能残留的XY动作状态。
-				//==========================================================
 				bXIssued := FALSE;
 				bYIssued := FALSE;
-			
 				bXDone := FALSE;
 				bYDone := FALSE;
-			
-			
-				//==========================================================
-				// 不进入Error。
-				//
-				// 直接进入正常撤离链：
-				//
-				// CloseGripper
-				//      ↓
-				// LiftZToSafe
-				//      ↓
-				// ReturnXYToStandby
-				//      ↓
-				// bAdjustmentDone
-				//
-				// COM4先恢复闭合，然后Z抬升，最后XY回准备位置。
-				//==========================================================
-				eStep :=
-					E_AdjustmentStep.CloseGripper;
-			
-			
+				eStep := E_AdjustmentStep.RequestSecondTighten;
+
 			ELSE
 			
 				//==========================================================
@@ -580,6 +560,8 @@ CASE eStep OF
                 uiAxis := GVL_AxisIndex.AdjustmentY, ioIssued := bYIssued, ioAxis := stAxisY);
         END_IF;
         IF bXDone AND bYDone THEN
+            // 每次XY修正完成后开始新的逻辑检测点。
+            nCoaxRetryCount := 0;
             eStep := E_AdjustmentStep.RequestMeasure;
         END_IF;
 
@@ -588,13 +570,9 @@ CASE eStep OF
 
     E_AdjustmentStep.WaitSecondTighten:
         IF bSecondTightenDone OR bRetractPermit THEN
-            IF bVisionFault THEN
-                // 视觉异常与真实测量0值明确区分；当前调试策略是不返调并继续撤离。
-                bAdjustmentQualified := FALSE;
-                eStep := E_AdjustmentStep.CloseGripper;
-            ELSE
-                eStep := E_AdjustmentStep.RequestFinalMeasure;
-            END_IF;
+            // 二次拧紧已完成；Final是独立的逻辑检测点。
+            nCoaxRetryCount := 0;
+            eStep := E_AdjustmentStep.RequestFinalMeasure;
         END_IF;
 
     E_AdjustmentStep.RequestFinalMeasure:
@@ -604,39 +582,57 @@ CASE eStep OF
         eStep := E_AdjustmentStep.WaitFinalMeasure;
 
     E_AdjustmentStep.WaitFinalMeasure:
-        IF fbCoaxVision.bDone THEN
-            fVisionCoaxiality := fbCoaxVision.stResult.fCoaxiality;
-            fCorrectionX := fbCoaxVision.stResult.fDeltaY;
-            fCorrectionY := fbCoaxVision.stResult.fDeltaX;
-
+        // Cancelled/Stop由现有Stop/Abort/Reset体系清理，不消费为产品结果。
+        IF fbCoaxVision.bDone
+            AND NOT bStopRequest
+            AND (fbCoaxVision.eVisionError <> E_VisionError.Cancelled)
+        THEN
             IF fbCoaxVision.bVisionFault THEN
-                bVisionFault := TRUE;
-                bFallbackUsed := fbCoaxVision.bFallbackUsed;
-                eVisionError := fbCoaxVision.eVisionError;
-                bVisionTimeout :=
-                    fbCoaxVision.eVisionError = E_VisionError.Timeout;
-                bAdjustmentQualified := FALSE;
-                eStep := E_AdjustmentStep.CloseGripper;
+                IF ((fbCoaxVision.eVisionError = E_VisionError.InvalidResult)
+                    OR (fbCoaxVision.eVisionError = E_VisionError.Timeout))
+                    AND (nCoaxRetryCount < GVL_ProcessConfig.stAdjustment.nCoaxMaxRetryCount)
+                THEN
+                    // 暂时失败不锁存工件级诊断；下一次执行创建新的RequestId。
+                    nCoaxRetryCount := nCoaxRetryCount + 1;
+                    eStep := E_AdjustmentStep.WaitFinalMeasureRetryDelay;
+                ELSE
+                    // Retry耗尽，或Offline/ServiceFault：当前件不合格，正常撤离。
+                    bVisionFault := TRUE;
+                    bFallbackUsed := fbCoaxVision.bFallbackUsed;
+                    eVisionError := fbCoaxVision.eVisionError;
+                    bVisionTimeout :=
+                        fbCoaxVision.eVisionError = E_VisionError.Timeout;
+                    bAdjustmentQualified := FALSE;
+                    eStep := E_AdjustmentStep.CloseGripper;
+                END_IF;
             ELSE
+                // 仅有效测量进入工艺判断；恢复成功不保留中间失败诊断。
+                bVisionFault := FALSE;
+                bVisionTimeout := FALSE;
+                bFallbackUsed := FALSE;
+                eVisionError := E_VisionError.None;
+                fVisionCoaxiality := fbCoaxVision.stResult.fCoaxiality;
+                fCorrectionX := fbCoaxVision.stResult.fCorrectionX;
+                fCorrectionY := fbCoaxVision.stResult.fCorrectionY;
                 bVisionWithinTolerance :=
                     fVisionCoaxiality <= GVL_ProcessConfig.stAdjustment.fQualifiedTolerance;
                 eStep := E_AdjustmentStep.EvaluateFinalResult;
             END_IF;
         END_IF;
 
-    E_AdjustmentStep.EvaluateFinalResult:
-        IF bVisionWithinTolerance THEN
-            bAdjustmentQualified := TRUE;
-            eStep := E_AdjustmentStep.CloseGripper;
-        ELSIF nReworkCount < GVL_ProcessConfig.stAdjustment.nMaxReworkCount THEN
-            bAdjustmentQualified := FALSE;
-            nReworkCount := nReworkCount + 1;
-            eStep := E_AdjustmentStep.RequestReworkLoosen;
-        ELSE
-            bAdjustmentQualified := FALSE;
-            eStep := E_AdjustmentStep.CloseGripper;
+    E_AdjustmentStep.WaitFinalMeasureRetryDelay:
+        // 本扫描fbCoaxVision.bExecute=FALSE，PT=0时也先正常复位旧事务。
+        IF fbCoaxRetryDelay.Q AND NOT bStopRequest THEN
+            // 同一逻辑检测点的Retry，保留nCoaxRetryCount。
+            eStep := E_AdjustmentStep.RequestFinalMeasure;
         END_IF;
 
+    E_AdjustmentStep.EvaluateFinalResult:
+        // 有效Final结果直接决定质量；不再返工拧松、重新调整或再次二次拧紧。
+        bAdjustmentQualified := bVisionWithinTolerance;
+        eStep := E_AdjustmentStep.CloseGripper;
+
+    // 旧返工符号和处理保留兼容；正常状态机已无进入此路径的转移。
     E_AdjustmentStep.RequestReworkLoosen:
         eStep := E_AdjustmentStep.WaitReworkLoosen;
 
@@ -685,6 +681,7 @@ CASE eStep OF
     E_AdjustmentStep.WaitDoneAck:
         bAdjustmentDone := TRUE;
         IF bDoneAck THEN
+            nCoaxRetryCount := 0;
             bAdjustmentDone := FALSE;
             bAdjustmentQualified := FALSE;
             bXIssued := FALSE;

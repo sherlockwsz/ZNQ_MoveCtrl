@@ -5,11 +5,19 @@
 {attribute 'strict'}
 {attribute 'to_string'}
 // 阻尼器上下料流程错误码。
-// 当前流程尚未产生本地错误码，仅预留16#6100～16#61FF。
+// 保留原范围，并定义本次异常保护错误码：16#6100～16#61FF。
 TYPE E_DamperErrorCode :
 (
     None         := 16#0000,
     ReservedBase := 16#6100,
+    ScrewVisionOffline       := 16#6111,
+    ScrewVisionTimeout       := 16#6112,
+    ScrewVisionInvalidResult := 16#6113,
+    ScrewVisionServiceFault  := 16#6114,
+    ScrewTargetNotDetected   := 16#6115,
+    MotionCommandRejected    := 16#6121,
+    MotionCommandAborted     := 16#6122,
+    MotionTimeout            := 16#6123,
     ReservedEnd  := 16#61FF
 ) UDINT;
 END_TYPE]]></Declaration>

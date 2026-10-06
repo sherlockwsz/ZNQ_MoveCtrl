@@ -21,6 +21,10 @@ VAR
     bAnyAxisConfigured : BOOL;
     bAllAxesControlAllowed : BOOL;
     bAnyAxisRequireEnableReset : BOOL;
+    // Tray预检查复用fbAutoStart.bTrayPlanChecking；不另建启动状态机。
+    eAxisCommandMode : E_MachineMode; // 仅轴命令入口使用，COM3/COM4仍使用原整机模式
+    bTrayPreCheckWasActive : BOOL; // 上周期预检查状态，退出时清除暂存手动运动
+    aTrayPreCheckEnable : ARRAY[1..GVL_Constants.cMaxAxisCount] OF BOOL; // 进入时的有效使能请求
 	
 	fbTrayProcess : FB_TrayProcess;//料盘自动运送流程
 	
@@ -99,7 +103,20 @@ VAR
 	// 整机统一故障状态
 	//==============================================================
 	// WPF/在线调试产生一个脉冲；仅当源故障已消失且Stop不在执行时复位。
-	bResetMachineFault : BOOL;
+    // 单一整机恢复入口；PLC消费上升沿后清零。恢复结果仍由整机故障接口发布。
+    bResetMachineFault : BOOL;
+    bMachineRecoveryPending : BOOL;
+    bMachineRecoveryAcceptedPulse : BOOL;
+    bMachineRecoverySourceResetPulse : BOOL;
+    bMachineRecoveryAxesSafe : BOOL;
+    bMachineRecoveryDevicesOK : BOOL;
+    bMachineRecoveryStopSafe : BOOL;
+    fbMachineRecoveryTimeout : TON;
+    aMachineRecoveryResetIssued : ARRAY[1..GVL_Constants.cMaxAxisCount] OF BOOL;
+    udiRecoveryDamperGripperId : UDINT;
+    udiRecoveryAdjustGripperId : UDINT;
+    bRecoveryDamperGripperRequired : BOOL;
+    bRecoveryAdjustGripperRequired : BOOL;
 	bMachineFault : BOOL;
 	bMachineFaultResetBlocked : BOOL;
 	eMachineFaultSource : E_MachineFaultSource;
@@ -194,6 +211,78 @@ trigStopRequest(
 // 防止WPF或在线调试长时间保持复位位：
 // 只有FALSE->TRUE的边沿才允许执行一次故障复位。
 trigResetMachineFault(CLK := bResetMachineFault);
+IF trigResetMachineFault.Q THEN
+    // 输入清零表示请求已消费，不表示故障已恢复。
+    bResetMachineFault := FALSE;
+END_IF;
+
+// 恢复专用许可。正常自动/准备/Home/Stop路径保持原样。
+// Stop故障只有在所有轴停稳、掉使能且Stop已释放、外部Stop已确认时才可恢复。
+bMachineRecoveryAxesSafe := TRUE;
+FOR uiAxisIndex := 1 TO GVL_Constants.cMaxAxisCount DO
+    IF GVL_AxisConfig.AxisLimits[uiAxisIndex].bConfigured THEN
+        bMachineRecoveryAxesSafe := bMachineRecoveryAxesSafe
+            AND NOT GVL_AxisRuntime.Axes[uiAxisIndex].State.bPowerStatus
+            AND NOT GVL_AxisRuntime.Axes[uiAxisIndex].State.bBusy
+            AND NOT GVL_AxisRuntime.Axes[uiAxisIndex].State.bActive
+            AND NOT GVL_AxisRuntime.Axes[uiAxisIndex].State.bTorqueControlActive
+            AND GVL_AxisRuntime.Axes[uiAxisIndex].State.bStopReleased;
+    END_IF;
+END_FOR;
+bMachineRecoveryStopSafe := fbAutoStopManager.bError
+    AND bMachineRecoveryAxesSafe
+    AND NOT bStopRequestRaw
+    AND (NOT bExternalGrippersStopRequired OR bExternalGrippersStopDone)
+    AND NOT bExternalGrippersStopError;
+
+bMachineRecoveryAcceptedPulse := trigResetMachineFault.Q
+    AND NOT bMachineRecoveryPending
+    AND NOT bStopRequestRaw
+    AND NOT fbAutoStopManager.bBusy
+    AND (NOT bAbortProcesses OR bMachineRecoveryStopSafe)
+    AND NOT bControlAuto
+    AND NOT fbAutoStart.bEnabling
+    AND NOT fbAutoProcessCoordinator.bBusy
+    AND NOT fbMachinePreparation.bBusy
+    AND NOT fbSingleAxisHoming.bBusy
+    AND (NOT GVL_System.bUseHmiWatchdog OR fbHmiWatchdog.bOnline)
+    AND ((eMachineMode = E_MachineMode.Manual)
+         OR (eMachineMode = E_MachineMode.Fault)
+         OR bMachineRecoveryStopSafe);
+bMachineRecoverySourceResetPulse := bMachineRecoveryAcceptedPulse AND bMachineFault;
+
+IF bMachineRecoverySourceResetPulse THEN
+    IF bMachineRecoveryStopSafe THEN
+        // 不伪造原Stop成功；只在实测安全条件满足后释放故障锁存。
+        IF fbAutoStopManager.M_TryRecover(ioAxes := GVL_AxisRuntime.Axes,
+            bExternalSafe := NOT bExternalGrippersStopRequired OR bExternalGrippersStopDone,
+            bExternalError := bExternalGrippersStopError) THEN
+            bAbortProcesses := FALSE;
+        END_IF;
+    END_IF;
+    bMachineRecoveryPending := TRUE;
+    udiRecoveryDamperGripperId := 0;
+    udiRecoveryAdjustGripperId := 0;
+    bRecoveryDamperGripperRequired :=
+        (eMachineFaultSource = E_MachineFaultSource.DamperGripper)
+        OR ((eMachineFaultSource = E_MachineFaultSource.MachinePreparation)
+            AND (udiMachineFaultCode = TO_UDINT(E_MachinePreparationErrorCode.GripperOpenFailed)));
+    bRecoveryAdjustGripperRequired :=
+        (eMachineFaultSource = E_MachineFaultSource.AdjustGripper)
+        OR ((eMachineFaultSource = E_MachineFaultSource.MachinePreparation)
+            AND (udiMachineFaultCode = TO_UDINT(E_MachinePreparationErrorCode.AdjustGripperCloseFailed)));
+    FOR uiAxisIndex := 1 TO GVL_Constants.cMaxAxisCount DO
+        aMachineRecoveryResetIssued[uiAxisIndex] := FALSE;
+    END_FOR;
+END_IF;
+
+fbMachineRecoveryTimeout(IN := bMachineRecoveryPending,
+    PT := GVL_SafetyConfig.stStop.tTimeout);
+IF fbMachineRecoveryTimeout.Q OR bStopRequestRaw THEN
+    // 一次请求只恢复一次；超时/新Stop不自动重试，保留整机第一故障。
+    bMachineRecoveryPending := FALSE;
+END_IF;
+
 
 IF trigStopRequest.Q THEN
     // 清除上一次停止完成反馈。
@@ -214,6 +303,12 @@ END_IF;
 // 防止停止过程中出现无效的bStart上升沿，
 // 也防止bControlStop尚未释放时重新启动。
 //==============================================================
+// 已进入Tray预检查后不受理新的Homing请求，避免其反向取消Auto。
+// 首次点击Auto时正在Homing仍由下面原有准入规则拒绝。
+IF fbAutoStart.bTrayPlanChecking THEN
+    bControlHoming := FALSE;
+END_IF;
+
 IF
     bStopRequestRaw
     OR bAbortProcesses
@@ -244,7 +339,7 @@ fbSingleAxisHoming(
         bStopRequestRaw
         OR bAbortProcesses
         OR bMachineFault,
-    bReset := trigResetMachineFault.Q,
+    bReset := bMachineRecoverySourceResetPulse,
     bModeGranted := fbMachineModeManager.bHomingAllowed,
     bControlAllowed :=
         GVL_HMI.Comm.bControlAllowed
@@ -318,6 +413,11 @@ END_IF;
 		
 		bMachinePreparationError :=
 			fbMachinePreparation.bError,
+		// Tray是五层稳定状态及固定Plan的唯一事实来源。
+		bTrayPlanCheckDone := fbTrayProcess.bPlanCheckDone,
+		bTrayPlanValid := fbTrayProcess.bPlanValid,
+		bTrayPlanLocked := fbTrayProcess.bPlanLocked,
+		bTrayNoTrayAvailable := fbTrayProcess.bNoTrayAvailable,
 		bRequest := bControlAuto,
 		bCancel := bStopRequestRaw
 				   OR bAbortProcesses
@@ -432,7 +532,7 @@ fbMachinePreparation(
         OR bAbortProcesses
         OR bMachineFault,
 
-    bReset := trigResetMachineFault.Q,
+    bReset := bMachineRecoverySourceResetPulse,
 
     stConfig := stPreparationConfig,
 
@@ -523,8 +623,10 @@ END_IF;
 // ============================================================
 fbAutoProcessCoordinator(
     bStart := fbAutoStart.bProcessStart,
+    bTrayPlanRequest := fbAutoStart.bTrayPlanRequest,
+    aTrayLevelDetected := GVL_IO.aTrayLevelDetected,
     bAbort := bAbortProcesses OR bStopRequestRaw,
-    bReset := trigResetMachineFault.Q,
+    bReset := bMachineRecoverySourceResetPulse,
     bStopRequest := bStopRequestRaw,
 	bMachinePrepared := fbMachinePreparation.bDone,
 	
@@ -545,12 +647,14 @@ fbAutoProcessCoordinator(
 
 // 启动准备阶段由启动协调器负责；运行阶段由流程协调器负责。
 bAutoProcessBusy :=
-    fbAutoStart.bEnabling
+    fbAutoStart.bTrayPlanChecking
+    OR fbAutoStart.bEnabling
     OR fbAutoProcessCoordinator.bBusy;
 
 bAutoProcessDone :=
     fbAutoProcessCoordinator.bDone
-    AND NOT fbAutoStart.bEnabling;
+    AND NOT fbAutoStart.bEnabling
+    AND NOT fbAutoStart.bTrayPlanChecking;
 
 // 启动请求不满足条件时由FB_AutoStartCoordinator执行“拒绝”，
 // 只有进入启动/运行/动作阶段后，COM3健康才升级为整机运行条件。
@@ -574,8 +678,48 @@ bAdjustGripperRequired :=
 // 本周期产生的COM3/转台故障可在本周期进入Stop首扫覆盖。
 // ============================================================
 
+// 夹爪恢复复用已有ManualCmd/Manager事务；PLC统一发ResetFault，WPF只发整机请求。
+IF bMachineRecoveryPending AND NOT bAbortProcesses AND NOT fbAutoStopManager.bBusy THEN
+    IF bRecoveryDamperGripperRequired AND (udiRecoveryDamperGripperId = 0)
+        AND NOT GVL_DamperGripper.stDamperGripper.Feedback.bBusy
+        AND NOT GVL_DamperGripper.stDamperGripper.ManualFeedback.bBusy
+        AND GVL_DamperGripper.stDamperGripper.State.bCommunicationReady THEN
+        GVL_DamperGripper.stDamperGripper.ManualCmd.eCommand := E_GripperCommand.ResetFault;
+        GVL_DamperGripper.stDamperGripper.ManualCmd.udiRequestId :=
+            GVL_DamperGripper.stDamperGripper.ManualCmd.udiRequestId + 1;
+        IF GVL_DamperGripper.stDamperGripper.ManualCmd.udiRequestId = 0 THEN
+            GVL_DamperGripper.stDamperGripper.ManualCmd.udiRequestId := 1;
+        END_IF;
+        udiRecoveryDamperGripperId := GVL_DamperGripper.stDamperGripper.ManualCmd.udiRequestId;
+    END_IF;
+    IF bRecoveryAdjustGripperRequired AND (udiRecoveryAdjustGripperId = 0)
+        AND NOT GVL_DamperGripper.stAdjustGripper.Feedback.bBusy
+        AND NOT GVL_DamperGripper.stAdjustGripper.ManualFeedback.bBusy
+        AND GVL_DamperGripper.stAdjustGripper.State.bCommunicationReady THEN
+        GVL_DamperGripper.stAdjustGripper.ManualCmd.eCommand := E_GripperCommand.ResetFault;
+        GVL_DamperGripper.stAdjustGripper.ManualCmd.udiRequestId :=
+            GVL_DamperGripper.stAdjustGripper.ManualCmd.udiRequestId + 1;
+        IF GVL_DamperGripper.stAdjustGripper.ManualCmd.udiRequestId = 0 THEN
+            GVL_DamperGripper.stAdjustGripper.ManualCmd.udiRequestId := 1;
+        END_IF;
+        udiRecoveryAdjustGripperId := GVL_DamperGripper.stAdjustGripper.ManualCmd.udiRequestId;
+    END_IF;
+END_IF;
+bMachineRecoveryDevicesOK :=
+    (NOT bRecoveryDamperGripperRequired
+     OR ((udiRecoveryDamperGripperId <> 0)
+         AND (GVL_DamperGripper.stDamperGripper.ManualFeedback.udiCompletedId = udiRecoveryDamperGripperId)
+         AND GVL_DamperGripper.stDamperGripper.State.bHealthy))
+    AND
+    (NOT bRecoveryAdjustGripperRequired
+     OR ((udiRecoveryAdjustGripperId <> 0)
+         AND (GVL_DamperGripper.stAdjustGripper.ManualFeedback.udiCompletedId = udiRecoveryAdjustGripperId)
+         AND GVL_DamperGripper.stAdjustGripper.State.bHealthy));
+
 fbMachineSupervisor(
-    bReset := trigResetMachineFault.Q
+    bReset := bMachineRecoveryPending,
+    bRecoveryReady := bMachineRecoveryDevicesOK
+              AND NOT bStopRequestRaw
               AND NOT bAbortProcesses
               AND NOT fbAutoStopManager.bBusy,
 
@@ -642,6 +786,13 @@ fbMachineSupervisor(
 		fbAutoProcessCoordinator.uiScrewdriverErrorAxis,
 	udiScrewdriverError :=
 		fbAutoProcessCoordinator.udScrewdriverError,
+    // Tray/Damper本扫描新增故障经Supervisor进入现有Stop首扫覆盖。
+    bTrayFault := fbAutoProcessCoordinator.bTrayFault,
+    uiTrayErrorAxis := fbAutoProcessCoordinator.uiTrayErrorAxis,
+    udiTrayError := fbAutoProcessCoordinator.udTrayError,
+    bDamperFault := fbAutoProcessCoordinator.bDamperFault,
+    uiDamperErrorAxis := fbAutoProcessCoordinator.uiDamperErrorAxis,
+    udiDamperError := fbAutoProcessCoordinator.udDamperError,
     // Stop管理器在本调用之后执行，因此这里读取其上一扫描周期状态。
     bAutoStopFault := fbAutoStopManager.bError,
     bAutoStopTimeout := fbAutoStopManager.bTimeout,
@@ -653,6 +804,9 @@ fbMachineSupervisor(
 
 // 发布稳定的ADS诊断符号。
 bMachineFault := fbMachineSupervisor.stFault.bActive;
+IF bMachineRecoveryPending AND NOT bMachineFault THEN
+    bMachineRecoveryPending := FALSE;
+END_IF;
 bMachineFaultResetBlocked := fbMachineSupervisor.bResetBlocked;
 eMachineFaultSource := fbMachineSupervisor.stFault.eSource;
 uiMachineFaultAxis := fbMachineSupervisor.stFault.uiAxisIndex;
@@ -665,7 +819,7 @@ bDamperGripperActionFault :=
 
 IF bDamperGripperActionFault THEN
     udDamperGripperActionError := udiMachineFaultCode;
-ELSIF trigResetMachineFault.Q AND NOT bMachineFault THEN
+ELSIF bMachineRecoveryAcceptedPulse AND NOT bMachineFault THEN
     udDamperGripperActionError := 0;
 END_IF;
 
@@ -675,11 +829,11 @@ bAdjustGripperActionFault :=
 
 IF bAdjustGripperActionFault THEN
     udAdjustGripperActionError := udiMachineFaultCode;
-ELSIF trigResetMachineFault.Q AND NOT bMachineFault THEN
+ELSIF bMachineRecoveryAcceptedPulse AND NOT bMachineFault THEN
     udAdjustGripperActionError := 0;
 END_IF;
 
-IF trigResetMachineFault.Q AND NOT bMachineFault THEN
+IF bMachineRecoveryAcceptedPulse AND NOT bMachineFault THEN
     bDamperGripperStartRejected := FALSE;
 	bAdjustGripperStartRejected := FALSE;
 END_IF;
@@ -837,9 +991,9 @@ fbMachineModeManager(
 	bHomingBusy := fbSingleAxisHoming.bBusy,
     bStopActive :=
         bStopRequestRaw
-        OR bAbortProcesses
+        OR (bAbortProcesses AND NOT bMachineRecoveryStopSafe)
         OR fbAutoStopManager.bBusy
-        OR fbAutoStopManager.bError,
+        OR (fbAutoStopManager.bError AND NOT bMachineRecoveryStopSafe),
     bMachineFault := bMachineFault
 );
 
@@ -851,6 +1005,16 @@ bHomingModeActive := fbMachineModeManager.bHomingAllowed;
 bStopOwnerActive := fbMachineModeManager.bStopOwnerActive;
 bRecoveryModeActive := fbMachineModeManager.bRecoveryModeActive;
 bPreparationModeActive := fbMachineModeManager.bPreparationAllowed;
+
+// Tray预检查与正式Auto轴接管分开：整机诊断模式保持原语义，
+// COM3/COM4模式及行为不变；仅在现有轴命令入口延迟Auto所有权。
+// Stop/Fault/Preparing等模式不改写，安全链路始终优先。
+eAxisCommandMode := eMachineMode;
+IF fbAutoStart.bTrayPlanChecking
+    AND (eMachineMode = E_MachineMode.AutoStarting)
+THEN
+    eAxisCommandMode := E_MachineMode.Manual;
+END_IF;
 
 //==============================================================
 // 两个RS485夹爪的统一管理层
@@ -906,13 +1070,49 @@ FOR uiAxisIndex := 1 TO GVL_Constants.cMaxAxisCount DO
         END_IF;
     END_FOR;
 
+    IF bMachineRecoveryPending
+        AND (eMachineMode = E_MachineMode.Fault)
+        AND GVL_AxisConfig.AxisLimits[uiAxisIndex].bConfigured
+        AND GVL_AxisRuntime.Axes[uiAxisIndex].Alarm.bError
+        AND NOT aMachineRecoveryResetIssued[uiAxisIndex]
+        AND NOT GVL_AxisRuntime.Axes[uiAxisIndex].State.bBusy
+        AND NOT GVL_AxisRuntime.Axes[uiAxisIndex].State.bActive
+        AND GVL_AxisRuntime.Axes[uiAxisIndex].State.bStopReleased
+        AND aAxisManagers[uiAxisIndex].bControlAllowed THEN
+        GVL_AxisRuntime.Axes[uiAxisIndex].Cmd.bReset := TRUE;
+        aMachineRecoveryResetIssued[uiAxisIndex] := TRUE;
+    END_IF;
+
+    // 只在进入预检查的首扫描保存上一周期有效使能请求。
+    // 保存所有轴，不依赖自动轴清单，不改变任何位置/速度参数。
+    IF fbAutoStart.bTrayPlanChecking AND NOT bTrayPreCheckWasActive THEN
+        aTrayPreCheckEnable[uiAxisIndex] :=
+            GVL_AxisRuntime.Axes[uiAxisIndex].ActiveCmd.bEnable;
+    END_IF;
+
+    // 复用现有Manual通道和Arbiter，保持Power同时封锁新运动。
+    // 取消/无盘拒绝的首扫描也清理，避免预检查期间的请求延后执行。
+    // 不覆盖bStop；真实Stop/Fault模式不进入本分支，后续Guard仍正常执行。
+    IF (fbAutoStart.bTrayPlanChecking OR bTrayPreCheckWasActive)
+        AND (eAxisCommandMode = E_MachineMode.Manual)
+    THEN
+        GVL_AxisRuntime.Axes[uiAxisIndex].Cmd.bEnable := aTrayPreCheckEnable[uiAxisIndex];
+        GVL_AxisRuntime.Axes[uiAxisIndex].Cmd.bReset := FALSE;
+        GVL_AxisRuntime.Axes[uiAxisIndex].Cmd.bHome := FALSE;
+        GVL_AxisRuntime.Axes[uiAxisIndex].Cmd.bMoveAbs := FALSE;
+        GVL_AxisRuntime.Axes[uiAxisIndex].Cmd.bMoveRel := FALSE;
+        GVL_AxisRuntime.Axes[uiAxisIndex].Cmd.bJogPos := FALSE;
+        GVL_AxisRuntime.Axes[uiAxisIndex].Cmd.bJogNeg := FALSE;
+        GVL_AxisRuntime.Axes[uiAxisIndex].Cmd.bTorqueControl := FALSE;
+    END_IF;
+
     aAxisManagers[uiAxisIndex](
         bAxisConfigured := GVL_AxisConfig.AxisLimits[uiAxisIndex].bConfigured,
         bAxisUsedByAuto := bAxisInAutoProcess,
         bAxisSelectedForHoming :=
             fbSingleAxisHoming.bBusy
             AND (uiAxisIndex = fbSingleAxisHoming.uiActiveAxis),
-        eMachineMode := eMachineMode,
+        eMachineMode := eAxisCommandMode,
         bProtectionEnabled := GVL_System.bUseHmiWatchdog,
         bHmiOnline := fbHmiWatchdog.bOnline,
         // 看门狗失联期间，Stop管理器拥有使能控制权；
@@ -943,6 +1143,9 @@ END_FOR;
 //==============================================================
 // 5. 发布HMI通信与全轴汇总状态
 //==============================================================
+// 必须在全部轴处理后更新，保证所有轴共用同一次进入/退出边沿。
+bTrayPreCheckWasActive := fbAutoStart.bTrayPlanChecking;
+
 GVL_HMI.Comm.bOnline := fbHmiWatchdog.bOnline;
 GVL_HMI.Comm.bTimeout := fbHmiWatchdog.bTimeout;
 GVL_HMI.Comm.bControlAllowed :=

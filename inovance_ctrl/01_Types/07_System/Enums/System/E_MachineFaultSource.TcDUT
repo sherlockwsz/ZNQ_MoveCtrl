@@ -16,6 +16,8 @@ TYPE E_MachineFaultSource :
     AdjustGripper       := 45,  // COM4通信、设备或动作失败
     TurntableProcess    := 50,  // 转台/夹紧协调流程失败
 	ScrewdriverProcess  := 55,  // 螺丝刀双轴定位或流程失败
+    TrayProcess         := 56,  // 料盘运动监督失败
+    DamperProcess       := 57,  // 阻尼器运动或螺钉视觉失败
     AutoStop            := 60   // 受控停止、释放Stop或掉使能失败
 );
 END_TYPE]]></Declaration>

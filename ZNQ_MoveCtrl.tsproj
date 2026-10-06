@@ -3294,11 +3294,18 @@ External Setpoint Generation:
 		</Motion>
 		<Plc>
 			<Project GUID="{EA67B656-2FC5-4A9C-A62D-78AA627F7844}" Name="inovance_ctrl" PrjFilePath="inovance_ctrl\inovance_ctrl.plcproj" TmcFilePath="inovance_ctrl\inovance_ctrl.tmc" ReloadTmc="true" AmsPort="851" FileArchiveSettings="#x000e" SymbolicMapping="true">
-				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcHash="{93AB69E1-439B-C3FA-C7AF-D24CC2B3D06B}" TmcPath="inovance_ctrl\inovance_ctrl.tmc">
+				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcHash="{DAC325BE-CE39-118A-0B4B-F96823E9C487}" TmcPath="inovance_ctrl\inovance_ctrl.tmc">
 					<Name>inovance_ctrl Instance</Name>
 					<CLSID ClassFactory="TcPlc30">{08500001-0000-0000-F000-000000000064}</CLSID>
 					<Vars VarGrpType="2" AreaNo="1">
 						<Name>PlcTask Outputs</Name>
+						<Var>
+							<Name>GVL_ClampingPdo.udiMaxProfileVelocity</Name>
+							<Comment><![CDATA[ SV680N 1702h 输出: 607Fh 最大轮廓速度，单位为驱动器指令单位/s。
+ 手册默认 4294967295，表示此 PDO 初始不额外限制速度。
+ 真实转矩控制联调前必须根据机械行程单独设定合理速度限制。]]></Comment>
+							<Type>UDINT</Type>
+						</Var>
 						<Var>
 							<Name>GVL_IO_Raw.aEL2008_01</Name>
 							<Comment><![CDATA[ =========================================================
@@ -3367,16 +3374,24 @@ External Setpoint Generation:
 							<Name>GVL_AxisRef.AxisRefs[14].PlcToNc</Name>
 							<Type GUID="{96B75FEB-2D84-43BE-A3EC-D9A681F27D52}" Namespace="MC">PLCTONC_AXIS_REF</Type>
 						</Var>
-						<Var>
-							<Name>GVL_ClampingPdo.udiMaxProfileVelocity</Name>
-							<Comment><![CDATA[ SV680N 1702h 输出: 607Fh 最大轮廓速度，单位为驱动器指令单位/s。
- 手册默认 4294967295，表示此 PDO 初始不额外限制速度。
- 真实转矩控制联调前必须根据机械行程单独设定合理速度限制。]]></Comment>
-							<Type>UDINT</Type>
-						</Var>
 					</Vars>
 					<Vars VarGrpType="1">
 						<Name>PlcTask Inputs</Name>
+						<Var>
+							<Name>GVL_ClampingPdo.i8ModeOfOperationDisplay</Name>
+							<Comment><![CDATA[ SV680N 1B01h 输入: 6061h真实运行模式，仅用于Clamping模式确认。
+ 8=CSP，10=CST；准备和位置运动必须确认值为8。]]></Comment>
+							<Type>SINT</Type>
+						</Var>
+						<Var>
+							<Name>GVL_ClampingPdo.uiErrorCode</Name>
+							<Comment><![CDATA[ SV680N 1B02h 输入: 603Fh 故障码及 60FDh DI 状态，仅供诊断。]]></Comment>
+							<Type>UINT</Type>
+						</Var>
+						<Var>
+							<Name>GVL_ClampingPdo.udiDigitalInputs</Name>
+							<Type>UDINT</Type>
+						</Var>
 						<Var>
 							<Name>GVL_IO_Raw.aEL1008_01</Name>
 							<Comment><![CDATA[ =========================================================
@@ -3392,15 +3407,6 @@ External Setpoint Generation:
 						<Var>
 							<Name>GVL_IO_Raw.aEL1008_03</Name>
 							<Type GUID="{71B58F72-0E49-50EB-B8E4-1CCD027538EC}">ARRAY [1..8] OF BOOL</Type>
-						</Var>
-						<Var>
-							<Name>GVL_ClampingPdo.uiErrorCode</Name>
-							<Comment><![CDATA[ SV680N 1B02h 输入: 603Fh 故障码及 60FDh DI 状态，仅供诊断。]]></Comment>
-							<Type>UINT</Type>
-						</Var>
-						<Var>
-							<Name>GVL_ClampingPdo.udiDigitalInputs</Name>
-							<Type>UDINT</Type>
 						</Var>
 						<Var>
 							<Name>GVL_AxisRef.AxisRefs[1].NcToPlc</Name>

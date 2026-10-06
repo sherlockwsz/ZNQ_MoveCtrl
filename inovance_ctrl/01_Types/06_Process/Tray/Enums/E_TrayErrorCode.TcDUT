@@ -5,11 +5,15 @@
 {attribute 'strict'}
 {attribute 'to_string'}
 // 料盘流程错误码。
-// 当前流程尚未产生本地错误码，仅预留16#6200～16#62FF。
+// 保留原范围，并定义本次异常保护错误码：16#6200～16#62FF。
 TYPE E_TrayErrorCode :
 (
     None         := 16#0000,
     ReservedBase := 16#6200,
+    MotionCommandRejected := 16#6211,
+    MotionCommandAborted  := 16#6212,
+    MotionTimeout         := 16#6213,
+    PlannedTrayMissing    := 16#6214, // 计划层真正入架取盘前稳定缺盘
     ReservedEnd  := 16#62FF
 ) UDINT;
 END_TYPE]]></Declaration>

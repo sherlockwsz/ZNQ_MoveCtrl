@@ -396,5 +396,45 @@ ELSE
 
 END_CASE;</ST>
     </Implementation>
+    <Method Name="M_TryRecover" Id="{bdbb4f1b-183a-47ef-8207-151855c6f52f}">
+      <Declaration><![CDATA[METHOD M_TryRecover : BOOL
+VAR_INPUT
+    bExternalSafe : BOOL;
+    bExternalError : BOOL;
+END_VAR
+VAR_IN_OUT
+    ioAxes : ARRAY[1..GVL_Constants.cMaxAxisCount] OF ST_AxisInterface;
+END_VAR
+VAR
+    uiItem : UINT;
+    bSafe : BOOL;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// 仅整机显式恢复请求调用。正常Stop状态机和超时分支不改变。
+// 不强行解除正在执行的Stop，不把原失败伪装成正常Done。
+M_TryRecover := FALSE;
+bSafe := (eStep = E_AutoStopStep.Fault) AND NOT bBusy
+    AND bExternalSafe AND NOT bExternalError;
+FOR uiItem := 1 TO GVL_Constants.cMaxAxisCount DO
+    IF GVL_AxisConfig.AxisLimits[uiItem].bConfigured THEN
+        bSafe := bSafe
+            AND NOT ioAxes[uiItem].State.bPowerStatus
+            AND NOT ioAxes[uiItem].State.bBusy
+            AND NOT ioAxes[uiItem].State.bActive
+            AND NOT ioAxes[uiItem].State.bTorqueControlActive
+            AND ioAxes[uiItem].State.bStopReleased;
+    END_IF;
+END_FOR;
+IF bSafe THEN
+    bError := FALSE;
+    bTimeout := FALSE;
+    bDone := FALSE;
+    uiErrorAxisIndex := 0;
+    nErrorID := 0;
+    eStep := E_AutoStopStep.Idle;
+    M_TryRecover := TRUE;
+END_IF;]]></ST>
+      </Implementation>
+    </Method>
   </POU>
 </TcPlcObject>

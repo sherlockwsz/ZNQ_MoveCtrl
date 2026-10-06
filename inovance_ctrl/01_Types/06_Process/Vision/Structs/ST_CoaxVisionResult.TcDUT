@@ -8,6 +8,8 @@ STRUCT
     fCoaxiality : LREAL;
     fDeltaX     : LREAL;
     fDeltaY     : LREAL;
+    fCorrectionX : LREAL; // AdjustmentX mechanical relative correction, mm.
+    fCorrectionY : LREAL; // AdjustmentY mechanical relative correction, mm.
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

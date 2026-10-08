@@ -6,6 +6,7 @@ STRUCT
     eCommand      : E_GripperCommand; // 本次请求的动作
     udiRequestId  : UDINT;            // 每发起一条新命令递增一次
                                       // 功能块只处理新的编号，避免持续重复发送
+    bAllowCloseTargetWithoutGrip : BOOL := FALSE; // 仅本次显式授权的Close；默认关闭
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

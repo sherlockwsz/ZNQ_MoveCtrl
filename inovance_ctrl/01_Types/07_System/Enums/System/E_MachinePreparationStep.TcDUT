@@ -10,7 +10,19 @@ TYPE E_MachinePreparationStep :
     WaitAxesReady    := 10,  // 请求十根轴使能并等待Ready
     MoveToStandby    := 20,  // 按机械互锁关系运动至准备位置
     Done             := 30,  // 十根轴全部到位
-    Error            := 40   // 准备过程发生故障
+    Error            := 40,  // 准备过程发生故障
+    // 以下仅用于MoveToStandby内部Tray子步骤，主eStep仍为MoveToStandby。
+    TrayWaitForkStable := 100,
+    TrayNormalX        := 110,
+    TrayNormalZ        := 120,
+    TrayWaitEmptyLayer := 130,
+    TrayRecoveryHigh   := 140,
+    TrayRecoveryRack   := 150,
+    TrayRecoveryLow    := 160,
+    TrayReleaseConfirm := 170,
+    TrayReturnX        := 180,
+    TrayReturnZ        := 190,
+    TrayComplete       := 200
 );
 END_TYPE]]></Declaration>
   </DUT>

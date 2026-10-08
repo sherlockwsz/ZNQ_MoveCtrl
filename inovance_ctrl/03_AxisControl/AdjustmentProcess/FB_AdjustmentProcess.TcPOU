@@ -628,18 +628,32 @@ CASE eStep OF
         END_IF;
 
     E_AdjustmentStep.EvaluateFinalResult:
-        // 有效Final结果直接决定质量；不再返工拧松、重新调整或再次二次拧紧。
-        bAdjustmentQualified := bVisionWithinTolerance;
-        eStep := E_AdjustmentStep.CloseGripper;
+        IF bVisionWithinTolerance THEN
+            // Final有效且合格：不返工。
+            bAdjustmentQualified := TRUE;
+            eStep := E_AdjustmentStep.CloseGripper;
 
-    // 旧返工符号和处理保留兼容；正常状态机已无进入此路径的转移。
+        ELSIF nReworkCount < GVL_ProcessConfig.stAdjustment.nMaxReworkCount THEN
+            // Final有效超差且仍有返工额度：只计数一次，进入既有拧松状态。
+            nReworkCount := nReworkCount + 1;
+            bAdjustmentQualified := FALSE;
+            eStep := E_AdjustmentStep.RequestReworkLoosen;
+
+        ELSE
+            // Final有效超差且额度耗尽：NG并正常撤离。
+            bAdjustmentQualified := FALSE;
+            eStep := E_AdjustmentStep.CloseGripper;
+        END_IF;
+
+    // 复用既有返工拧松握手；完成后直接返回原检测调整循环。
     E_AdjustmentStep.RequestReworkLoosen:
         eStep := E_AdjustmentStep.WaitReworkLoosen;
 
     E_AdjustmentStep.WaitReworkLoosen:
         IF bReworkLoosenDone THEN
-            // AdjustmentXYZ与COM4始终未撤离；仅重置本轮修正计数并重新检测。
+            // AdjustmentXYZ与COM4始终未撤离；仅重置本轮修正和视觉重试计数并重新检测。
             nAdjustCount := 0;
+            nCoaxRetryCount := 0;
             fCorrectionX := 0.0;
             fCorrectionY := 0.0;
             bVisionWithinTolerance := FALSE;

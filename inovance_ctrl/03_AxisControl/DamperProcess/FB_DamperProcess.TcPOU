@@ -23,6 +23,8 @@ VAR_INPUT
 	
 	bGripperActionDone  : BOOL; // 上一扫描至本扫描的动作FB结果
 	bGripperActionError : BOOL;
+    bGripperCloseTargetReachedWithoutGrip : BOOL;
+    bGripperActionReady : BOOL; // Action Idle且Manager/Control均已释放
     // FALSE变为TRUE时启动完整五盘循环。
     bStart : BOOL;
 
@@ -132,6 +134,7 @@ VAR_OUTPUT
 	
 	bGripperActionExecute : BOOL; // 给COM3动作FB的保持型请求
 	eGripperActionCommand : E_GripperCommand;
+    bGripperAllowCloseTargetWithoutGrip : BOOL;
 END_VAR
 
 VAR
@@ -196,6 +199,7 @@ VAR
     bPreviousPartAvailable  : BOOL;
     // 单槽位内部结果：只推进搜索，不代表实际取料成功。
     bTakeSkippedNoScrew : BOOL;
+    bTakeSkippedEmptySlot : BOOL; // 物理空位已Open并回安全Z，独立于视觉Skip
 
     fCurrentSlotX : LREAL;
     fCurrentSlotY : LREAL;
@@ -315,6 +319,7 @@ trigReinitializeCoordinates(
 
 bGripperActionExecute := FALSE;
 eGripperActionCommand := E_GripperCommand.None;
+bGripperAllowCloseTargetWithoutGrip := FALSE;
 
 // 机械流程只保持请求并消费统一结果；Simulation延时和ADS握手
 // 均封装在FB_ScrewAngleVision中。
@@ -477,6 +482,7 @@ CASE eCurrentStep OF
 	
 		bPreviousPartAvailable := FALSE;
 		bTakeSkippedNoScrew := FALSE;
+		bTakeSkippedEmptySlot := FALSE;
 	
 		// 清除上一件阻尼器来源位置。
 		nPreviousSourceTray := 0;
@@ -662,7 +668,35 @@ CASE eCurrentStep OF
 				// eTakeStep已退出AcquireVisionResult；下一扫描bExecute=FALSE
 				// 复位本笔视觉事务，下一槽位重新到相机位后才发起新请求。
 				bTakeSkippedNoScrew := FALSE;
+				bTakeSkippedEmptySlot := FALSE;
 
+				IF nCurrentColumn < UPPER_BOUND(aSlots, 2) THEN
+					nCurrentColumn := nCurrentColumn + 1;
+				ELSIF nCurrentRow < UPPER_BOUND(aSlots, 1) THEN
+					nCurrentColumn := LOWER_BOUND(aSlots, 2);
+					nCurrentRow := nCurrentRow + 1;
+				ELSE
+					// 盘尾Skip只结束搜索；保留最后一次真实取料的来源与在途状态。
+					// 仅本盘真实尾件需要登记调整结果；全盘Skip不创建等待工件。
+					IF bPreviousPartAvailable AND (nPreviousSourceTray = nCurrentTray) THEN
+						bWaitingTrayResult := TRUE;
+						nTrayAwaitingResult := nCurrentTray;
+					END_IF;
+
+					IF NOT bCurrentTrayIsLastPlanned THEN
+						eCurrentStep := E_DamperProcessStep.WaitTrayChange;
+					ELSIF bPreviousPartAvailable THEN
+						// 最终计划盘仍有真实尾件：使用原最终收尾路径。
+						eCurrentStep := E_DamperProcessStep.FinalWaitAdjustment;
+					ELSE
+						// 无真实在途件：不等待不存在的调整结果、不请求空转。
+						eCurrentStep := E_DamperProcessStep.Completed;
+					END_IF;
+				END_IF;
+            ELSIF bTakeSkippedEmptySlot THEN
+                // 仅Open Done且安全Z真正到位后产生；物料Empty已由取料层确认。
+                // 不返回真实取料成功，不改最后真实工件的来源或在途状态。
+                bTakeSkippedEmptySlot := FALSE;
 				IF nCurrentColumn < UPPER_BOUND(aSlots, 2) THEN
 					nCurrentColumn := nCurrentColumn + 1;
 				ELSIF nCurrentRow < UPPER_BOUND(aSlots, 1) THEN
@@ -914,6 +948,7 @@ CASE eCurrentStep OF
 	
 			// 保留此前真实取料建立的在途状态；全盘Skip不能凭换盘创建工件。
 			bTakeSkippedNoScrew := FALSE;
+			bTakeSkippedEmptySlot := FALSE;
 	
 			eCurrentStep :=
 				E_DamperProcessStep.TakeCurrentDamper;
@@ -1024,6 +1059,7 @@ CASE eCurrentStep OF
 	// 保留bVisionFault/eVisionError，等待现有bAbort或系统复位处理。
 	//==========================================================
 	E_DamperProcessStep.Error:
+        bTakeSkippedEmptySlot := FALSE;
 		bBusy := FALSE;
 		bDone := FALSE;
 		bTrayChangeRequest := FALSE;
@@ -1034,6 +1070,7 @@ CASE eCurrentStep OF
 
 		bGripperActionExecute := FALSE;
 		eGripperActionCommand := E_GripperCommand.None;
+		bGripperAllowCloseTargetWithoutGrip := FALSE;
 
 		stAxisX.AutoCmd.bMoveAbs := FALSE;
 		stAxisY.AutoCmd.bMoveAbs := FALSE;
@@ -1150,6 +1187,10 @@ stTurntableInput.bReset := FALSE;
 //==============================================================
 // 5. 清除流程输出和握手
 //==============================================================
+bGripperActionExecute := FALSE;
+eGripperActionCommand := E_GripperCommand.None;
+bGripperAllowCloseTargetWithoutGrip := FALSE;
+bTakeSkippedEmptySlot := FALSE;
 bBusy := FALSE;
 bDone := FALSE;
 bCurrentTrayDone := FALSE;
@@ -1696,6 +1737,7 @@ ioAxisZ.AutoCmd.bMoveAbs := FALSE;
 
 // 复位单槽位Skip结果以及相机检测和旋转运行状态。
 bTakeSkippedNoScrew := FALSE;
+bTakeSkippedEmptySlot := FALSE;
 fDetectedAngleLatched := 0.0;
 fCorrectionAngleLatched := 0.0;
 fRotationBaseAngle := GVL_PositionConfig.stDamper.fRotationZero;
@@ -1760,6 +1802,7 @@ CASE eTakeStep OF
     //==========================================================
 	E_DamperTakeStep.Idle:
 		bTakeSkippedNoScrew := FALSE;
+		bTakeSkippedEmptySlot := FALSE;
 		// 清除上一件阻尼器锁存的视觉结果和机械角度基准。
 		fDetectedAngleLatched := 0.0;
 		fCorrectionAngleLatched := 0.0;
@@ -1931,15 +1974,50 @@ CASE eTakeStep OF
 		// DamperZ已到料盘取料高度。保持请求，动作FB仅在上升沿发一次Close。
 		bGripperActionExecute := TRUE;
 		eGripperActionCommand := E_GripperCommand.Close;
+        bGripperAllowCloseTargetWithoutGrip := TRUE;
 	
 		// 本次Close被验证完成之前，禁止Z抬升和DamperRotation运动。
-		IF bGripperActionDone AND NOT bGripperActionError THEN
-			bCameraLiftZDoneLatched := FALSE;
-			bCameraRotationDoneLatched := FALSE;
-			bRotationCommandIssued := FALSE;
-	
-			eTakeStep := E_DamperTakeStep.RotationToCameraAngle;
-		END_IF;
+        IF bGripperActionDone AND NOT bGripperActionError THEN
+            IF bGripperCloseTargetReachedWithoutGrip THEN
+                // 唯一允许解释物理Empty的工艺位置；不建立虚拟工件。
+                aSlots[nCurrentRow, nCurrentColumn].eState := E_DamperSlotState.Empty;
+                bGripperActionExecute := FALSE;
+                eGripperActionCommand := E_GripperCommand.None;
+                bGripperAllowCloseTargetWithoutGrip := FALSE;
+                eTakeStep := E_DamperTakeStep.EmptyReleaseClose;
+            ELSE
+                bCameraLiftZDoneLatched := FALSE;
+                bCameraRotationDoneLatched := FALSE;
+                bRotationCommandIssued := FALSE;
+                eTakeStep := E_DamperTakeStep.RotationToCameraAngle;
+            END_IF;
+        END_IF;
+
+    E_DamperTakeStep.EmptyReleaseClose:
+        // Execute已释放；必须等Action Idle且旧Owner/Control Busy均已清除。
+        // 本扫描仍不发Open，下一步才能形成独立Execute上升沿和RequestId。
+        IF bGripperActionReady THEN
+            eTakeStep := E_DamperTakeStep.EmptyOpen;
+        END_IF;
+
+    E_DamperTakeStep.EmptyOpen:
+        bGripperActionExecute := TRUE;
+        eGripperActionCommand := E_GripperCommand.Open;
+        IF bGripperActionDone AND NOT bGripperActionError THEN
+            bGripperActionExecute := FALSE;
+            eGripperActionCommand := E_GripperCommand.None;
+            eTakeStep := E_DamperTakeStep.EmptyLiftSafe;
+        END_IF;
+
+    E_DamperTakeStep.EmptyLiftSafe:
+        // Open已完成；仅Z回现有安全高度，禁止XY/Rotation/扫码/交换。
+        IF M_MoveZAbsolute(
+            fTargetZ := GVL_PositionConfig.stDamper.fSafeZ,
+            ioAxisZ := ioAxisZ
+        ) THEN
+            bTakeSkippedEmptySlot := TRUE;
+            eTakeStep := E_DamperTakeStep.Idle;
+        END_IF;
 	//==========================================================
 	// 7. Z轴抬升与DamperRotation绝对运动并行执行
 	//

@@ -50,6 +50,31 @@ VAR
 
     fbReadyTimeout  : TON;
     fbMotionTimeout : TON;
+    // 准备私有Tray恢复上下文，每次Start/Stop/Fault均清理。
+    eTrayRecoveryStep : E_MachinePreparationStep := E_MachinePreparationStep.TrayWaitForkStable;
+    nRecoveryTargetLayer : DINT;
+    nRecoveryIndex : DINT;
+    nRecoveryMatchCount : DINT;
+    bTrayRecoverySelected : BOOL;
+    bTrayRecoveryActive : BOOL;
+    bRecoveryClassC : BOOL;
+    bRecoveryRackPermit : BOOL;
+    fbTrayRecoveryTimeout : TON;
+    fbTrayReleaseTimeout : TON;
+    fbTrayReleaseStable : TON;
+    bReleaseConditions : BOOL;
+    fbForkStable : TON;
+    bForkCandidateInitialized : BOOL;
+    bForkCandidate : BOOL;
+    bForkStable : BOOL;
+    bForkStableValid : BOOL;
+    aRecoveryLevelTimer : ARRAY[1..5] OF TON;
+    aRecoveryLevelInitialized : ARRAY[1..5] OF BOOL;
+    aRecoveryLevelCandidate : ARRAY[1..5] OF BOOL;
+    aRecoveryLevelStable : ARRAY[1..5] OF BOOL;
+    aRecoveryLevelStableValid : ARRAY[1..5] OF BOOL;
+    bRecoveryAllLevelsStable : BOOL;
+    bNonTrayStandbyDone : BOOL;
 
     uiItem : DINT;
     uiAxis : UINT;
@@ -91,10 +116,18 @@ VAR
 
     // COM3夹爪已经张开完成的锁存状态。
     bGripperOpenDone : BOOL;
+    bGripperEnableExecute : BOOL;
+    bGripperEnableDone : BOOL; // 本次准备Enable写事务完成，不是硬件使能状态
+    bGripperEnableReleasePending : BOOL;
+    eGripperPreparationCommand : E_GripperCommand;
 
 	// AdjustmentZ处于安全位置后执行COM4闭合。
 	bAdjustGripperCloseExecute : BOOL;
 	bAdjustGripperCloseDone : BOOL;
+    bAdjustGripperEnableExecute : BOOL;
+    bAdjustGripperEnableDone : BOOL;
+    bAdjustGripperEnableReleasePending : BOOL;
+    eAdjustGripperPreparationCommand : E_GripperCommand;
 	bAdjustGripperReady : BOOL;
 	liAdjustGripperPositionError : LINT;
 END_VAR]]></Declaration>
@@ -110,17 +143,16 @@ fbReadyTimeout(
     PT := stConfig.tReadyTimeout
 );
 
-fbMotionTimeout(
-    IN := (eStep = E_MachinePreparationStep.MoveToStandby)
-          AND NOT bAbort,
-    PT := stConfig.tMotionTimeout
-);
-
 bErrorPulse := FALSE;
 // 默认不请求夹爪动作。
 // 只有MoveToStandby步骤尚未完成张开时才置TRUE。
 bGripperOpenExecute := FALSE;
 bAdjustGripperCloseExecute := FALSE;
+
+bGripperEnableExecute := FALSE;
+bAdjustGripperEnableExecute := FALSE;
+eGripperPreparationCommand := E_GripperCommand.Open;
+eAdjustGripperPreparationCommand := E_GripperCommand.Close;
 
 // COM4准备完成必须由真实状态共同确认，不能只依赖动作完成握手。
 liAdjustGripperPositionError :=
@@ -131,7 +163,8 @@ IF liAdjustGripperPositionError < 0 THEN
 END_IF;
 
 bAdjustGripperReady :=
-    ioAdjustGripper.Feedback.bOnline
+    ioAdjustGripper.State.bSimulationActive
+    OR (ioAdjustGripper.Feedback.bOnline
     AND NOT ioAdjustGripper.Feedback.bCommFault
     AND ioAdjustGripper.Feedback.bFaultCodeValid
     AND NOT ioAdjustGripper.Feedback.bFault
@@ -144,7 +177,21 @@ bAdjustGripperReady :=
         liAdjustGripperPositionError
         <= DINT_TO_LINT(ioAdjustGripper.Set.diPositionTolerance)
     )
-    AND ioAdjustGripper.Feedback.bClosed;
+    AND ioAdjustGripper.Feedback.bClosed);
+
+// 原超时仍保护全部非Tray准备机构；有盘回库由独立总超时保护。
+bNonTrayStandbyDone := bDamperXDone AND bDamperYDone AND bDamperZDone
+              AND bRotationDone AND bClampDone AND bTurntableDone
+              AND bAdjustmentXDone AND bAdjustmentYDone AND bAdjustmentZDone
+              AND bScrewYDone AND bScrewZDone
+              AND bGripperOpenDone AND bAdjustGripperCloseDone AND bAdjustGripperReady;
+fbMotionTimeout(
+    IN := (eStep = E_MachinePreparationStep.MoveToStandby)
+        AND NOT bAbort
+        AND (NOT bNonTrayStandbyDone
+            OR (NOT bTrayRecoverySelected AND NOT (bTrayXDone AND bTrayZDone))),
+    PT := stConfig.tMotionTimeout
+);
 
 //==============================================================
 // 2. Preparation命令脉冲默认清除
@@ -344,8 +391,29 @@ ELSE
 			// 与DamperZ抬升同时启动，不需要等待DamperZ到位。
 			// bExecute保持TRUE，直到FB_GripperAction返回Done。
 			//======================================================
-			IF NOT bGripperOpenDone THEN
-				bGripperOpenExecute := TRUE;
+            // 同一路复用唯一Action：Enable完成后FALSE释放，Idle后才发位置动作。
+            IF NOT bGripperEnableDone THEN
+                eGripperPreparationCommand := E_GripperCommand.Enable;
+                bGripperEnableExecute := TRUE;
+                IF ioGripperAction.bError THEN
+                    bGripperEnableExecute := FALSE;
+                    bError := TRUE;
+                    bErrorPulse := TRUE;
+                    uiErrorAxis := 0;
+                    udiErrorCode := TO_UDINT(E_MachinePreparationErrorCode.DamperGripperEnableFailed);
+                    // 具体底层原因仍保留在Action/AutoFeedback中。
+                    eStep := E_MachinePreparationStep.Error;
+                ELSIF ioGripperAction.bDone THEN
+                    bGripperEnableDone := TRUE;
+                    bGripperEnableReleasePending := TRUE;
+                    bGripperEnableExecute := FALSE;
+                END_IF;
+            ELSIF bGripperEnableReleasePending THEN
+                IF ioGripperAction.eStep = E_GripperActionStep.Idle THEN
+                    bGripperEnableReleasePending := FALSE;
+                END_IF;
+            ELSIF NOT bGripperOpenDone THEN
+                bGripperOpenExecute := TRUE;
 			
 				// FB_GripperAction在MAIN中的调用结果会跨扫描周期更新。
 				IF ioGripperAction.bError THEN
@@ -371,18 +439,11 @@ ELSE
 					bGripperOpenExecute := FALSE;
 				END_IF;
 			END_IF;
-            // 第一组保护轴并行运动。
-            IF NOT bTrayXDone THEN
-                bTrayXDone := M_MoveAxisAbsolute(
-                    fTarget := stConfig.fTrayXStandby,
-                    fVelocity := stConfig.fTrayVelocity,
-                    fTolerance := stConfig.fLinearTolerance,
-                    uiAxisIndex := GVL_AxisIndex.TrayX,
-                    ioIssued := bTrayXIssued,
-                    ioAxis := aAxes[GVL_AxisIndex.TrayX]
-                );
-            END_IF;
-
+            // Tray先等待Fork稳定，再执行原无盘路径或A/B/C恢复。
+			M_PrepareTray(
+				ioAxes := aAxes
+			);
+            // 其它机构继续保持原有并行准备时序。
             IF NOT bDamperZDone THEN
                 bDamperZDone := M_MoveAxisAbsolute(
                     fTarget := stConfig.fDamperZStandby,
@@ -402,19 +463,6 @@ ELSE
                     uiAxisIndex := GVL_AxisIndex.ScrewdriverZ,
                     ioIssued := bScrewZIssued,
                     ioAxis := aAxes[GVL_AxisIndex.ScrewdriverZ]
-                );
-            END_IF;
-
-
-            // TrayX在升降位后，TrayZ才允许下降。
-            IF bTrayXDone AND NOT bTrayZDone THEN
-                bTrayZDone := M_MoveAxisAbsolute(
-                    fTarget := stConfig.fTrayZStandby,
-                    fVelocity := stConfig.fTrayVelocity,
-                    fTolerance := stConfig.fLinearTolerance,
-                    uiAxisIndex := GVL_AxisIndex.TrayZ,
-                    ioIssued := bTrayZIssued,
-                    ioAxis := aAxes[GVL_AxisIndex.TrayZ]
                 );
             END_IF;
 
@@ -466,8 +514,29 @@ ELSE
 			// 随后才允许AdjustmentZ回准备位置；Z到位后，
 			// AdjustmentX/Y再同时回到准备位置。
 			//==============================================================
-			IF NOT bAdjustGripperCloseDone THEN
-				bAdjustGripperCloseExecute := TRUE;
+            // 同一路复用唯一Action：Enable完成后FALSE释放，Idle后才发位置动作。
+            IF NOT bAdjustGripperEnableDone THEN
+                eAdjustGripperPreparationCommand := E_GripperCommand.Enable;
+                bAdjustGripperEnableExecute := TRUE;
+                IF ioAdjustGripperAction.bError THEN
+                    bAdjustGripperEnableExecute := FALSE;
+                    bError := TRUE;
+                    bErrorPulse := TRUE;
+                    uiErrorAxis := 0;
+                    udiErrorCode := TO_UDINT(E_MachinePreparationErrorCode.AdjustGripperEnableFailed);
+                    // 具体底层原因仍保留在Action/AutoFeedback中。
+                    eStep := E_MachinePreparationStep.Error;
+                ELSIF ioAdjustGripperAction.bDone THEN
+                    bAdjustGripperEnableDone := TRUE;
+                    bAdjustGripperEnableReleasePending := TRUE;
+                    bAdjustGripperEnableExecute := FALSE;
+                END_IF;
+            ELSIF bAdjustGripperEnableReleasePending THEN
+                IF ioAdjustGripperAction.eStep = E_GripperActionStep.Idle THEN
+                    bAdjustGripperEnableReleasePending := FALSE;
+                END_IF;
+            ELSIF NOT bAdjustGripperCloseDone THEN
+                bAdjustGripperCloseExecute := TRUE;
 
 				IF ioAdjustGripperAction.bError THEN
 					bAdjustGripperCloseExecute := FALSE;
@@ -580,8 +649,17 @@ ELSE
             END_IF;
 
 
+            // 按本扫描最新完成锁存判断超时，避免回库等待期间
+            // 非Tray分支恰好完成却被上一扫描的未完成状态误报。
+            bNonTrayStandbyDone := bDamperXDone AND bDamperYDone AND bDamperZDone
+                AND bRotationDone AND bClampDone AND bTurntableDone
+                AND bAdjustmentXDone AND bAdjustmentYDone AND bAdjustmentZDone
+                AND bScrewYDone AND bScrewZDone
+                AND bGripperOpenDone AND bAdjustGripperCloseDone AND bAdjustGripperReady;
+
             // 十根轴全部满足目标位置才发布Done。
-            IF bTrayXDone
+            IF (eStep <> E_MachinePreparationStep.Error)
+                AND bTrayXDone
                 AND bTrayZDone
                 AND bDamperXDone
                 AND bDamperYDone
@@ -602,7 +680,10 @@ ELSE
                 bDone := TRUE;
                 eStep := E_MachinePreparationStep.Done;
 
-            ELSIF fbMotionTimeout.Q THEN
+            ELSIF (eStep <> E_MachinePreparationStep.Error)
+                AND fbMotionTimeout.Q
+                AND (NOT bNonTrayStandbyDone OR NOT bTrayRecoverySelected)
+            THEN
                 bError := TRUE;
                 bTimeout := TRUE;
                 bErrorPulse := TRUE;
@@ -610,15 +691,21 @@ ELSE
 
                 // 保存第一根尚未到位的轴。
 				    // COM3没有完成张开。
-				IF NOT bGripperOpenDone THEN
+				IF NOT bGripperEnableDone THEN
+                    uiErrorAxis := 0;
+                    udiErrorCode := TO_UDINT(E_MachinePreparationErrorCode.DamperGripperEnableFailed);
+                ELSIF NOT bAdjustGripperEnableDone THEN
+                    uiErrorAxis := 0;
+                    udiErrorCode := TO_UDINT(E_MachinePreparationErrorCode.AdjustGripperEnableFailed);
+                ELSIF NOT bGripperOpenDone THEN
 					uiErrorAxis := 0;
 					udiErrorCode := TO_UDINT(E_MachinePreparationErrorCode.GripperOpenFailed);
 				ELSIF NOT bAdjustGripperCloseDone OR NOT bAdjustGripperReady THEN
 					uiErrorAxis := 0;
 					udiErrorCode := TO_UDINT(E_MachinePreparationErrorCode.AdjustGripperCloseFailed);
-                ELSIF NOT bTrayXDone THEN
+                ELSIF NOT bTrayRecoverySelected AND NOT bTrayXDone THEN
                     uiErrorAxis := GVL_AxisIndex.TrayX;
-                ELSIF NOT bTrayZDone THEN
+                ELSIF NOT bTrayRecoverySelected AND NOT bTrayZDone THEN
                     uiErrorAxis := GVL_AxisIndex.TrayZ;
                 ELSIF NOT bDamperZDone THEN
                     uiErrorAxis := GVL_AxisIndex.DamperZ;
@@ -666,11 +753,29 @@ ELSE
             eStep := E_MachinePreparationStep.Error;
     END_CASE;
 END_IF;
+// 当扫描即清理恢复上下文和未提交运动脉冲，诊断保持到既有Reset。
+// 实际减速停止/Stop所有权仍由MAIN中既有安全链处理。
+IF eStep = E_MachinePreparationStep.Error THEN
+    bBusy := FALSE;
+    bDone := FALSE;
+    M_ResetTrayRecovery();
+    FOR uiItem := LOWER_BOUND(GVL_AxisIndex.AutoProcessAxes, 1)
+        TO UPPER_BOUND(GVL_AxisIndex.AutoProcessAxes, 1)
+    DO
+        uiAxis := GVL_AxisIndex.AutoProcessAxes[uiItem];
+        aAxes[uiAxis].PreparationCmd.bMoveAbs := FALSE;
+        aAxes[uiAxis].PreparationCmd.bMoveRel := FALSE;
+        aAxes[uiAxis].PreparationCmd.bJogPos := FALSE;
+        aAxes[uiAxis].PreparationCmd.bJogNeg := FALSE;
+        aAxes[uiAxis].PreparationCmd.bTorqueControl := FALSE;
+    END_FOR;
+END_IF;
+
 //==============================================================
 // 4. COM3机构准备动作
 //
 // WaitAxesReady阶段使用FALSE调用一次，使动作FB完成初始化。
-// MoveToStandby阶段根据bGripperOpenExecute执行Open。
+// MoveToStandby阶段各自Enable完成并释放Action后执行Open/Close。
 // Error或Abort时撤销动作。
 // Done阶段不再调用，命令权交还给自动流程协调器。
 //==============================================================
@@ -681,6 +786,8 @@ IF bAbort
 THEN
     bGripperOpenExecute := FALSE;
     bAdjustGripperCloseExecute := FALSE;
+    bGripperEnableExecute := FALSE;
+    bAdjustGripperEnableExecute := FALSE;
 END_IF;
 
 IF bAbort
@@ -689,8 +796,9 @@ IF bAbort
     OR (eStep = E_MachinePreparationStep.Error)
 THEN
     ioGripperAction(
-        bExecute := bGripperOpenExecute,
-        eCommand := E_GripperCommand.Open,
+        bExecute := bGripperEnableExecute OR bGripperOpenExecute,
+        eCommand := eGripperPreparationCommand,
+        bAllowCloseTargetWithoutGrip := FALSE, // 准备不继承自动取料授权
 
         // 整机Stop或准备Abort时立即取消夹爪动作。
         bCancel := bAbort,
@@ -709,8 +817,8 @@ IF bAbort
     OR (eStep = E_MachinePreparationStep.Error)
 THEN
     ioAdjustGripperAction(
-        bExecute := bAdjustGripperCloseExecute,
-        eCommand := E_GripperCommand.Close,
+        bExecute := bAdjustGripperEnableExecute OR bAdjustGripperCloseExecute,
+        eCommand := eAdjustGripperPreparationCommand,
         bCancel := bAbort,
         tAcceptTimeout := GVL_ProcessConfig.stGripper.tAcceptTimeout,
         tResultTimeout := GVL_ProcessConfig.stGripper.tResultTimeout,
@@ -830,13 +938,290 @@ ioAxis.PreparationCmd.bMoveAbs := TRUE;
 ioIssued := TRUE;]]></ST>
       </Implementation>
     </Method>
+    <Method Name="M_PrepareTray" Id="{b0fb961a-6efa-4506-b0cd-982db79de926}">
+      <Declaration><![CDATA[METHOD PRIVATE M_PrepareTray
+VAR_IN_OUT
+    ioAxes : ARRAY[1..GVL_Constants.cMaxAxisCount] OF ST_AxisInterface;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// 只在MoveToStandby内调用。所有运动继续经M_MoveAxisAbsolute写PreparationCmd。
+IF eStep = E_MachinePreparationStep.Error THEN
+    RETURN;
+END_IF;
+
+// 即使等待传感器，也优先保留Tray底层真实Axis Error ID。
+FOR nRecoveryIndex := GVL_AxisIndex.TrayX TO GVL_AxisIndex.TrayZ DO
+    IF ioAxes[nRecoveryIndex].Alarm.bError THEN
+        bError := TRUE;
+        bErrorPulse := TRUE;
+        uiErrorAxis := DINT_TO_UINT(nRecoveryIndex);
+        IF ioAxes[nRecoveryIndex].Alarm.nErrorID <> 0 THEN
+            udiErrorCode := ioAxes[nRecoveryIndex].Alarm.nErrorID;
+        ELSE
+            udiErrorCode := TO_UDINT(E_MachinePreparationErrorCode.AxisAlarmBase)
+                + DINT_TO_UDINT(nRecoveryIndex);
+        END_IF;
+        eStep := E_MachinePreparationStep.Error;
+        RETURN;
+    END_IF;
+END_FOR;
+
+// Fork双向稳定确认：候选变化先复位，首次稳定前禁止TrayXZ运动。
+IF NOT bForkCandidateInitialized
+    OR (bForkCandidate <> GVL_IO.bTrayPresentOnFork)
+THEN
+    bForkCandidate := GVL_IO.bTrayPresentOnFork;
+    bForkCandidateInitialized := TRUE;
+    bForkStableValid := FALSE;
+    fbForkStable(IN := FALSE, PT := stConfig.tTrayDetectStable);
+END_IF;
+fbForkStable(IN := TRUE, PT := stConfig.tTrayDetectStable);
+IF fbForkStable.Q THEN
+    bForkStable := bForkCandidate;
+    bForkStableValid := TRUE;
+END_IF;
+
+// 准备私有DI稳定状态只用于恢复，不访问生产aTray[]或建立Plan。
+bRecoveryAllLevelsStable := TRUE;
+FOR nRecoveryIndex := LOWER_BOUND(GVL_IO.aTrayLevelDetected, 1)
+    TO UPPER_BOUND(GVL_IO.aTrayLevelDetected, 1)
+DO
+    IF NOT aRecoveryLevelInitialized[nRecoveryIndex]
+        OR (aRecoveryLevelCandidate[nRecoveryIndex]
+            <> GVL_IO.aTrayLevelDetected[nRecoveryIndex])
+    THEN
+        aRecoveryLevelCandidate[nRecoveryIndex] := GVL_IO.aTrayLevelDetected[nRecoveryIndex];
+        aRecoveryLevelInitialized[nRecoveryIndex] := TRUE;
+        aRecoveryLevelStableValid[nRecoveryIndex] := FALSE;
+        aRecoveryLevelTimer[nRecoveryIndex](IN := FALSE, PT := stConfig.tTrayDetectStable);
+    END_IF;
+    aRecoveryLevelTimer[nRecoveryIndex](IN := TRUE, PT := stConfig.tTrayDetectStable);
+    IF aRecoveryLevelTimer[nRecoveryIndex].Q THEN
+        aRecoveryLevelStable[nRecoveryIndex] := aRecoveryLevelCandidate[nRecoveryIndex];
+        aRecoveryLevelStableValid[nRecoveryIndex] := TRUE;
+    END_IF;
+    bRecoveryAllLevelsStable := bRecoveryAllLevelsStable
+        AND aRecoveryLevelStableValid[nRecoveryIndex];
+END_FOR;
+
+// 放盘前稳定丢盘优先故障；Release/回准备位时Fork=FALSE属于预期状态。
+IF bTrayRecoveryActive
+    AND (eTrayRecoveryStep <> E_MachinePreparationStep.TrayReleaseConfirm)
+    AND (eTrayRecoveryStep <> E_MachinePreparationStep.TrayReturnX)
+    AND (eTrayRecoveryStep <> E_MachinePreparationStep.TrayReturnZ)
+    AND bForkStableValid AND NOT bForkStable
+THEN
+    M_TrayRecoveryFault(eError := E_MachinePreparationErrorCode.TrayRecoveryForkLost);
+    RETURN;
+END_IF;
+
+// 到Low以后才计时，且两项条件必须同时连续稳定，禁止立即退X。
+bReleaseConditions := FALSE;
+IF (eTrayRecoveryStep = E_MachinePreparationStep.TrayReleaseConfirm)
+    AND (nRecoveryTargetLayer >= LOWER_BOUND(stConfig.aTrayLayer, 1))
+    AND (nRecoveryTargetLayer <= UPPER_BOUND(stConfig.aTrayLayer, 1))
+THEN
+    bReleaseConditions := GVL_IO.aTrayLevelDetected[nRecoveryTargetLayer]
+        AND NOT GVL_IO.bTrayPresentOnFork;
+END_IF;
+fbTrayReleaseStable(IN := bReleaseConditions, PT := stConfig.tTrayDetectStable);
+fbTrayReleaseTimeout(
+    IN := (eTrayRecoveryStep = E_MachinePreparationStep.TrayReleaseConfirm),
+    PT := stConfig.tTrayReleaseConfirmTimeout
+);
+
+CASE eTrayRecoveryStep OF
+    E_MachinePreparationStep.TrayWaitForkStable:
+        IF bForkStableValid THEN
+            IF NOT bForkStable THEN
+                // 无盘：保留原X先到Lift、Z再到Standby路径。
+                eTrayRecoveryStep := E_MachinePreparationStep.TrayNormalX;
+            ELSE
+                bTrayRecoverySelected := TRUE;
+                bTrayRecoveryActive := TRUE;
+                bRecoveryClassC := FALSE;
+                IF ABS(ioAxes[GVL_AxisIndex.TrayX].Data.fActPosition
+                    - stConfig.fTrayRackStationX) <= stConfig.fTrayRecoveryBoundaryTolerance
+                THEN
+                    // A类：只按Z区间认层，直接到本层Low。
+                    eTrayRecoveryStep := E_MachinePreparationStep.TrayRecoveryLow;
+                ELSIF ABS(ioAxes[GVL_AxisIndex.TrayX].Data.fActPosition
+                    - stConfig.fTrayXStandby) <= stConfig.fTrayRecoveryBoundaryTolerance
+                THEN
+                    // C类：完全退出料架，只按稳定空层事实选目标。
+                    bRecoveryClassC := TRUE;
+                    eTrayRecoveryStep := E_MachinePreparationStep.TrayWaitEmptyLayer;
+                ELSIF (ioAxes[GVL_AxisIndex.TrayX].Data.fActPosition
+                        > MIN(stConfig.fTrayXStandby, stConfig.fTrayRackStationX))
+                    AND (ioAxes[GVL_AxisIndex.TrayX].Data.fActPosition
+                        < MAX(stConfig.fTrayXStandby, stConfig.fTrayRackStationX))
+                THEN
+                    // B类：保持当前Z，X先回Rack；同样只按Z区间认层。
+                    eTrayRecoveryStep := E_MachinePreparationStep.TrayRecoveryRack;
+                ELSE
+                    M_TrayRecoveryFault(eError := E_MachinePreparationErrorCode.TrayRecoveryPositionInvalid);
+                END_IF;
+
+                IF NOT bRecoveryClassC AND NOT bError THEN
+                    nRecoveryMatchCount := 0;
+                    FOR nRecoveryIndex := LOWER_BOUND(stConfig.aTrayLayer, 1)
+                        TO UPPER_BOUND(stConfig.aTrayLayer, 1)
+                    DO
+                        IF (ioAxes[GVL_AxisIndex.TrayZ].Data.fActPosition
+                                >= stConfig.aTrayLayer[nRecoveryIndex].fLowPosition
+                                    - stConfig.fTrayRecoveryBoundaryTolerance)
+                            AND (ioAxes[GVL_AxisIndex.TrayZ].Data.fActPosition
+                                <= stConfig.aTrayLayer[nRecoveryIndex].fHighPosition
+                                    + stConfig.fTrayRecoveryBoundaryTolerance)
+                        THEN
+                            nRecoveryMatchCount := nRecoveryMatchCount + 1;
+                            nRecoveryTargetLayer := nRecoveryIndex;
+                        END_IF;
+                    END_FOR;
+                    IF nRecoveryMatchCount <> 1 THEN
+                        M_TrayRecoveryFault(eError := E_MachinePreparationErrorCode.TrayRecoveryPositionInvalid);
+                    END_IF;
+                END_IF;
+            END_IF;
+        END_IF;
+
+    E_MachinePreparationStep.TrayWaitEmptyLayer:
+        IF bRecoveryAllLevelsStable THEN
+            // 只选择一次，从Layer1至Layer5；五层全满禁止运动。
+            FOR nRecoveryIndex := LOWER_BOUND(stConfig.aTrayLayer, 1)
+                TO UPPER_BOUND(stConfig.aTrayLayer, 1)
+            DO
+                IF NOT aRecoveryLevelStable[nRecoveryIndex] THEN
+                    nRecoveryTargetLayer := nRecoveryIndex;
+                    EXIT;
+                END_IF;
+            END_FOR;
+            IF nRecoveryTargetLayer = 0 THEN
+                M_TrayRecoveryFault(eError := E_MachinePreparationErrorCode.TrayRecoveryNoEmptyLayer);
+            ELSE
+                eTrayRecoveryStep := E_MachinePreparationStep.TrayRecoveryHigh;
+            END_IF;
+        END_IF;
+
+    E_MachinePreparationStep.TrayRecoveryHigh:
+        IF M_MoveAxisAbsolute(
+            fTarget := stConfig.aTrayLayer[nRecoveryTargetLayer].fHighPosition,
+            fVelocity := stConfig.fTrayVelocity,
+            fTolerance := stConfig.fLinearTolerance,
+            uiAxisIndex := GVL_AxisIndex.TrayZ,
+            ioIssued := bTrayZIssued,
+            ioAxis := ioAxes[GVL_AxisIndex.TrayZ])
+        THEN
+            eTrayRecoveryStep := E_MachinePreparationStep.TrayRecoveryRack;
+        END_IF;
+
+    E_MachinePreparationStep.TrayRecoveryRack:
+        // C类在真正发X运动前再次确认同一目标仍稳定空；不改投。
+        bRecoveryRackPermit := TRUE;
+        IF bRecoveryClassC AND NOT bTrayXIssued THEN
+            bRecoveryRackPermit := aRecoveryLevelStableValid[nRecoveryTargetLayer];
+            IF bRecoveryRackPermit AND aRecoveryLevelStable[nRecoveryTargetLayer] THEN
+                bRecoveryRackPermit := FALSE;
+                M_TrayRecoveryFault(eError := E_MachinePreparationErrorCode.TrayRecoveryTargetChanged);
+            END_IF;
+        END_IF;
+        IF bRecoveryRackPermit THEN
+            IF M_MoveAxisAbsolute(
+                fTarget := stConfig.fTrayRackStationX,
+                fVelocity := stConfig.fTrayVelocity,
+                fTolerance := stConfig.fLinearTolerance,
+                uiAxisIndex := GVL_AxisIndex.TrayX,
+                ioIssued := bTrayXIssued,
+                ioAxis := ioAxes[GVL_AxisIndex.TrayX])
+            THEN
+                eTrayRecoveryStep := E_MachinePreparationStep.TrayRecoveryLow;
+            END_IF;
+        END_IF;
+
+    E_MachinePreparationStep.TrayRecoveryLow:
+        // A/B不把层传感器当作原仓位占用依据。
+        IF M_MoveAxisAbsolute(
+            fTarget := stConfig.aTrayLayer[nRecoveryTargetLayer].fLowPosition,
+            fVelocity := stConfig.fTrayVelocity,
+            fTolerance := stConfig.fLinearTolerance,
+            uiAxisIndex := GVL_AxisIndex.TrayZ,
+            ioIssued := bTrayZIssued,
+            ioAxis := ioAxes[GVL_AxisIndex.TrayZ])
+        THEN
+            eTrayRecoveryStep := E_MachinePreparationStep.TrayReleaseConfirm;
+        END_IF;
+
+    E_MachinePreparationStep.TrayReleaseConfirm:
+        IF fbTrayReleaseStable.Q
+            AND aRecoveryLevelStableValid[nRecoveryTargetLayer]
+            AND aRecoveryLevelStable[nRecoveryTargetLayer]
+            AND bForkStableValid AND NOT bForkStable
+        THEN
+            eTrayRecoveryStep := E_MachinePreparationStep.TrayReturnX;
+        ELSIF fbTrayReleaseTimeout.Q THEN
+            bTimeout := TRUE;
+            M_TrayRecoveryFault(eError := E_MachinePreparationErrorCode.TrayRecoveryReleaseFailed);
+        END_IF;
+
+    E_MachinePreparationStep.TrayNormalX,
+    E_MachinePreparationStep.TrayReturnX:
+        bTrayXDone := M_MoveAxisAbsolute(
+            fTarget := stConfig.fTrayXStandby,
+            fVelocity := stConfig.fTrayVelocity,
+            fTolerance := stConfig.fLinearTolerance,
+            uiAxisIndex := GVL_AxisIndex.TrayX,
+            ioIssued := bTrayXIssued,
+            ioAxis := ioAxes[GVL_AxisIndex.TrayX]);
+        IF bTrayXDone THEN
+            IF bTrayRecoverySelected THEN
+                eTrayRecoveryStep := E_MachinePreparationStep.TrayReturnZ;
+            ELSE
+                eTrayRecoveryStep := E_MachinePreparationStep.TrayNormalZ;
+            END_IF;
+        END_IF;
+
+    E_MachinePreparationStep.TrayNormalZ,
+    E_MachinePreparationStep.TrayReturnZ:
+        bTrayZDone := M_MoveAxisAbsolute(
+            fTarget := stConfig.fTrayZStandby,
+            fVelocity := stConfig.fTrayVelocity,
+            fTolerance := stConfig.fLinearTolerance,
+            uiAxisIndex := GVL_AxisIndex.TrayZ,
+            ioIssued := bTrayZIssued,
+            ioAxis := ioAxes[GVL_AxisIndex.TrayZ]);
+        IF bTrayZDone THEN
+            bTrayRecoveryActive := FALSE;
+            eTrayRecoveryStep := E_MachinePreparationStep.TrayComplete;
+        END_IF;
+
+    E_MachinePreparationStep.TrayComplete:
+        // Tray Done不替代其它机构Done；最终准备仍由原主状态机汇总。
+        bTrayRecoveryActive := FALSE;
+
+    ELSE
+        M_TrayRecoveryFault(eError := E_MachinePreparationErrorCode.TrayRecoveryPositionInvalid);
+END_CASE;
+
+// 从稳定有盘的分类扫描开始，到X/Lift与Z/Standby完成扫描结束。
+fbTrayRecoveryTimeout(
+    IN := bTrayRecoveryActive AND NOT bError,
+    PT := stConfig.tTrayRecoveryTimeout
+);
+IF fbTrayRecoveryTimeout.Q AND NOT bError THEN
+    bTimeout := TRUE;
+    M_TrayRecoveryFault(eError := E_MachinePreparationErrorCode.TrayRecoveryTimeout);
+END_IF;
+]]></ST>
+      </Implementation>
+    </Method>
     <Method Name="M_ResetProgress" Id="{c29fe135-6b79-4ad5-9d47-96d5f3728157}">
       <Declaration><![CDATA[METHOD PRIVATE M_ResetProgress
 VAR_INPUT
 END_VAR
 ]]></Declaration>
       <Implementation>
-        <ST><![CDATA[bTrayXIssued := FALSE;
+        <ST><![CDATA[M_ResetTrayRecovery();
+bTrayXIssued := FALSE;
 bTrayZIssued := FALSE;
 bDamperXIssued := FALSE;
 bDamperYIssued := FALSE;
@@ -867,10 +1252,68 @@ bAdjustmentZDone := FALSE;
 // 清除机构准备阶段的COM3状态。
 bGripperOpenExecute := FALSE;
 bGripperOpenDone := FALSE;
+bGripperEnableExecute := FALSE;
+bGripperEnableDone := FALSE;
+bGripperEnableReleasePending := FALSE;
 
 // 清除机构准备阶段的COM4状态。
 bAdjustGripperCloseExecute := FALSE;
-bAdjustGripperCloseDone := FALSE;]]></ST>
+bAdjustGripperCloseDone := FALSE;
+bAdjustGripperEnableExecute := FALSE;
+bAdjustGripperEnableDone := FALSE;
+bAdjustGripperEnableReleasePending := FALSE;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ResetTrayRecovery" Id="{08388bbb-f6b0-495b-935a-39ac6bf3b90e}">
+      <Declaration><![CDATA[METHOD PRIVATE M_ResetTrayRecovery
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[nRecoveryTargetLayer := 0;
+nRecoveryMatchCount := 0;
+bTrayRecoverySelected := FALSE;
+bTrayRecoveryActive := FALSE;
+bRecoveryClassC := FALSE;
+bRecoveryRackPermit := FALSE;
+eTrayRecoveryStep := E_MachinePreparationStep.TrayWaitForkStable;
+bTrayXIssued := FALSE;
+bTrayZIssued := FALSE;
+bTrayXDone := FALSE;
+bTrayZDone := FALSE;
+bForkCandidateInitialized := FALSE;
+bForkCandidate := FALSE;
+bForkStable := FALSE;
+bForkStableValid := FALSE;
+bRecoveryAllLevelsStable := FALSE;
+bReleaseConditions := FALSE;
+fbForkStable(IN := FALSE, PT := stConfig.tTrayDetectStable);
+fbTrayRecoveryTimeout(IN := FALSE, PT := stConfig.tTrayRecoveryTimeout);
+fbTrayReleaseTimeout(IN := FALSE, PT := stConfig.tTrayReleaseConfirmTimeout);
+fbTrayReleaseStable(IN := FALSE, PT := stConfig.tTrayDetectStable);
+FOR nRecoveryIndex := LOWER_BOUND(aRecoveryLevelTimer, 1)
+    TO UPPER_BOUND(aRecoveryLevelTimer, 1)
+DO
+    aRecoveryLevelTimer[nRecoveryIndex](IN := FALSE, PT := stConfig.tTrayDetectStable);
+    aRecoveryLevelInitialized[nRecoveryIndex] := FALSE;
+    aRecoveryLevelCandidate[nRecoveryIndex] := FALSE;
+    aRecoveryLevelStable[nRecoveryIndex] := FALSE;
+    aRecoveryLevelStableValid[nRecoveryIndex] := FALSE;
+END_FOR;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_TrayRecoveryFault" Id="{6476248e-3a08-45e4-b899-2f38d308f244}">
+      <Declaration><![CDATA[METHOD PRIVATE M_TrayRecoveryFault
+VAR_INPUT
+    eError : E_MachinePreparationErrorCode;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[bError := TRUE;
+bErrorPulse := TRUE;
+uiErrorAxis := 0; // 纯传感器/现场分类错误，不冒充具体轴故障。
+udiErrorCode := TO_UDINT(eError);
+eStep := E_MachinePreparationStep.Error;
+]]></ST>
       </Implementation>
     </Method>
   </POU>

@@ -25,6 +25,7 @@ STRUCT
     udCommErrorCode     : UDINT;
     udCommandErrorCode  : UDINT;
     udStopErrorCode     : UDINT;  // Stop错误与普通动作错误分离
+    bCloseTargetReachedWithoutGrip : BOOL; // 与udiCompletedId绑定；非Grip、非Error
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

@@ -14,6 +14,10 @@ STRUCT
     fRotationPositionTolerance : LREAL;
     tMoveTimeout : TIME;
     tReadyTimeout : TIME;
+    // Tray回库专用参数，数值只在GVL_MotionConfig初始化。
+    fTrayRecoveryBoundaryTolerance : LREAL;
+    tTrayRecoveryTimeout : TIME;
+    tTrayReleaseConfirmTimeout : TIME;
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

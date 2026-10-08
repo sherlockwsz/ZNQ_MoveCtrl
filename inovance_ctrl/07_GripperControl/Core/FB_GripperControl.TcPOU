@@ -55,6 +55,7 @@ VAR
 	udiLastSeenId    : UDINT; // 防止同一编号每周期重复发送
 	udiActiveId      : UDINT; // 已锁存的本次命令编号
 	eActiveCommand   : E_GripperCommand;
+	bActiveAllowCloseTargetWithoutGrip : BOOL; // 受理时锁存，仅本次Close
 	diActiveTarget   : DINT;  // 命令受理时锁存目标，执行中修改Set不影响本次
 	
 	udRejectCode     : UDINT;
@@ -85,8 +86,12 @@ fbSerialPort(
     stConfig := stSerialConfig,
     aTxBuffer := fbProtocol.aTxBuffer,
     uiTxLength := fbProtocol.uiTxLength,
-    bSend := (eStep = E_GripperCommStep.SendRequest),
-    bAbortTransaction := bSerialAbortTransaction,
+    bSend := (eStep = E_GripperCommStep.SendRequest)
+        AND NOT (bStopRequested AND bWriteActive
+            AND (eActiveCommand = E_GripperCommand.Enable)),
+    bAbortTransaction := bSerialAbortTransaction
+        OR (bStopRequested AND bWriteActive
+            AND (eActiveCommand = E_GripperCommand.Enable)),
     bRxFrameComplete := bSerialFrameComplete,
     bCheckCrc16 := TRUE
 );
@@ -130,6 +135,15 @@ IF NOT bCmdInitialized THEN
     udiLastSeenId := ioGripper.Cmd.udiRequestId;
     bCmdInitialized := TRUE;
 END_IF;
+// 新编号/Stop清除旧结果；授权只能在新Close受理时锁存。
+IF bStopRequested OR (ioGripper.Cmd.udiRequestId <> udiLastSeenId) THEN
+    bActiveAllowCloseTargetWithoutGrip := FALSE;
+    ioGripper.Feedback.bCloseTargetReachedWithoutGrip := FALSE;
+END_IF;
+IF NOT ioGripper.Cmd.bAllowCloseTargetWithoutGrip THEN
+    bActiveAllowCloseTargetWithoutGrip := FALSE;
+END_IF;
+
 // 整机停止只入队一次；当前串口事务结束后，优先发送Stop。
 // 停止请求到来时，取消原Open/Close的完成判定。
 // Stop报文仍由bStopPending排队，在当前串口事务结束后发送。
@@ -144,7 +158,8 @@ IF bStopRequested AND NOT bStopSignalSeen THEN
         OR (bWriteActive
             AND ((eActiveCommand = E_GripperCommand.Open)
               OR (eActiveCommand = E_GripperCommand.Close)
-              OR (eActiveCommand = E_GripperCommand.ResetFault))) THEN
+              OR (eActiveCommand = E_GripperCommand.ResetFault)
+              OR (eActiveCommand = E_GripperCommand.Enable))) THEN
 
         bMoveActive := FALSE;
         bResetActive := FALSE;
@@ -160,6 +175,14 @@ IF bStopRequested AND NOT bStopSignalSeen THEN
         ioGripper.Feedback.bPositionReached := FALSE;
         ioGripper.Feedback.bCurrentReached := FALSE;
         ioGripper.Feedback.udCommandErrorCode := TO_UDINT(E_GripperErrorCode.InterruptedByMachineStop); // 动作被整机停止中断
+    END_IF;
+    IF bWriteActive AND (eActiveCommand = E_GripperCommand.Enable) THEN
+        // 放弃Enable等待，不等其回执才排Stop；旧RequestId已消费，不续跑。
+        bSerialAbortTransaction := TRUE;
+        bSerialFrameComplete := FALSE;
+        bWriteActive := FALSE;
+        nExpectedLen := 0;
+        eStep := E_GripperCommStep.SelectRequest;
     END_IF;
 END_IF;
 bStopSignalSeen := bStopRequested;
@@ -191,6 +214,7 @@ IF NOT bEnableComm OR NOT bPortConfigOk OR NOT fbSerialPort.Runtime.bPortOpened 
 	END_IF;
 	
 	ioGripper.Feedback.bBusy := FALSE;
+	bActiveAllowCloseTargetWithoutGrip := FALSE;
 	bWriteActive := FALSE;
 	bMoveActive := FALSE;
 	bResetActive := FALSE;
@@ -314,6 +338,17 @@ CASE eStep OF
                     udRejectCode := TO_UDINT(E_GripperErrorCode.NotReady);
                 END_IF;
 
+            E_GripperCommand.Enable:
+                // 非位置命令：不检查位置、电流、Grip或MoveTimeout参数。
+                IF ioGripper.Feedback.bBusy THEN
+                    udRejectCode := TO_UDINT(E_GripperErrorCode.Busy);
+                ELSIF NOT ioGripper.Feedback.bOnline
+                    OR ioGripper.Feedback.bCommFault
+                    OR NOT ioGripper.Feedback.bFaultCodeValid
+                    OR ioGripper.Feedback.bFault THEN
+                    udRejectCode := TO_UDINT(E_GripperErrorCode.NotReady);
+                END_IF;
+
             E_GripperCommand.None:
                 udRejectCode := TO_UDINT(E_GripperErrorCode.InvalidCommand);
 
@@ -330,6 +365,10 @@ CASE eStep OF
             bWriteActive := TRUE;
             eActiveCommand := ioGripper.Cmd.eCommand;
             udiActiveId := ioGripper.Cmd.udiRequestId;
+            bActiveAllowCloseTargetWithoutGrip :=
+                ioGripper.Cmd.bAllowCloseTargetWithoutGrip
+                AND (eActiveCommand = E_GripperCommand.Close);
+            ioGripper.Feedback.bCloseTargetReachedWithoutGrip := FALSE;
 
             // Set的目标在受理时锁存，防止发送过程中在线修改。
             IF eActiveCommand = E_GripperCommand.Open THEN
@@ -541,6 +580,16 @@ CASE eStep OF
 							ioGripper.Feedback.udiCompletedId := udiActiveId;
 						END_IF;
 		
+                    E_GripperCommand.Enable:
+                        ioGripper.Feedback.bBusy := FALSE;
+                        IF bStopPending OR bStopRequested THEN
+                            ioGripper.Feedback.udCommandErrorCode := TO_UDINT(E_GripperErrorCode.InterruptedByMachineStop);
+                        ELSE
+                            // 只完成匹配06回执的写事务，不发布物理使能反馈。
+                            ioGripper.Feedback.udCommandErrorCode := TO_UDINT(E_GripperErrorCode.None);
+                            ioGripper.Feedback.udiCompletedId := udiActiveId;
+                        END_IF;
+
 					E_GripperCommand.ResetFault:
 						// 回执仅表示复位写入成功；继续保持Busy，
 						// 直到随后0x603F有效读回且故障码真正清零。
@@ -751,6 +800,11 @@ CASE eStep OF
 							ioGripper.Feedback.udCommandErrorCode := TO_UDINT(E_GripperErrorCode.CommunicationUnavailable);
 						END_IF;
 
+                    E_GripperCommand.Enable:
+                        // 无独立反馈可事后确认；所有通信错误均失败，禁止重发。
+                        ioGripper.Feedback.bBusy := FALSE;
+                        ioGripper.Feedback.udCommandErrorCode := TO_UDINT(E_GripperErrorCode.CommunicationUnavailable);
+
 					E_GripperCommand.ResetFault:
 						IF (uiLastCommErrorReason = TO_UINT(E_GripperCommErrorReason.SendError))
 							OR (uiLastCommErrorReason = TO_UINT(E_GripperCommErrorReason.SerialBlockError)) THEN
@@ -816,7 +870,9 @@ IF bMoveActive THEN
         ioGripper.Feedback.udCommandErrorCode := TO_UDINT(E_GripperErrorCode.DeviceFaultOrResetTimeout);
         bStopPending := fbSerialPort.Runtime.bPortOpened;
 
-    ELSIF fbMoveTimeout.Q THEN
+    // 原普通Open/Close仍在原位置判超时。
+    // 仅显式授权Close先判Grip/到目标的正常结果，再判MotionTimeout。
+    ELSIF fbMoveTimeout.Q AND NOT bActiveAllowCloseTargetWithoutGrip THEN
         bMoveActive := FALSE;
         bGripPositionValid := FALSE;
         bMovePositionFresh := FALSE;
@@ -869,7 +925,7 @@ IF bMoveActive THEN
                     END_IF;
 
                 E_GripperCommand.Close:
-                    // Close成功只依赖Grip Window内的新电流样本连续确认。
+                    // 正常Grip优先，保留原Grip Window及新电流连续确认判据。
                     IF bGripDetected THEN
                         IF ioGripper.Set.bStopAfterGripDetected THEN
                             // 保持Busy，等待内部Stop有效回执后再完成原Close请求。
@@ -887,10 +943,58 @@ IF bMoveActive THEN
                             uiGripConfirmCounter := 0;
                             bGripDetected := FALSE;
                         END_IF;
+                    ELSIF bActiveAllowCloseTargetWithoutGrip
+                        AND NOT bStopRequested
+                        AND NOT bStopPending
+                        AND NOT fbMoveTimeout.Q
+                        AND bMovePositionFresh
+                        AND (ioGripper.Feedback.udiAcceptedId = udiActiveId)
+                        AND (diActiveTarget = ioGripper.Set.diClosePosition)
+                        AND ioGripper.Feedback.bPositionReached THEN
+                        // 机械事实：本次Close新位置反馈到目标，但没有有效Grip。
+                        // Payload先写，CompletedId最后提交；不宣告bClosed。
+                        ioGripper.Feedback.bOpen := FALSE;
+                        ioGripper.Feedback.bClosed := FALSE;
+                        ioGripper.Feedback.bBusy := FALSE;
+                        ioGripper.Feedback.bCloseTargetReachedWithoutGrip := TRUE;
+                        ioGripper.Feedback.udiCompletedId := udiActiveId;
+                        bMoveActive := FALSE;
+                        bGripPositionValid := FALSE;
+                        bMovePositionFresh := FALSE;
+                        bMoveCurrentFresh := FALSE;
+                        uiGripConfirmCounter := 0;
+                        bGripDetected := FALSE;
+                        bGripStopPending := FALSE;
+                        bGripStopActive := FALSE;
+                        bActiveAllowCloseTargetWithoutGrip := FALSE;
                     END_IF;
             END_CASE;
         END_IF;
     END_IF;
+END_IF;
+
+// 仅授权Close延后至正常结果判定之后检查超时；未到目标仍是原故障。
+IF bMoveActive AND bActiveAllowCloseTargetWithoutGrip AND fbMoveTimeout.Q THEN
+    bMoveActive := FALSE;
+    bGripPositionValid := FALSE;
+    bMovePositionFresh := FALSE;
+    bMoveCurrentFresh := FALSE;
+    uiGripConfirmCounter := 0;
+    bGripDetected := FALSE;
+    bGripStopPending := FALSE;
+    ioGripper.Feedback.bBusy := FALSE;
+    ioGripper.Feedback.udCommandErrorCode := TO_UDINT(E_GripperErrorCode.MotionTimeout);
+    bStopPending := fbSerialPort.Runtime.bPortOpened;
+END_IF;
+
+// 成功/错误/禁用后的授权不跨事务保留；特殊结果只随CompletedId保持。
+IF NOT bMoveActive AND NOT bWriteActive
+    AND NOT bGripStopPending AND NOT bGripStopActive THEN
+    bActiveAllowCloseTargetWithoutGrip := FALSE;
+END_IF;
+IF ioGripper.Feedback.udCommandErrorCode <> TO_UDINT(E_GripperErrorCode.None) THEN
+    bActiveAllowCloseTargetWithoutGrip := FALSE;
+    ioGripper.Feedback.bCloseTargetReachedWithoutGrip := FALSE;
 END_IF;
 
 // 故障复位必须由0x603F的有效反馈确认，不能把写回执当作复位完成。
@@ -919,7 +1023,8 @@ VAR_IN_OUT
     stFeedback : ST_GripperFeedback;
 END_VAR</Declaration>
       <Implementation>
-        <ST>stFeedback.bPositionValid := FALSE;
+        <ST>stFeedback.bCloseTargetReachedWithoutGrip := FALSE;
+stFeedback.bPositionValid := FALSE;
 stFeedback.bCurrentValid := FALSE;
 stFeedback.bFaultCodeValid := FALSE;
 stFeedback.bOpen := FALSE;

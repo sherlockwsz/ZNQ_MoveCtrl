@@ -43,6 +43,13 @@ STRUCT
 
     tReadyTimeout      : TIME;
     tMotionTimeout     : TIME;
+    // 仅传输既有配置源，不设置第二套默认数值。
+    fTrayRackStationX : LREAL;
+    aTrayLayer : ARRAY[1..5] OF ST_TrayLayerPositionConfig;
+    fTrayRecoveryBoundaryTolerance : LREAL;
+    tTrayRecoveryTimeout : TIME;
+    tTrayReleaseConfirmTimeout : TIME;
+    tTrayDetectStable : TIME;
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>

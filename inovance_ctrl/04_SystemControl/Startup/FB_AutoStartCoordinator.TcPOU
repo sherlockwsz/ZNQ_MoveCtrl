@@ -25,12 +25,12 @@ VAR_IN_OUT
 END_VAR
 
 VAR_OUTPUT
-    bTrayPlanRequest : BOOL;  // 启动前预检查；成功后保持至批次结束
-    bTrayPlanChecking : BOOL; // 仅诊断/Busy，不代表轴使能
+    bTrayPlanRequest : BOOL;  // 准备后建立正式Plan；成功后保持至批次结束
+    bTrayPlanChecking : BOOL; // 准备后的Plan检查；保持已准备轴使能
     bEnableAxes      : BOOL;  // MAIN 据此请求自动流程涉及的轴使能
     bProcessStart    : BOOL;  // 全部就绪后保持 TRUE，直到完成或中止
     bEnabling        : BOOL;  // 正在等待轴使能、就绪
-    bStartRejected   : BOOL;  // 尚未发使能时，启动条件不满足
+    bStartRejected   : BOOL;  // 启动拒绝；准备后全无盘也沿用此语义
     bError           : BOOL;  // 启动阶段故障，保持供诊断
     bErrorPulse      : BOOL;  // 单周期脉冲，交给现有 Stop 链路
     bTimeout         : BOOL;
@@ -104,8 +104,8 @@ ELSE
                     END_FOR;
 
                     IF NOT bStartRejected THEN
-                        // Auto启动前Tray计划预检查，尚不使能、不请求整机准备。
-                        eStep := E_AutoStartStep.WaitTrayPlan;
+                        // 基础准入后先使能、整机准备；此时绝不建立正式Plan。
+                        eStep := E_AutoStartStep.WaitAxesReady;
                     END_IF;
                 END_IF;
             END_IF;
@@ -113,7 +113,7 @@ ELSE
         E_AutoStartStep.WaitTrayPlan:
             IF NOT bHmiOnline OR NOT bControlAllowed
                 OR bGripperActionFault OR NOT bGripperReady THEN
-                // 准入检查期间条件失效，尚无自动运动，沿用启动拒绝。
+                // 准备后只检查Plan，条件失效沿用启动拒绝。
                 bStartRejected := TRUE;
                 uiErrorCode := TO_UINT(E_AutoStartErrorCode.StartConditionLost);
                 eStep := E_AutoStartStep.Idle;
@@ -124,7 +124,7 @@ ELSE
                     uiErrorCode := TO_UINT(E_AutoStartErrorCode.NoTrayAvailable);
                     eStep := E_AutoStartStep.Idle;
                 ELSIF bTrayPlanValid AND bTrayPlanLocked THEN
-                    eStep := E_AutoStartStep.WaitAxesReady;
+                    eStep := E_AutoStartStep.Running;
                 END_IF;
             END_IF; // StableValid未全部成立时继续等待，不新增超时。
 
@@ -185,7 +185,7 @@ ELSE
 				eStep := E_AutoStartStep.Idle;
 		
 			ELSIF bMachinePreparationDone THEN
-				eStep := E_AutoStartStep.Running;
+				eStep := E_AutoStartStep.WaitTrayPlan;
 			END_IF;
 
         E_AutoStartStep.Running: // 保持启动许可；现有流程 FB 自己锁存 bStart 上升沿
@@ -205,13 +205,13 @@ END_IF;
 // 根据本周期最终状态发布输出；Stop 时三个输出立即撤销。
 // 计划请求贯穿本轮生命周期，Tray据此冻结/释放唯一计划。
 bTrayPlanChecking := (eStep = E_AutoStartStep.WaitTrayPlan);
+// Preparation之前保持FALSE；唯一计划仅在准备完成后建立。
 bTrayPlanRequest := bTrayPlanChecking
-    OR (eStep = E_AutoStartStep.WaitAxesReady)
-    OR (eStep = E_AutoStartStep.WaitMachinePreparation)
     OR (eStep = E_AutoStartStep.Running);
 
 bEnabling :=
-    (eStep = E_AutoStartStep.WaitAxesReady)
+    bTrayPlanChecking
+    OR (eStep = E_AutoStartStep.WaitAxesReady)
     OR
     (eStep = E_AutoStartStep.WaitMachinePreparation);
 

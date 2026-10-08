@@ -6,6 +6,7 @@ VAR_INPUT
     bExecute       : BOOL;
     eCommand       : E_GripperCommand;
     bCancel        : BOOL;
+    bAllowCloseTargetWithoutGrip : BOOL := FALSE;
     tAcceptTimeout : TIME := GVL_ProcessConfig.stGripper.tAcceptTimeout;
     tResultTimeout : TIME := GVL_ProcessConfig.stGripper.tResultTimeout;
 END_VAR
@@ -15,6 +16,7 @@ END_VAR
 VAR_OUTPUT
     bBusy       : BOOL;
     bDone       : BOOL;
+    bCloseTargetReachedWithoutGrip : BOOL;
     bError      : BOOL;
     udErrorCode : UDINT;
     udiActionId : UDINT;
@@ -24,6 +26,7 @@ VAR
     bInitialized     : BOOL;
     bExecutePrevious : BOOL;
     eActiveCommand   : E_GripperCommand;
+    bActiveAllowCloseTargetWithoutGrip : BOOL;
     fbAcceptTimeout  : TON;
     fbResultTimeout  : TON;
 END_VAR]]></Declaration>
@@ -32,6 +35,13 @@ END_VAR]]></Declaration>
 IF NOT bInitialized THEN
     bExecutePrevious := bExecute;
     bInitialized := TRUE;
+END_IF;
+
+// 取消/释放只撤销特殊完成授权，不改变既有Stop/Fault链。
+IF bCancel OR NOT bExecute THEN
+    ioGripper.AutoCmd.bAllowCloseTargetWithoutGrip := FALSE;
+    bActiveAllowCloseTargetWithoutGrip := FALSE;
+    bCloseTargetReachedWithoutGrip := FALSE;
 END_IF;
 
 fbAcceptTimeout(
@@ -59,17 +69,25 @@ CASE eStep OF
     E_GripperActionStep.Idle:
         bBusy := FALSE;
         bDone := FALSE;
+        bCloseTargetReachedWithoutGrip := FALSE;
+        bActiveAllowCloseTargetWithoutGrip := FALSE;
         bError := FALSE;
         udErrorCode := TO_UDINT(E_GripperErrorCode.None);
 
         IF bExecute AND NOT bExecutePrevious AND NOT bCancel THEN
             IF (eCommand &lt;&gt; E_GripperCommand.Close)
-                AND (eCommand &lt;&gt; E_GripperCommand.Open) THEN
+                AND (eCommand &lt;&gt; E_GripperCommand.Open)
+                AND (eCommand &lt;&gt; E_GripperCommand.Enable) THEN
                 bError := TRUE;
                 udErrorCode := TO_UDINT(E_GripperErrorCode.ActionInvalidCommand);
                 eStep := E_GripperActionStep.Error;
             ELSE
                 eActiveCommand := eCommand;
+                bActiveAllowCloseTargetWithoutGrip :=
+                    bAllowCloseTargetWithoutGrip
+                    AND (eActiveCommand = E_GripperCommand.Close);
+                ioGripper.AutoCmd.bAllowCloseTargetWithoutGrip :=
+                    bActiveAllowCloseTargetWithoutGrip;
                 ioGripper.AutoCmd.eCommand := eActiveCommand;
                 IF ioGripper.AutoCmd.udiRequestId = 16#FFFFFFFF THEN
                     ioGripper.AutoCmd.udiRequestId := 1;
@@ -119,8 +137,15 @@ CASE eStep OF
             END_IF;
             eStep := E_GripperActionStep.Error;
         ELSIF ioGripper.AutoFeedback.udiCompletedId = udiActionId THEN
-            IF ioGripper.State.bHealthy THEN
+            IF ioGripper.State.bHealthy
+                AND ((eActiveCommand &lt;&gt; E_GripperCommand.Enable)
+                    OR (ioGripper.AutoFeedback.udErrorCode = TO_UDINT(E_GripperErrorCode.None)))
+                AND ((eActiveCommand = E_GripperCommand.Enable)
+                    OR NOT ioGripper.AutoFeedback.bCloseTargetReachedWithoutGrip
+                    OR bActiveAllowCloseTargetWithoutGrip) THEN
                 bBusy := FALSE;
+                bCloseTargetReachedWithoutGrip :=
+                    ioGripper.AutoFeedback.bCloseTargetReachedWithoutGrip;
                 bDone := TRUE;
                 eStep := E_GripperActionStep.Done;
             ELSE
@@ -152,11 +177,20 @@ CASE eStep OF
     E_GripperActionStep.Error:
         bBusy := FALSE;
         bError := TRUE;
+        bCloseTargetReachedWithoutGrip := FALSE;
+        bActiveAllowCloseTargetWithoutGrip := FALSE;
+        ioGripper.AutoCmd.bAllowCloseTargetWithoutGrip := FALSE;
         IF NOT bExecute THEN
             bError := FALSE;
             eStep := E_GripperActionStep.Idle;
         END_IF;
 END_CASE;
+
+IF bError THEN
+    bCloseTargetReachedWithoutGrip := FALSE;
+    bActiveAllowCloseTargetWithoutGrip := FALSE;
+    ioGripper.AutoCmd.bAllowCloseTargetWithoutGrip := FALSE;
+END_IF;
 
 bExecutePrevious := bExecute;</ST>
     </Implementation>

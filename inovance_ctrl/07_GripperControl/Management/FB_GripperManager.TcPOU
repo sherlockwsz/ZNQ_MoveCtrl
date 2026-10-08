@@ -8,6 +8,7 @@ VAR_INPUT
     bStopRequested  : BOOL;
     bControlAllowed : BOOL;
     eMachineMode    : E_MachineMode;
+    bRecoveryEnableAllowed : BOOL := FALSE; // 仅MAIN本扫描提交内部恢复Enable时授权
 END_VAR
 VAR_IN_OUT
     ioGripper : ST_GripperInterface;
@@ -64,6 +65,21 @@ bAutoParametersValid :=
     AND (ioGripper.Set.tFeedbackTimeout > T#0MS)
     AND (ioGripper.Set.tMoveTimeout > T#0MS);
 
+// 特殊结果与当前通道事务绑定；新编号和Stop不得继承上一结果。
+IF bNewManual OR bStopRequested THEN
+    ioGripper.ManualFeedback.bCloseTargetReachedWithoutGrip := FALSE;
+END_IF;
+IF bNewAuto OR bStopRequested THEN
+    ioGripper.AutoFeedback.bCloseTargetReachedWithoutGrip := FALSE;
+END_IF;
+// Action取消/释放后撤销底层授权；不为此生成新命令或改动所有权。
+IF (eActiveOwner = E_GripperControlOwner.Auto)
+    AND (NOT ioGripper.AutoCmd.bAllowCloseTargetWithoutGrip
+        OR (eMachineMode <> E_MachineMode.Automatic)
+        OR bStopRequested) THEN
+    ioGripper.Cmd.bAllowCloseTargetWithoutGrip := FALSE;
+END_IF;
+
 // Stop到来时，当前来源动作立即以“被停止中断”结束。
 IF bStopRequested AND (eActiveOwner <> E_GripperControlOwner.None) THEN
     CASE eActiveOwner OF
@@ -114,11 +130,15 @@ THEN
             ioGripper.AutoFeedback.udiRejectedId := ioGripper.AutoCmd.udiRequestId;
             ioGripper.AutoFeedback.udErrorCode := TO_UDINT(E_GripperErrorCode.Busy);
         ELSIF (ioGripper.AutoCmd.eCommand <> E_GripperCommand.Open)
-            AND (ioGripper.AutoCmd.eCommand <> E_GripperCommand.Close) THEN
+            AND (ioGripper.AutoCmd.eCommand <> E_GripperCommand.Close)
+            AND NOT ((eMachineMode = E_MachineMode.Preparing)
+                AND (ioGripper.AutoCmd.eCommand = E_GripperCommand.Enable)) THEN
             ioGripper.AutoFeedback.udiRejectedId := ioGripper.AutoCmd.udiRequestId;
             ioGripper.AutoFeedback.udErrorCode := TO_UDINT(E_GripperErrorCode.InvalidCommand);
         ELSIF NOT bSimulationMode
-            AND (NOT bHealthy OR NOT bAutoParametersValid) THEN
+            AND (NOT bHealthy
+                OR ((ioGripper.AutoCmd.eCommand <> E_GripperCommand.Enable)
+                    AND NOT bAutoParametersValid)) THEN
             ioGripper.AutoFeedback.udiRejectedId := ioGripper.AutoCmd.udiRequestId;
             ioGripper.AutoFeedback.udErrorCode := TO_UDINT(E_GripperErrorCode.NotReady);
         ELSE
@@ -143,9 +163,20 @@ ELSIF (eMachineMode = E_MachineMode.Manual)
             ioGripper.ManualFeedback.udErrorCode := TO_UDINT(E_GripperErrorCode.Busy);
         ELSIF (eMachineMode = E_MachineMode.Fault)
             AND (ioGripper.ManualCmd.eCommand <> E_GripperCommand.ResetFault)
-            AND (ioGripper.ManualCmd.eCommand <> E_GripperCommand.Stop) THEN
+            AND (ioGripper.ManualCmd.eCommand <> E_GripperCommand.Stop)
+            AND NOT (bRecoveryEnableAllowed
+                AND (ioGripper.ManualCmd.eCommand = E_GripperCommand.Enable)) THEN
             ioGripper.ManualFeedback.udiRejectedId := ioGripper.ManualCmd.udiRequestId;
             ioGripper.ManualFeedback.udErrorCode := TO_UDINT(E_GripperErrorCode.FaultModeCommandForbidden);
+        ELSIF (ioGripper.ManualCmd.eCommand = E_GripperCommand.Enable)
+            AND NOT bRecoveryEnableAllowed THEN
+            // Enable只属于内部整机恢复，不开放为普通HMI手动能力。
+            ioGripper.ManualFeedback.udiRejectedId := ioGripper.ManualCmd.udiRequestId;
+            ioGripper.ManualFeedback.udErrorCode := TO_UDINT(E_GripperErrorCode.ControlForbiddenInCurrentMode);
+        ELSIF (ioGripper.ManualCmd.eCommand = E_GripperCommand.Enable)
+            AND NOT bHealthy THEN
+            ioGripper.ManualFeedback.udiRejectedId := ioGripper.ManualCmd.udiRequestId;
+            ioGripper.ManualFeedback.udErrorCode := TO_UDINT(E_GripperErrorCode.NotReady);
         ELSIF (ioGripper.ManualCmd.eCommand = E_GripperCommand.None) THEN
             ioGripper.ManualFeedback.udiRejectedId := ioGripper.ManualCmd.udiRequestId;
             ioGripper.ManualFeedback.udErrorCode := TO_UDINT(E_GripperErrorCode.InvalidCommand);
@@ -176,10 +207,12 @@ IF bIssueCommand THEN
         // 仿真只完成管理通道握手，不伪造物理位置、电流或在线反馈。
         CASE eIssueOwner OF
             E_GripperControlOwner.Manual:
+                ioGripper.ManualFeedback.bCloseTargetReachedWithoutGrip := FALSE;
                 ioGripper.ManualFeedback.udiAcceptedId := udiIssueSourceId;
                 ioGripper.ManualFeedback.udiCompletedId := udiIssueSourceId;
                 ioGripper.ManualFeedback.udErrorCode := TO_UDINT(E_GripperErrorCode.None);
             E_GripperControlOwner.Auto:
+                ioGripper.AutoFeedback.bCloseTargetReachedWithoutGrip := FALSE;
                 ioGripper.AutoFeedback.udiAcceptedId := udiIssueSourceId;
                 ioGripper.AutoFeedback.udiCompletedId := udiIssueSourceId;
                 ioGripper.AutoFeedback.udErrorCode := TO_UDINT(E_GripperErrorCode.None);
@@ -190,6 +223,14 @@ IF bIssueCommand THEN
         ELSE
             udiDeviceRequestId := udiDeviceRequestId + 1;
         END_IF;
+        // 只透明传递实机COM3正式自动Close的显式授权。
+        // Manual、Preparation、COM4及非Close始终关闭。
+        ioGripper.Cmd.bAllowCloseTargetWithoutGrip :=
+            (eIssueOwner = E_GripperControlOwner.Auto)
+            AND (eMachineMode = E_MachineMode.Automatic)
+            AND (ioGripper.Port.ComPort = 3)
+            AND (eIssueCommand = E_GripperCommand.Close)
+            AND ioGripper.AutoCmd.bAllowCloseTargetWithoutGrip;
         ioGripper.Cmd.eCommand := eIssueCommand;
         ioGripper.Cmd.udiRequestId := udiDeviceRequestId;
         udiActiveDeviceId := udiDeviceRequestId;
@@ -253,6 +294,8 @@ IF NOT bSimulationMode AND (eActiveOwner <> E_GripperControlOwner.None) THEN
             ELSIF (ioGripper.Feedback.udiCompletedId = udiActiveDeviceId)
                 AND (ioGripper.Feedback.udCommandErrorCode = TO_UDINT(E_GripperErrorCode.None)) THEN
                 ioGripper.AutoFeedback.bBusy := FALSE;
+                ioGripper.AutoFeedback.bCloseTargetReachedWithoutGrip :=
+                    ioGripper.Feedback.bCloseTargetReachedWithoutGrip;
                 ioGripper.AutoFeedback.udiCompletedId := udiActiveSourceId;
                 ioGripper.AutoFeedback.udErrorCode := TO_UDINT(E_GripperErrorCode.None);
                 eActiveOwner := E_GripperControlOwner.None;
@@ -260,6 +303,7 @@ IF NOT bSimulationMode AND (eActiveOwner <> E_GripperControlOwner.None) THEN
                 AND NOT ioGripper.Feedback.bBusy
                 AND (ioGripper.Feedback.udCommandErrorCode <> TO_UDINT(E_GripperErrorCode.None)) THEN
                 ioGripper.AutoFeedback.bBusy := FALSE;
+                ioGripper.AutoFeedback.bCloseTargetReachedWithoutGrip := FALSE;
                 ioGripper.AutoFeedback.udiFailedId := udiActiveSourceId;
                 ioGripper.AutoFeedback.udErrorCode := ioGripper.Feedback.udCommandErrorCode;
                 eActiveOwner := E_GripperControlOwner.None;
@@ -268,6 +312,7 @@ IF NOT bSimulationMode AND (eActiveOwner <> E_GripperControlOwner.None) THEN
 END_IF;
 
 IF eActiveOwner = E_GripperControlOwner.None THEN
+    ioGripper.Cmd.bAllowCloseTargetWithoutGrip := FALSE;
     eActiveCommand := E_GripperCommand.None;
 END_IF;
 

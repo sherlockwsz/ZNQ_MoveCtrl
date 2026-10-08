@@ -9,7 +9,8 @@ TYPE E_GripperCommand :
     Open       := 1,    // 运动至张开绝对位置
     Close      := 2,    // 运动至夹紧绝对位置
     Stop       := 3,    // 停止当前运动
-    ResetFault := 4     // 故障复位
+    ResetFault := 4,    // 故障复位
+    Enable     := 5     // 上使能写事务
 );
 END_TYPE]]></Declaration>
   </DUT>

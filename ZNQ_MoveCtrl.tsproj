@@ -3294,18 +3294,11 @@ External Setpoint Generation:
 		</Motion>
 		<Plc>
 			<Project GUID="{EA67B656-2FC5-4A9C-A62D-78AA627F7844}" Name="inovance_ctrl" PrjFilePath="inovance_ctrl\inovance_ctrl.plcproj" TmcFilePath="inovance_ctrl\inovance_ctrl.tmc" ReloadTmc="true" AmsPort="851" FileArchiveSettings="#x000e" SymbolicMapping="true">
-				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcHash="{DAC325BE-CE39-118A-0B4B-F96823E9C487}" TmcPath="inovance_ctrl\inovance_ctrl.tmc">
+				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcHash="{F36CE719-C9BC-1EDA-7116-66BD0AC35095}" TmcPath="inovance_ctrl\inovance_ctrl.tmc">
 					<Name>inovance_ctrl Instance</Name>
 					<CLSID ClassFactory="TcPlc30">{08500001-0000-0000-F000-000000000064}</CLSID>
 					<Vars VarGrpType="2" AreaNo="1">
 						<Name>PlcTask Outputs</Name>
-						<Var>
-							<Name>GVL_ClampingPdo.udiMaxProfileVelocity</Name>
-							<Comment><![CDATA[ SV680N 1702h 输出: 607Fh 最大轮廓速度，单位为驱动器指令单位/s。
- 手册默认 4294967295，表示此 PDO 初始不额外限制速度。
- 真实转矩控制联调前必须根据机械行程单独设定合理速度限制。]]></Comment>
-							<Type>UDINT</Type>
-						</Var>
 						<Var>
 							<Name>GVL_IO_Raw.aEL2008_01</Name>
 							<Comment><![CDATA[ =========================================================
@@ -3374,24 +3367,16 @@ External Setpoint Generation:
 							<Name>GVL_AxisRef.AxisRefs[14].PlcToNc</Name>
 							<Type GUID="{96B75FEB-2D84-43BE-A3EC-D9A681F27D52}" Namespace="MC">PLCTONC_AXIS_REF</Type>
 						</Var>
+						<Var>
+							<Name>GVL_ClampingPdo.udiMaxProfileVelocity</Name>
+							<Comment><![CDATA[ SV680N 1702h 输出: 607Fh 最大轮廓速度，单位为驱动器指令单位/s。
+ 手册默认 4294967295，表示此 PDO 初始不额外限制速度。
+ 真实转矩控制联调前必须根据机械行程单独设定合理速度限制。]]></Comment>
+							<Type>UDINT</Type>
+						</Var>
 					</Vars>
 					<Vars VarGrpType="1">
 						<Name>PlcTask Inputs</Name>
-						<Var>
-							<Name>GVL_ClampingPdo.i8ModeOfOperationDisplay</Name>
-							<Comment><![CDATA[ SV680N 1B01h 输入: 6061h真实运行模式，仅用于Clamping模式确认。
- 8=CSP，10=CST；准备和位置运动必须确认值为8。]]></Comment>
-							<Type>SINT</Type>
-						</Var>
-						<Var>
-							<Name>GVL_ClampingPdo.uiErrorCode</Name>
-							<Comment><![CDATA[ SV680N 1B02h 输入: 603Fh 故障码及 60FDh DI 状态，仅供诊断。]]></Comment>
-							<Type>UINT</Type>
-						</Var>
-						<Var>
-							<Name>GVL_ClampingPdo.udiDigitalInputs</Name>
-							<Type>UDINT</Type>
-						</Var>
 						<Var>
 							<Name>GVL_IO_Raw.aEL1008_01</Name>
 							<Comment><![CDATA[ =========================================================
@@ -3407,6 +3392,21 @@ External Setpoint Generation:
 						<Var>
 							<Name>GVL_IO_Raw.aEL1008_03</Name>
 							<Type GUID="{71B58F72-0E49-50EB-B8E4-1CCD027538EC}">ARRAY [1..8] OF BOOL</Type>
+						</Var>
+						<Var>
+							<Name>GVL_ClampingPdo.i8ModeOfOperationDisplay</Name>
+							<Comment><![CDATA[ SV680N 1B01h 输入: 6061h真实运行模式，仅用于Clamping模式确认。
+ 8=CSP，10=CST；准备和位置运动必须确认值为8。]]></Comment>
+							<Type>SINT</Type>
+						</Var>
+						<Var>
+							<Name>GVL_ClampingPdo.uiErrorCode</Name>
+							<Comment><![CDATA[ SV680N 1B02h 输入: 603Fh 故障码及 60FDh DI 状态，仅供诊断。]]></Comment>
+							<Type>UINT</Type>
+						</Var>
+						<Var>
+							<Name>GVL_ClampingPdo.udiDigitalInputs</Name>
+							<Type>UDINT</Type>
 						</Var>
 						<Var>
 							<Name>GVL_AxisRef.AxisRefs[1].NcToPlc</Name>
@@ -8304,11 +8304,11 @@ External Setpoint Generation:
 		</Io>
 	</Project>
 	<Mappings>
-		<MappingInfo Identifier="{00000000-2001-0850-0020-500841000403}" Id="#x02030020"/>
+		<MappingInfo Identifier="{00000000-2001-0850-0020-500841000403}" Id="#x02030030"/>
 		<MappingInfo Identifier="{00000000-0020-0304-1000-040320000403}" Id="#x02030010"/>
 		<MappingInfo Identifier="{00000000-0030-0304-1000-040332000403}" Id="#x02030040"/>
-		<MappingInfo Identifier="{08502001-0020-0304-0020-500820000403}" Id="#x02030050" Watchdog="00000000000000000000000000000000"/>
-		<MappingInfo Identifier="{05000010-2001-0850-1000-040300205008}" Id="#x02030030" Watchdog="14000000040000000400000004000000"/>
+		<MappingInfo Identifier="{08502001-0020-0304-0020-500820000403}" Id="#x02030020" Watchdog="00000000000000000000000000000000"/>
+		<MappingInfo Identifier="{05000010-2001-0850-1000-040300205008}" Id="#x02030050" Watchdog="14000000040000000400000004000000"/>
 		<OwnerA Name="TINC^Servo SAF^Axes^AdjustmentX">
 			<OwnerB Name="TIID^设备 1 (EtherCAT)^驱动器 17 (InoSV670N)">
 				<Link VarA="Drive^输入^In^nDataIn1" VarB="Inputs^Following error actual value"/>

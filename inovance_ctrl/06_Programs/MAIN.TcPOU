@@ -115,6 +115,12 @@ VAR
     aMachineRecoveryResetIssued : ARRAY[1..GVL_Constants.cMaxAxisCount] OF BOOL;
     udiRecoveryDamperGripperId : UDINT;
     udiRecoveryAdjustGripperId : UDINT;
+    udiRecoveryDamperGripperEnableId : UDINT;
+    udiRecoveryAdjustGripperEnableId : UDINT;
+    bRecoveryDamperGripperResetDone : BOOL;
+    bRecoveryAdjustGripperResetDone : BOOL;
+    bRecoveryDamperEnableAllowed : BOOL;
+    bRecoveryAdjustEnableAllowed : BOOL;
     bRecoveryDamperGripperRequired : BOOL;
     bRecoveryAdjustGripperRequired : BOOL;
 	bMachineFault : BOOL;
@@ -263,12 +269,22 @@ IF bMachineRecoverySourceResetPulse THEN
     bMachineRecoveryPending := TRUE;
     udiRecoveryDamperGripperId := 0;
     udiRecoveryAdjustGripperId := 0;
+    udiRecoveryDamperGripperEnableId := 0;
+    udiRecoveryAdjustGripperEnableId := 0;
+    bRecoveryDamperGripperResetDone := FALSE;
+    bRecoveryAdjustGripperResetDone := FALSE;
     bRecoveryDamperGripperRequired :=
-        (eMachineFaultSource = E_MachineFaultSource.DamperGripper)
+        (NOT GVL_DamperGripper.stDamperGripper.State.bSimulationActive
+            AND GVL_DamperGripper.stDamperGripper.Feedback.bFaultCodeValid
+            AND GVL_DamperGripper.stDamperGripper.Feedback.bFault)
+        OR (eMachineFaultSource = E_MachineFaultSource.DamperGripper)
         OR ((eMachineFaultSource = E_MachineFaultSource.MachinePreparation)
             AND (udiMachineFaultCode = TO_UDINT(E_MachinePreparationErrorCode.GripperOpenFailed)));
     bRecoveryAdjustGripperRequired :=
-        (eMachineFaultSource = E_MachineFaultSource.AdjustGripper)
+        (NOT GVL_DamperGripper.stAdjustGripper.State.bSimulationActive
+            AND GVL_DamperGripper.stAdjustGripper.Feedback.bFaultCodeValid
+            AND GVL_DamperGripper.stAdjustGripper.Feedback.bFault)
+        OR (eMachineFaultSource = E_MachineFaultSource.AdjustGripper)
         OR ((eMachineFaultSource = E_MachineFaultSource.MachinePreparation)
             AND (udiMachineFaultCode = TO_UDINT(E_MachinePreparationErrorCode.AdjustGripperCloseFailed)));
     FOR uiAxisIndex := 1 TO GVL_Constants.cMaxAxisCount DO
@@ -501,6 +517,12 @@ bPreparationStartRequest :=
 
 stPreparationConfig.fTrayXStandby := GVL_PositionConfig.stTray.fLiftStationX;
 stPreparationConfig.fTrayZStandby := GVL_PositionConfig.stTray.fStandbyZ;
+stPreparationConfig.fTrayRackStationX := GVL_PositionConfig.stTray.fRackStationX;
+stPreparationConfig.aTrayLayer := GVL_PositionConfig.stTray.aLayer;
+stPreparationConfig.fTrayRecoveryBoundaryTolerance := GVL_MotionConfig.stPreparation.fTrayRecoveryBoundaryTolerance;
+stPreparationConfig.tTrayRecoveryTimeout := GVL_MotionConfig.stPreparation.tTrayRecoveryTimeout;
+stPreparationConfig.tTrayReleaseConfirmTimeout := GVL_MotionConfig.stPreparation.tTrayReleaseConfirmTimeout;
+stPreparationConfig.tTrayDetectStable := GVL_ProcessConfig.stTray.tLevelDetectStable;
 stPreparationConfig.fDamperXStandby := GVL_PositionConfig.stDamper.stGrid.stOrigin.X + GVL_PositionConfig.stDamper.stGrid.aSlotOffset[1, 1].X;
 stPreparationConfig.fDamperYStandby := GVL_PositionConfig.stDamper.stGrid.stOrigin.Y + GVL_PositionConfig.stDamper.stGrid.aSlotOffset[1, 1].Y;
 stPreparationConfig.fDamperZStandby := GVL_PositionConfig.stDamper.fSafeZ;
@@ -678,43 +700,121 @@ bAdjustGripperRequired :=
 // 本周期产生的COM3/转台故障可在本周期进入Stop首扫覆盖。
 // ============================================================
 
-// 夹爪恢复复用已有ManualCmd/Manager事务；PLC统一发ResetFault，WPF只发整机请求。
-IF bMachineRecoveryPending AND NOT bAbortProcesses AND NOT fbAutoStopManager.bBusy THEN
+// 夹爪恢复复用已有ManualCmd/Manager事务；仅恢复Fault/Enable，不发位置动作。
+bRecoveryDamperEnableAllowed := FALSE;
+bRecoveryAdjustEnableAllowed := FALSE;
+IF bMachineRecoveryPending AND NOT bStopRequestRaw
+    AND NOT bAbortProcesses AND NOT fbAutoStopManager.bBusy THEN
+    // Damper：ResetFault与Enable用不同编号；Reset结果在发Enable前锁存。
+    IF NOT bRecoveryDamperGripperRequired THEN
+        bRecoveryDamperGripperResetDone := GVL_DamperGripper.stDamperGripper.State.bHealthy;
+    ELSIF (udiRecoveryDamperGripperId <> 0)
+        AND (GVL_DamperGripper.stDamperGripper.ManualFeedback.udiAcceptedId = udiRecoveryDamperGripperId)
+        AND (GVL_DamperGripper.stDamperGripper.ManualFeedback.udiCompletedId = udiRecoveryDamperGripperId)
+        AND (GVL_DamperGripper.stDamperGripper.ManualFeedback.udErrorCode = TO_UDINT(E_GripperErrorCode.None))
+        AND GVL_DamperGripper.stDamperGripper.State.bHealthy THEN
+        bRecoveryDamperGripperResetDone := TRUE;
+    END_IF;
+
     IF bRecoveryDamperGripperRequired AND (udiRecoveryDamperGripperId = 0)
+        AND NOT GVL_DamperGripper.stDamperGripper.State.bBusy
         AND NOT GVL_DamperGripper.stDamperGripper.Feedback.bBusy
         AND NOT GVL_DamperGripper.stDamperGripper.ManualFeedback.bBusy
         AND GVL_DamperGripper.stDamperGripper.State.bCommunicationReady THEN
         GVL_DamperGripper.stDamperGripper.ManualCmd.eCommand := E_GripperCommand.ResetFault;
-        GVL_DamperGripper.stDamperGripper.ManualCmd.udiRequestId :=
-            GVL_DamperGripper.stDamperGripper.ManualCmd.udiRequestId + 1;
-        IF GVL_DamperGripper.stDamperGripper.ManualCmd.udiRequestId = 0 THEN
+        IF GVL_DamperGripper.stDamperGripper.ManualCmd.udiRequestId = 16#FFFFFFFF THEN
             GVL_DamperGripper.stDamperGripper.ManualCmd.udiRequestId := 1;
+        ELSE
+            GVL_DamperGripper.stDamperGripper.ManualCmd.udiRequestId := GVL_DamperGripper.stDamperGripper.ManualCmd.udiRequestId + 1;
         END_IF;
         udiRecoveryDamperGripperId := GVL_DamperGripper.stDamperGripper.ManualCmd.udiRequestId;
+    ELSIF bRecoveryDamperGripperResetDone AND (udiRecoveryDamperGripperEnableId = 0)
+        AND GVL_DamperGripper.stDamperGripper.State.bHealthy
+        AND (GVL_DamperGripper.stDamperGripper.State.bSimulationActive
+            OR (GVL_DamperGripper.stDamperGripper.Feedback.bFaultCodeValid AND NOT GVL_DamperGripper.stDamperGripper.Feedback.bFault))
+        AND NOT GVL_DamperGripper.stDamperGripper.State.bBusy
+        AND NOT GVL_DamperGripper.stDamperGripper.Feedback.bBusy
+        AND NOT GVL_DamperGripper.stDamperGripper.ManualFeedback.bBusy THEN
+        GVL_DamperGripper.stDamperGripper.ManualCmd.eCommand := E_GripperCommand.Enable;
+        IF GVL_DamperGripper.stDamperGripper.ManualCmd.udiRequestId = 16#FFFFFFFF THEN
+            GVL_DamperGripper.stDamperGripper.ManualCmd.udiRequestId := 1;
+        ELSE
+            GVL_DamperGripper.stDamperGripper.ManualCmd.udiRequestId := GVL_DamperGripper.stDamperGripper.ManualCmd.udiRequestId + 1;
+        END_IF;
+        udiRecoveryDamperGripperEnableId := GVL_DamperGripper.stDamperGripper.ManualCmd.udiRequestId;
+        // 只给本扫描由MAIN写入的Enable授权；普通HMI请求无此许可。
+        bRecoveryDamperEnableAllowed := TRUE;
     END_IF;
+    // Adjust：ResetFault与Enable用不同编号；Reset结果在发Enable前锁存。
+    IF NOT bRecoveryAdjustGripperRequired THEN
+        bRecoveryAdjustGripperResetDone := GVL_DamperGripper.stAdjustGripper.State.bHealthy;
+    ELSIF (udiRecoveryAdjustGripperId <> 0)
+        AND (GVL_DamperGripper.stAdjustGripper.ManualFeedback.udiAcceptedId = udiRecoveryAdjustGripperId)
+        AND (GVL_DamperGripper.stAdjustGripper.ManualFeedback.udiCompletedId = udiRecoveryAdjustGripperId)
+        AND (GVL_DamperGripper.stAdjustGripper.ManualFeedback.udErrorCode = TO_UDINT(E_GripperErrorCode.None))
+        AND GVL_DamperGripper.stAdjustGripper.State.bHealthy THEN
+        bRecoveryAdjustGripperResetDone := TRUE;
+    END_IF;
+
     IF bRecoveryAdjustGripperRequired AND (udiRecoveryAdjustGripperId = 0)
+        AND NOT GVL_DamperGripper.stAdjustGripper.State.bBusy
         AND NOT GVL_DamperGripper.stAdjustGripper.Feedback.bBusy
         AND NOT GVL_DamperGripper.stAdjustGripper.ManualFeedback.bBusy
         AND GVL_DamperGripper.stAdjustGripper.State.bCommunicationReady THEN
         GVL_DamperGripper.stAdjustGripper.ManualCmd.eCommand := E_GripperCommand.ResetFault;
-        GVL_DamperGripper.stAdjustGripper.ManualCmd.udiRequestId :=
-            GVL_DamperGripper.stAdjustGripper.ManualCmd.udiRequestId + 1;
-        IF GVL_DamperGripper.stAdjustGripper.ManualCmd.udiRequestId = 0 THEN
+        IF GVL_DamperGripper.stAdjustGripper.ManualCmd.udiRequestId = 16#FFFFFFFF THEN
             GVL_DamperGripper.stAdjustGripper.ManualCmd.udiRequestId := 1;
+        ELSE
+            GVL_DamperGripper.stAdjustGripper.ManualCmd.udiRequestId := GVL_DamperGripper.stAdjustGripper.ManualCmd.udiRequestId + 1;
         END_IF;
         udiRecoveryAdjustGripperId := GVL_DamperGripper.stAdjustGripper.ManualCmd.udiRequestId;
+    ELSIF bRecoveryAdjustGripperResetDone AND (udiRecoveryAdjustGripperEnableId = 0)
+        AND GVL_DamperGripper.stAdjustGripper.State.bHealthy
+        AND (GVL_DamperGripper.stAdjustGripper.State.bSimulationActive
+            OR (GVL_DamperGripper.stAdjustGripper.Feedback.bFaultCodeValid AND NOT GVL_DamperGripper.stAdjustGripper.Feedback.bFault))
+        AND NOT GVL_DamperGripper.stAdjustGripper.State.bBusy
+        AND NOT GVL_DamperGripper.stAdjustGripper.Feedback.bBusy
+        AND NOT GVL_DamperGripper.stAdjustGripper.ManualFeedback.bBusy THEN
+        GVL_DamperGripper.stAdjustGripper.ManualCmd.eCommand := E_GripperCommand.Enable;
+        IF GVL_DamperGripper.stAdjustGripper.ManualCmd.udiRequestId = 16#FFFFFFFF THEN
+            GVL_DamperGripper.stAdjustGripper.ManualCmd.udiRequestId := 1;
+        ELSE
+            GVL_DamperGripper.stAdjustGripper.ManualCmd.udiRequestId := GVL_DamperGripper.stAdjustGripper.ManualCmd.udiRequestId + 1;
+        END_IF;
+        udiRecoveryAdjustGripperEnableId := GVL_DamperGripper.stAdjustGripper.ManualCmd.udiRequestId;
+        // 只给本扫描由MAIN写入的Enable授权；普通HMI请求无此许可。
+        bRecoveryAdjustEnableAllowed := TRUE;
     END_IF;
 END_IF;
+
+// 任一路Enable明确失败即终止本次恢复；保留第一故障及通道诊断，不重发。
+IF bMachineRecoveryPending AND (
+    ((udiRecoveryDamperGripperEnableId <> 0)
+        AND ((GVL_DamperGripper.stDamperGripper.ManualFeedback.udiRejectedId = udiRecoveryDamperGripperEnableId)
+            OR (GVL_DamperGripper.stDamperGripper.ManualFeedback.udiFailedId = udiRecoveryDamperGripperEnableId)))
+    OR
+    ((udiRecoveryAdjustGripperEnableId <> 0)
+        AND ((GVL_DamperGripper.stAdjustGripper.ManualFeedback.udiRejectedId = udiRecoveryAdjustGripperEnableId)
+            OR (GVL_DamperGripper.stAdjustGripper.ManualFeedback.udiFailedId = udiRecoveryAdjustGripperEnableId)))
+    ) THEN
+    bMachineRecoveryPending := FALSE;
+    bRecoveryDamperEnableAllowed := FALSE;
+    bRecoveryAdjustEnableAllowed := FALSE;
+END_IF;
 bMachineRecoveryDevicesOK :=
-    (NOT bRecoveryDamperGripperRequired
-     OR ((udiRecoveryDamperGripperId <> 0)
-         AND (GVL_DamperGripper.stDamperGripper.ManualFeedback.udiCompletedId = udiRecoveryDamperGripperId)
-         AND GVL_DamperGripper.stDamperGripper.State.bHealthy))
+    (bRecoveryDamperGripperResetDone
+        AND (udiRecoveryDamperGripperEnableId <> 0)
+        AND (GVL_DamperGripper.stDamperGripper.ManualFeedback.udiAcceptedId = udiRecoveryDamperGripperEnableId)
+        AND (GVL_DamperGripper.stDamperGripper.ManualFeedback.udiCompletedId = udiRecoveryDamperGripperEnableId)
+        AND (GVL_DamperGripper.stDamperGripper.ManualFeedback.udErrorCode = TO_UDINT(E_GripperErrorCode.None))
+        AND GVL_DamperGripper.stDamperGripper.State.bHealthy)
     AND
-    (NOT bRecoveryAdjustGripperRequired
-     OR ((udiRecoveryAdjustGripperId <> 0)
-         AND (GVL_DamperGripper.stAdjustGripper.ManualFeedback.udiCompletedId = udiRecoveryAdjustGripperId)
-         AND GVL_DamperGripper.stAdjustGripper.State.bHealthy));
+    (bRecoveryAdjustGripperResetDone
+        AND (udiRecoveryAdjustGripperEnableId <> 0)
+        AND (GVL_DamperGripper.stAdjustGripper.ManualFeedback.udiAcceptedId = udiRecoveryAdjustGripperEnableId)
+        AND (GVL_DamperGripper.stAdjustGripper.ManualFeedback.udiCompletedId = udiRecoveryAdjustGripperEnableId)
+        AND (GVL_DamperGripper.stAdjustGripper.ManualFeedback.udErrorCode = TO_UDINT(E_GripperErrorCode.None))
+        AND GVL_DamperGripper.stAdjustGripper.State.bHealthy);
 
 fbMachineSupervisor(
     bReset := bMachineRecoveryPending,
@@ -1006,7 +1106,7 @@ bStopOwnerActive := fbMachineModeManager.bStopOwnerActive;
 bRecoveryModeActive := fbMachineModeManager.bRecoveryModeActive;
 bPreparationModeActive := fbMachineModeManager.bPreparationAllowed;
 
-// Tray预检查与正式Auto轴接管分开：整机诊断模式保持原语义，
+// 准备后Plan检查与正式Auto轴接管分开：整机诊断模式保持原语义，
 // COM3/COM4模式及行为不变；仅在现有轴命令入口延迟Auto所有权。
 // Stop/Fault/Preparing等模式不改写，安全链路始终优先。
 eAxisCommandMode := eMachineMode;
@@ -1027,6 +1127,10 @@ fbDamperGripperManager(
     bStopRequested := bStopRequestRaw OR bAbortProcesses,
     bControlAllowed := GVL_HMI.Comm.bControlAllowed,
     eMachineMode := eMachineMode,
+    bRecoveryEnableAllowed := bRecoveryDamperEnableAllowed
+        AND bMachineRecoveryPending
+        AND NOT bStopRequestRaw AND NOT bAbortProcesses
+        AND NOT fbAutoStopManager.bBusy,
     ioGripper := GVL_DamperGripper.stDamperGripper
 );
 
@@ -1037,6 +1141,10 @@ fbAdjustGripperManager(
     bStopRequested := bStopRequestRaw OR bAbortProcesses,
     bControlAllowed := GVL_HMI.Comm.bControlAllowed,
     eMachineMode := eMachineMode,
+    bRecoveryEnableAllowed := bRecoveryAdjustEnableAllowed
+        AND bMachineRecoveryPending
+        AND NOT bStopRequestRaw AND NOT bAbortProcesses
+        AND NOT fbAutoStopManager.bBusy,
     ioGripper := GVL_DamperGripper.stAdjustGripper
 );
 //==============================================================
@@ -1083,7 +1191,8 @@ FOR uiAxisIndex := 1 TO GVL_Constants.cMaxAxisCount DO
         aMachineRecoveryResetIssued[uiAxisIndex] := TRUE;
     END_IF;
 
-    // 只在进入预检查的首扫描保存上一周期有效使能请求。
+    // 只在进入准备后Plan检查的首扫描保存上一周期有效使能请求。
+    // 上一扫描由Preparation保持的使能转交Manual保持；Running再交给Auto。
     // 保存所有轴，不依赖自动轴清单，不改变任何位置/速度参数。
     IF fbAutoStart.bTrayPlanChecking AND NOT bTrayPreCheckWasActive THEN
         aTrayPreCheckEnable[uiAxisIndex] :=
@@ -1091,7 +1200,8 @@ FOR uiAxisIndex := 1 TO GVL_Constants.cMaxAxisCount DO
     END_IF;
 
     // 复用现有Manual通道和Arbiter，保持Power同时封锁新运动。
-    // 取消/无盘拒绝的首扫描也清理，避免预检查期间的请求延后执行。
+    // 取消/无盘拒绝的首扫描也清理，避免Plan检查期间的请求延后执行。
+    // Manual所有权使Arbiter每扫描清除Auto/Preparation缓存，只保持Power。
     // 不覆盖bStop；真实Stop/Fault模式不进入本分支，后续Guard仍正常执行。
     IF (fbAutoStart.bTrayPlanChecking OR bTrayPreCheckWasActive)
         AND (eAxisCommandMode = E_MachineMode.Manual)

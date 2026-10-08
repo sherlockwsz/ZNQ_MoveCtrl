@@ -115,7 +115,9 @@ IF bMachinePrepared THEN
     ioGripperAction(
         bExecute := ioDamperProcess.bGripperActionExecute,
         eCommand := ioDamperProcess.eGripperActionCommand,
-        bCancel := bStopRequest OR bAbort,
+        bAllowCloseTargetWithoutGrip := ioDamperProcess.bGripperAllowCloseTargetWithoutGrip,
+        bCancel := bStopRequest OR bAbort
+            OR (bReset AND ioDamperProcess.bGripperAllowCloseTargetWithoutGrip),
         tAcceptTimeout := GVL_ProcessConfig.stGripper.tAcceptTimeout,
         tResultTimeout := GVL_ProcessConfig.stGripper.tResultTimeout,
         ioGripper := ioGripper
@@ -147,6 +149,9 @@ ioDamperProcess(
 	// 本协调器始终执行同一条自动动作链。
 	bGripperActionDone := ioGripperAction.bDone,
 	bGripperActionError := ioGripperAction.bError,
+    bGripperCloseTargetReachedWithoutGrip := ioGripperAction.bCloseTargetReachedWithoutGrip,
+    bGripperActionReady := (ioGripperAction.eStep = E_GripperActionStep.Idle)
+        AND NOT ioGripperAction.bBusy AND NOT ioGripper.State.bBusy,
 		
     bReinitializeCoordinates :=
         bReinitializeCoordinates,

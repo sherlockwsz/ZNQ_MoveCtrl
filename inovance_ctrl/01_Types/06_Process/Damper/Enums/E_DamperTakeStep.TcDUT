@@ -16,6 +16,9 @@ TYPE E_DamperTakeStep :
     MoveXYToSlot               := 20,// 检测完成后，XY回到阻尼器理论料位。
     LowerZToSlot         := 30,// Z轴下降到料盘取料高度。
     ClampPlaceholder     := 40,// 夹爪夹紧占位。
+    EmptyReleaseClose    := 41, // 撤销Close，等待Action重新武装及Owner释放。
+    EmptyOpen            := 42, // 独立Open事务完成后才允许抬Z。
+    EmptyLiftSafe        := 43, // 安全Z到位后才报告EmptySkip。
     RotationToCameraAngle := 50,// 兼容保留步骤名：Z轴抬升与按需执行一次DamperRotation修正并行。
     MoveXYToTransfer     := 60, // 两个并行动作均完成后，XY移动到转台备料位。
 	// XY到达备料位、Z保持110mm时，

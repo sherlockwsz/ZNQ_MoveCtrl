@@ -67,6 +67,15 @@ CASE eCommand OF
         aTxBuffer[5] := 16#80;
         uiTxLength := 8;
 
+    E_GripperCommand.Enable:
+        // 06 6040 0007：上使能；匹配写回执仅表示本次写事务完成。
+        aTxBuffer[1] := 16#06;
+        aTxBuffer[2] := 16#60;
+        aTxBuffer[3] := 16#40;
+        aTxBuffer[4] := 16#00;
+        aTxBuffer[5] := 16#07;
+        uiTxLength := 8;
+
 ELSE
     uiTxLength := 0;
     M_BuildCommand := FALSE;

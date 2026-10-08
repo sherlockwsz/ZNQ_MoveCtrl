@@ -9,6 +9,7 @@ STRUCT
     udiRejectedId  : UDINT;
     udiFailedId    : UDINT;
     udErrorCode    : UDINT;
+    bCloseTargetReachedWithoutGrip : BOOL; // 与udiCompletedId绑定；非Grip、非Error
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>
